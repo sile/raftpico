@@ -71,24 +71,40 @@ impl<M: Machine> RaftNode<M> {
         socket.set_nonblocking(true)?;
 
         let seqno = 0;
-        let msg = Message::JoinClusterCall {
+        let send_msg = Message::JoinClusterCall {
             seqno,
             from: local_addr,
         };
 
         let mut send_buf = Vec::new();
-        msg.encode(&mut send_buf);
+        send_msg.encode(&mut send_buf);
 
         for _ in 0..10 {
             socket.send_to(&send_buf, contact_node_addr)?;
             std::thread::sleep(Duration::from_millis(100));
 
+            // TODO: while
             let mut recv_buf = [0; 2048];
             let Some((size, _addr)) = maybe_would_block(socket.recv_from(&mut recv_buf))? else {
                 continue;
             };
             assert!(size >= 5); // seqno (4) + tag (1)
             assert!(size <= 1205); // TODO
+
+            let recv_msg = Message::decode(&recv_buf[..size])?;
+            let Message::JoinClusterReply { seqno, node_id } = recv_msg else {
+                // TODO: buffer pending messages
+                continue;
+            };
+
+            return Ok(Self {
+                machine: M::default(),
+                bare_node: BareNode::start(node_id),
+                socket,
+                local_addr,
+                seqno: seqno + 1,
+                command_log: Vec::new(),
+            });
         }
 
         Err(Error::new(ErrorKind::TimedOut, "join_cluster timed out"))

@@ -1,9 +1,11 @@
+use raftbare::NodeId;
 use std::{
     io::{Error, Read},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
 const MESSAGE_TAG_JOIN_CLUSTER_CALL: u8 = 0;
+const MESSAGE_TAG_JOIN_CLUSTER_REPLY: u8 = 1;
 
 const ADDR_TAG_IPV4: u8 = 4;
 const ADDR_TAG_IPV6: u8 = 6;
@@ -11,16 +13,27 @@ const ADDR_TAG_IPV6: u8 = 6;
 #[derive(Debug, Clone)]
 pub enum Message {
     JoinClusterCall { seqno: u32, from: SocketAddr },
-    //JoinClusterReply,
+    JoinClusterReply { seqno: u32, node_id: NodeId },
 }
 
 impl Message {
+    pub fn seqno(&self) -> u32 {
+        match self {
+            Message::JoinClusterCall { seqno, .. } => *seqno,
+            Message::JoinClusterReply { seqno, .. } => *seqno,
+        }
+    }
+
+    pub fn is_reply(&self) -> bool {
+        matches!(self, Message::JoinClusterReply { .. })
+    }
+
     // TODO: Use writer
     pub fn encode(&self, buf: &mut Vec<u8>) {
         match self {
             Message::JoinClusterCall { seqno, from } => {
-                buf.extend(&seqno.to_be_bytes());
                 buf.push(MESSAGE_TAG_JOIN_CLUSTER_CALL);
+                buf.extend(&seqno.to_be_bytes());
 
                 match from {
                     SocketAddr::V4(addr) => {
@@ -34,6 +47,11 @@ impl Message {
                         buf.extend(&addr.port().to_be_bytes());
                     }
                 }
+            }
+            Message::JoinClusterReply { seqno, node_id } => {
+                buf.push(MESSAGE_TAG_JOIN_CLUSTER_REPLY);
+                buf.extend(&seqno.to_be_bytes());
+                buf.extend(&node_id.get().to_be_bytes());
             }
         }
     }
@@ -63,6 +81,13 @@ impl Message {
                     )),
                 }
             }
+            MESSAGE_TAG_JOIN_CLUSTER_REPLY => {
+                let node_id = read_u64(&mut reader)?;
+                Ok(Message::JoinClusterReply {
+                    seqno,
+                    node_id: NodeId::new(node_id),
+                })
+            }
             _ => Err(Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Unknown message tag: {msg_tag}"),
@@ -89,11 +114,11 @@ fn read_u32<R: Read>(reader: &mut R) -> std::io::Result<u32> {
     Ok(u32::from_be_bytes(buf))
 }
 
-// fn read_u64<R: Read>(reader: &mut R) -> std::io::Result<u64> {
-//     let mut buf = [0; 8];
-//     reader.read_exact(&mut buf)?;
-//     Ok(u64::from_be_bytes(buf))
-// }
+fn read_u64<R: Read>(reader: &mut R) -> std::io::Result<u64> {
+    let mut buf = [0; 8];
+    reader.read_exact(&mut buf)?;
+    Ok(u64::from_be_bytes(buf))
+}
 
 fn read_u128<R: Read>(reader: &mut R) -> std::io::Result<u128> {
     let mut buf = [0; 16];
