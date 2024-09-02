@@ -4,35 +4,35 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-const MESSAGE_TAG_JOIN_CLUSTER_CALL: u8 = 0;
-const MESSAGE_TAG_JOIN_CLUSTER_REPLY: u8 = 1;
+const MESSAGE_TAG_CLUSTER_CALL: u8 = 0;
+const MESSAGE_TAG_CLUSTER_REPLY: u8 = 1;
 
 const ADDR_TAG_IPV4: u8 = 4;
 const ADDR_TAG_IPV6: u8 = 6;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    JoinClusterCall { seqno: u32, from: SocketAddr },
-    JoinClusterReply { seqno: u32, node_id: NodeId },
+    JoinCall { seqno: u32, from: SocketAddr },
+    JoinReply { seqno: u32, node_id: NodeId },
 }
 
 impl Message {
     pub fn seqno(&self) -> u32 {
         match self {
-            Message::JoinClusterCall { seqno, .. } => *seqno,
-            Message::JoinClusterReply { seqno, .. } => *seqno,
+            Message::JoinCall { seqno, .. } => *seqno,
+            Message::JoinReply { seqno, .. } => *seqno,
         }
     }
 
     pub fn is_reply(&self) -> bool {
-        matches!(self, Message::JoinClusterReply { .. })
+        matches!(self, Message::JoinReply { .. })
     }
 
     // TODO: Use writer
     pub fn encode(&self, buf: &mut Vec<u8>) {
         match self {
-            Message::JoinClusterCall { seqno, from } => {
-                buf.push(MESSAGE_TAG_JOIN_CLUSTER_CALL);
+            Message::JoinCall { seqno, from } => {
+                buf.push(MESSAGE_TAG_CLUSTER_CALL);
                 buf.extend(&seqno.to_be_bytes());
 
                 match from {
@@ -48,8 +48,8 @@ impl Message {
                     }
                 }
             }
-            Message::JoinClusterReply { seqno, node_id } => {
-                buf.push(MESSAGE_TAG_JOIN_CLUSTER_REPLY);
+            Message::JoinReply { seqno, node_id } => {
+                buf.push(MESSAGE_TAG_CLUSTER_REPLY);
                 buf.extend(&seqno.to_be_bytes());
                 buf.extend(&node_id.get().to_be_bytes());
             }
@@ -60,20 +60,20 @@ impl Message {
         let seqno = read_u32(&mut reader)?;
         let msg_tag = read_u8(&mut reader)?;
         match msg_tag {
-            MESSAGE_TAG_JOIN_CLUSTER_CALL => {
+            MESSAGE_TAG_CLUSTER_CALL => {
                 let addr_tag = read_u8(&mut reader)?;
                 match addr_tag {
                     ADDR_TAG_IPV4 => {
                         let ip = read_u32(&mut reader)?;
                         let port = read_u16(&mut reader)?;
                         let from = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(ip)), port);
-                        Ok(Message::JoinClusterCall { seqno, from })
+                        Ok(Message::JoinCall { seqno, from })
                     }
                     ADDR_TAG_IPV6 => {
                         let ip = read_u128(&mut reader)?;
                         let port = read_u16(&mut reader)?;
                         let from = SocketAddr::new(IpAddr::V6(Ipv6Addr::from(ip)), port);
-                        Ok(Message::JoinClusterCall { seqno, from })
+                        Ok(Message::JoinCall { seqno, from })
                     }
                     _ => Err(Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -81,9 +81,9 @@ impl Message {
                     )),
                 }
             }
-            MESSAGE_TAG_JOIN_CLUSTER_REPLY => {
+            MESSAGE_TAG_CLUSTER_REPLY => {
                 let node_id = read_u64(&mut reader)?;
-                Ok(Message::JoinClusterReply {
+                Ok(Message::JoinReply {
                     seqno,
                     node_id: NodeId::new(node_id),
                 })
