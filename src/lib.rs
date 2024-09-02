@@ -1,7 +1,10 @@
 use message::Message;
-use raftbare::{Action, LogEntries, LogIndex, Node as BareNode, NodeId, Role};
+use raftbare::{
+    Action, CommitPromise, LogEntries, LogIndex, LogPosition, Node as BareNode, NodeId, Role,
+};
 use rand::Rng;
 use std::{
+    collections::BTreeMap,
     io::{Error, ErrorKind},
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
@@ -32,6 +35,10 @@ pub struct RaftNode<M: Machine> {
     seqno: u32,
     command_log: Vec<(LogIndex, M::Command)>,
     election_timeout: Option<Instant>,
+
+    // raft state machine (system)
+    next_node_id: NodeId,
+    peer_addrs: BTreeMap<NodeId, SocketAddr>,
 }
 
 impl<M: Machine> RaftNode<M> {
@@ -50,6 +57,9 @@ impl<M: Machine> RaftNode<M> {
             seqno: 0,
             command_log: Vec::new(),
             election_timeout: None,
+
+            next_node_id: NodeId::new(1),
+            peer_addrs: BTreeMap::new(),
         })
     }
 
@@ -116,18 +126,12 @@ impl<M: Machine> RaftNode<M> {
             };
             assert!(size >= 5); // seqno (4) + tag (1)
             assert!(size <= 1205); // TODO
-
             let recv_msg = Message::decode(&recv_buf[..size])?;
-            let Message::JoinReply { seqno, node_id } = recv_msg else {
-                // TODO: buffer pending messages
-                continue;
-            };
-            if seqno != send_msg.seqno() {
-                continue;
+            self.handle_message(recv_msg)?;
+            if self.node_id() != Self::UNINIT_NODE_ID {
+                // TODO: wait commited
+                return Ok(());
             }
-
-            self.bare_node = BareNode::start(node_id);
-            return Ok(());
         }
 
         Err(Error::new(ErrorKind::TimedOut, "join timed out"))
@@ -153,7 +157,7 @@ impl<M: Machine> RaftNode<M> {
             assert!(size <= 1205); // TODO
 
             let recv_msg = Message::decode(&recv_buf[..size])?;
-            self.handle_message(recv_msg);
+            self.handle_message(recv_msg)?;
         }
 
         while let Some(action) = self.bare_node.actions_mut().next() {
@@ -179,8 +183,54 @@ impl<M: Machine> RaftNode<M> {
         &self.machine
     }
 
-    fn handle_message(&mut self, msg: Message) {
-        todo!("{:?}", msg);
+    fn handle_message(&mut self, msg: Message) -> std::io::Result<()> {
+        match msg {
+            Message::JoinCall { seqno, from } => {
+                self.handle_join_call(seqno, from)?;
+            }
+            Message::JoinReply {
+                seqno,
+                node_id,
+                promise,
+            } => {
+                assert_eq!(seqno, 0);
+                let _ = promise; // TODO: handle promise
+
+                if self.bare_node.id() != Self::UNINIT_NODE_ID {
+                    return Ok(());
+                }
+                self.bare_node = BareNode::start(node_id);
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_join_call(&mut self, seqno: u32, peer_addr: SocketAddr) -> std::io::Result<()> {
+        let (node_id, promise) = if let Some((&node_id, _)) =
+            self.peer_addrs.iter().find(|(_, &addr)| addr != peer_addr)
+        {
+            (node_id, CommitPromise::Pending(LogPosition::ZERO)) // TODO: use appropriate promise
+        } else {
+            let node_id = self.next_node_id;
+            self.next_node_id = NodeId::new(node_id.get() + 1);
+            self.peer_addrs.insert(node_id, peer_addr);
+
+            let new_config = self.bare_node.config().to_joint_consensus(&[node_id], &[]);
+            let promise = self.bare_node.propose_config(new_config);
+            assert!(!promise.is_rejected()); // TODO: handle this case (redirect or retry later)
+
+            (node_id, promise)
+        };
+
+        let msg = Message::JoinReply {
+            seqno,
+            node_id,
+            promise,
+        };
+        let mut buf = Vec::new(); // TODO: reuse
+        msg.encode(&mut buf);
+        self.socket.send_to(&buf, peer_addr)?;
+        Ok(())
     }
 
     fn handle_action(&mut self, action: Action) {

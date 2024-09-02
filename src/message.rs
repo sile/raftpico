@@ -1,6 +1,6 @@
-use raftbare::NodeId;
+use raftbare::{CommitPromise, LogIndex, LogPosition, NodeId, Term};
 use std::{
-    io::{Error, Read},
+    io::{Error, ErrorKind, Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
@@ -12,8 +12,15 @@ const ADDR_TAG_IPV6: u8 = 6;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    JoinCall { seqno: u32, from: SocketAddr },
-    JoinReply { seqno: u32, node_id: NodeId },
+    JoinCall {
+        seqno: u32,
+        from: SocketAddr,
+    },
+    JoinReply {
+        seqno: u32,
+        node_id: NodeId,
+        promise: CommitPromise,
+    },
 }
 
 impl Message {
@@ -48,10 +55,15 @@ impl Message {
                     }
                 }
             }
-            Message::JoinReply { seqno, node_id } => {
+            Message::JoinReply {
+                seqno,
+                node_id,
+                promise,
+            } => {
                 buf.push(MESSAGE_TAG_CLUSTER_REPLY);
                 buf.extend(&seqno.to_be_bytes());
                 buf.extend(&node_id.get().to_be_bytes());
+                encode_commit_promise(buf, *promise).expect("TODO");
             }
         }
     }
@@ -76,20 +88,22 @@ impl Message {
                         Ok(Message::JoinCall { seqno, from })
                     }
                     _ => Err(Error::new(
-                        std::io::ErrorKind::InvalidData,
+                        ErrorKind::InvalidData,
                         format!("Unknown address tag: {addr_tag}"),
                     )),
                 }
             }
             MESSAGE_TAG_CLUSTER_REPLY => {
                 let node_id = read_u64(&mut reader)?;
+                let promise = decode_commit_promise(&mut reader)?;
                 Ok(Message::JoinReply {
                     seqno,
                     node_id: NodeId::new(node_id),
+                    promise,
                 })
             }
             _ => Err(Error::new(
-                std::io::ErrorKind::InvalidData,
+                ErrorKind::InvalidData,
                 format!("Unknown message tag: {msg_tag}"),
             )),
         }
@@ -124,4 +138,40 @@ fn read_u128<R: Read>(reader: &mut R) -> std::io::Result<u128> {
     let mut buf = [0; 16];
     reader.read_exact(&mut buf)?;
     Ok(u128::from_be_bytes(buf))
+}
+
+fn encode_commit_promise<W: Write>(writer: &mut W, promise: CommitPromise) -> std::io::Result<()> {
+    let tag = match promise {
+        CommitPromise::Pending(_) => 0,
+        CommitPromise::Rejected(_) => 1,
+        CommitPromise::Accepted(_) => 2,
+    };
+    writer.write_all(&[tag])?;
+
+    let position = promise.log_position();
+    writer.write_all(&position.term.get().to_be_bytes())?;
+    writer.write_all(&position.index.get().to_be_bytes())?;
+
+    Ok(())
+}
+
+fn decode_commit_promise<R: Read>(reader: &mut R) -> std::io::Result<CommitPromise> {
+    let tag = read_u8(reader)?;
+    let term = read_u64(reader)?;
+    let index = read_u64(reader)?;
+
+    let position = LogPosition {
+        term: Term::new(term),
+        index: LogIndex::new(index),
+    };
+
+    match tag {
+        0 => Ok(CommitPromise::Pending(position)),
+        1 => Ok(CommitPromise::Rejected(position)),
+        2 => Ok(CommitPromise::Accepted(position)),
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Unknown commit promise tag: {tag}"),
+        )),
+    }
 }
