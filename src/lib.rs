@@ -36,6 +36,8 @@ pub struct RaftNode<M: Machine> {
     command_log: Vec<(LogIndex, M::Command)>,
     election_timeout: Option<Instant>,
 
+    join_promise: Option<CommitPromise>, // TODO
+
     // raft state machine (system)
     next_node_id: NodeId,
     peer_addrs: BTreeMap<NodeId, SocketAddr>,
@@ -57,6 +59,8 @@ impl<M: Machine> RaftNode<M> {
             seqno: 0,
             command_log: Vec::new(),
             election_timeout: None,
+
+            join_promise: None,
 
             next_node_id: NodeId::new(1),
             peer_addrs: BTreeMap::new(),
@@ -115,6 +119,15 @@ impl<M: Machine> RaftNode<M> {
 
         let start_time = Instant::now();
         while timeout.map_or(true, |t| start_time.elapsed() <= t) {
+            if self
+                .join_promise
+                .take_if(|promise| promise.poll(&self.bare_node).is_accepted())
+                .is_some()
+            {
+                // Committed
+                return Ok(());
+            }
+
             self.socket.send_to(&send_buf, contact_node_addr)?;
             std::thread::sleep(Duration::from_millis(100)); // TODO
 
@@ -128,10 +141,6 @@ impl<M: Machine> RaftNode<M> {
             assert!(size <= 1205); // TODO
             let recv_msg = Message::decode(&recv_buf[..size])?;
             self.handle_message(recv_msg)?;
-            if self.node_id() != Self::UNINIT_NODE_ID {
-                // TODO: wait commited
-                return Ok(());
-            }
         }
 
         Err(Error::new(ErrorKind::TimedOut, "join timed out"))
@@ -194,12 +203,15 @@ impl<M: Machine> RaftNode<M> {
                 promise,
             } => {
                 assert_eq!(seqno, 0);
-                let _ = promise; // TODO: handle promise
 
                 if self.bare_node.id() != Self::UNINIT_NODE_ID {
                     return Ok(());
                 }
+                self.join_promise = Some(promise);
                 self.bare_node = BareNode::start(node_id);
+            }
+            Message::RaftMessageCast { msg, .. } => {
+                self.bare_node.handle_message(msg);
             }
         }
         Ok(())
@@ -244,7 +256,24 @@ impl<M: Machine> RaftNode<M> {
             Action::AppendLogEntries(entries) => {
                 self.append_log_entries(entries);
             }
+            Action::BroadcastMessage(msg) => {
+                self.broadcast_message(msg);
+            }
             _ => todo!("action: {:?}", action),
+        }
+    }
+
+    fn broadcast_message(&mut self, msg: raftbare::Message) {
+        let msg = Message::RaftMessageCast {
+            seqno: self.next_seqno(),
+            msg,
+        };
+        let mut buf = Vec::new(); // TODO: reuse
+        msg.encode(&mut buf);
+
+        for id in self.bare_node.peers() {
+            let peer_addr = self.peer_addrs.get(&id).copied().expect("peer addr");
+            self.socket.send_to(&buf, peer_addr).expect("TODO");
         }
     }
 

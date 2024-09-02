@@ -6,6 +6,7 @@ use std::{
 
 const MESSAGE_TAG_CLUSTER_CALL: u8 = 0;
 const MESSAGE_TAG_CLUSTER_REPLY: u8 = 1;
+const MESSAGE_TAG_RAFT_MESSAGE_CAST: u8 = 2;
 
 const ADDR_TAG_IPV4: u8 = 4;
 const ADDR_TAG_IPV6: u8 = 6;
@@ -21,24 +22,29 @@ pub enum Message {
         node_id: NodeId,
         promise: CommitPromise,
     },
+    RaftMessageCast {
+        seqno: u32, // TODO(?): delete
+        msg: raftbare::Message,
+    },
 }
 
 impl Message {
     pub fn seqno(&self) -> u32 {
         match self {
-            Message::JoinCall { seqno, .. } => *seqno,
-            Message::JoinReply { seqno, .. } => *seqno,
+            Self::JoinCall { seqno, .. } => *seqno,
+            Self::JoinReply { seqno, .. } => *seqno,
+            Self::RaftMessageCast { seqno, .. } => *seqno,
         }
     }
 
     pub fn is_reply(&self) -> bool {
-        matches!(self, Message::JoinReply { .. })
+        matches!(self, Self::JoinReply { .. })
     }
 
     // TODO: Use writer
     pub fn encode(&self, buf: &mut Vec<u8>) {
         match self {
-            Message::JoinCall { seqno, from } => {
+            Self::JoinCall { seqno, from } => {
                 buf.push(MESSAGE_TAG_CLUSTER_CALL);
                 buf.extend(&seqno.to_be_bytes());
 
@@ -55,7 +61,7 @@ impl Message {
                     }
                 }
             }
-            Message::JoinReply {
+            Self::JoinReply {
                 seqno,
                 node_id,
                 promise,
@@ -65,12 +71,17 @@ impl Message {
                 buf.extend(&node_id.get().to_be_bytes());
                 encode_commit_promise(buf, *promise).expect("TODO");
             }
+            Self::RaftMessageCast { seqno, msg } => {
+                buf.push(MESSAGE_TAG_RAFT_MESSAGE_CAST);
+                buf.extend(&seqno.to_be_bytes());
+                encode_raft_message(buf, msg).expect("TODO");
+            }
         }
     }
 
     pub fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {
-        let seqno = read_u32(&mut reader)?;
         let msg_tag = read_u8(&mut reader)?;
+        let seqno = read_u32(&mut reader)?;
         match msg_tag {
             MESSAGE_TAG_CLUSTER_CALL => {
                 let addr_tag = read_u8(&mut reader)?;
@@ -79,13 +90,13 @@ impl Message {
                         let ip = read_u32(&mut reader)?;
                         let port = read_u16(&mut reader)?;
                         let from = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(ip)), port);
-                        Ok(Message::JoinCall { seqno, from })
+                        Ok(Self::JoinCall { seqno, from })
                     }
                     ADDR_TAG_IPV6 => {
                         let ip = read_u128(&mut reader)?;
                         let port = read_u16(&mut reader)?;
                         let from = SocketAddr::new(IpAddr::V6(Ipv6Addr::from(ip)), port);
-                        Ok(Message::JoinCall { seqno, from })
+                        Ok(Self::JoinCall { seqno, from })
                     }
                     _ => Err(Error::new(
                         ErrorKind::InvalidData,
@@ -96,11 +107,15 @@ impl Message {
             MESSAGE_TAG_CLUSTER_REPLY => {
                 let node_id = read_u64(&mut reader)?;
                 let promise = decode_commit_promise(&mut reader)?;
-                Ok(Message::JoinReply {
+                Ok(Self::JoinReply {
                     seqno,
                     node_id: NodeId::new(node_id),
                     promise,
                 })
+            }
+            MESSAGE_TAG_RAFT_MESSAGE_CAST => {
+                let msg = decode_raft_message(&mut reader)?;
+                Ok(Self::RaftMessageCast { seqno, msg })
             }
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
@@ -174,4 +189,12 @@ fn decode_commit_promise<R: Read>(reader: &mut R) -> std::io::Result<CommitPromi
             format!("Unknown commit promise tag: {tag}"),
         )),
     }
+}
+
+fn encode_raft_message<W: Write>(writer: &mut W, msg: &raftbare::Message) -> std::io::Result<()> {
+    todo!()
+}
+
+fn decode_raft_message<R: Read>(reader: &mut R) -> std::io::Result<raftbare::Message> {
+    todo!()
 }
