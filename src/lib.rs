@@ -1,5 +1,6 @@
 use message::Message;
-use raftbare::{Action, LogIndex, Node as BareNode, NodeId};
+use raftbare::{Action, LogEntries, LogIndex, Node as BareNode, NodeId, Role};
+use rand::Rng;
 use std::{
     io::{Error, ErrorKind},
     net::{SocketAddr, UdpSocket},
@@ -30,6 +31,7 @@ pub struct RaftNode<M: Machine> {
     local_addr: SocketAddr,
     seqno: u32,
     command_log: Vec<(LogIndex, M::Command)>,
+    election_timeout: Option<Instant>,
 }
 
 impl<M: Machine> RaftNode<M> {
@@ -47,6 +49,7 @@ impl<M: Machine> RaftNode<M> {
             local_addr,
             seqno: 0,
             command_log: Vec::new(),
+            election_timeout: None,
         })
     }
 
@@ -164,6 +167,10 @@ impl<M: Machine> RaftNode<M> {
         self.bare_node.id()
     }
 
+    pub fn role(&self) -> Role {
+        self.bare_node.role()
+    }
+
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
@@ -173,11 +180,40 @@ impl<M: Machine> RaftNode<M> {
     }
 
     fn handle_message(&mut self, msg: Message) {
-        todo!();
+        todo!("{:?}", msg);
     }
 
     fn handle_action(&mut self, action: Action) {
-        todo!("action: {:?}", action);
+        match action {
+            Action::SetElectionTimeout => {
+                self.set_election_timeout();
+            }
+            Action::SaveCurrentTerm | Action::SaveVotedFor => {
+                // noop
+            }
+            Action::AppendLogEntries(entries) => {
+                self.append_log_entries(entries);
+            }
+            _ => todo!("action: {:?}", action),
+        }
+    }
+
+    fn append_log_entries(&mut self, entries: LogEntries) {
+        // todo
+        eprintln!("{:?}", entries);
+    }
+
+    fn set_election_timeout(&mut self) {
+        // TODO: configurable
+        let min_timeout = Duration::from_millis(150);
+        let max_timeout = Duration::from_millis(1000);
+
+        let duration = match self.role() {
+            Role::Follower => max_timeout,
+            Role::Candidate => rand::thread_rng().gen_range(min_timeout..max_timeout),
+            Role::Leader => min_timeout,
+        };
+        self.election_timeout = Some(Instant::now() + duration);
     }
 }
 
