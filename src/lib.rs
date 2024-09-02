@@ -118,7 +118,7 @@ impl<M: Machine> RaftNode<M> {
         };
 
         let mut send_buf = Vec::new();
-        send_msg.encode(&mut send_buf)?;
+        send_msg.encode(&mut send_buf, &self.command_log)?;
 
         let start_time = Instant::now();
         while timeout.map_or(true, |t| start_time.elapsed() <= t) {
@@ -142,7 +142,7 @@ impl<M: Machine> RaftNode<M> {
             };
             assert!(size >= 5); // seqno (4) + tag (1)
             assert!(size <= 1205); // TODO
-            let recv_msg = Message::decode(&recv_buf[..size])?;
+            let recv_msg = Message::decode(&recv_buf[..size], &mut self.command_log)?;
             self.handle_message(addr, recv_msg)?;
             self.run_one()?; // TODO
         }
@@ -169,7 +169,7 @@ impl<M: Machine> RaftNode<M> {
             assert!(size >= 5); // seqno (4) + tag (1)
             assert!(size <= 1205); // TODO
 
-            let recv_msg = Message::decode(&recv_buf[..size])?;
+            let recv_msg = Message::decode(&recv_buf[..size], &mut self.command_log)?;
             self.handle_message(addr, recv_msg)?;
         }
 
@@ -258,7 +258,7 @@ impl<M: Machine> RaftNode<M> {
             promise,
         };
         let mut buf = Vec::new(); // TODO: reuse
-        msg.encode(&mut buf)?;
+        msg.encode(&mut buf, &self.command_log)?;
         self.socket.send_to(&buf, peer_addr)?;
         Ok(())
     }
@@ -290,7 +290,7 @@ impl<M: Machine> RaftNode<M> {
             msg,
         };
         let mut buf = Vec::new(); // TODO: reuse
-        msg.encode(&mut buf).expect("TODO");
+        msg.encode(&mut buf, &self.command_log).expect("TODO");
 
         let peer_addr = self.peer_addrs.get(&peer).copied().expect("peer addr");
         self.socket.send_to(&buf, peer_addr).expect("TODO");
@@ -302,7 +302,7 @@ impl<M: Machine> RaftNode<M> {
             msg,
         };
         let mut buf = Vec::new(); // TODO: reuse
-        msg.encode(&mut buf).expect("TODO");
+        msg.encode(&mut buf, &self.command_log).expect("TODO");
 
         for id in self.bare_node.peers() {
             let peer_addr = self.peer_addrs.get(&id).copied().expect("peer addr");

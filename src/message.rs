@@ -7,6 +7,8 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
+use crate::CommandLog;
+
 const MESSAGE_TAG_CLUSTER_CALL: u8 = 0;
 const MESSAGE_TAG_CLUSTER_REPLY: u8 = 1;
 const MESSAGE_TAG_RAFT_MESSAGE_CAST: u8 = 2;
@@ -17,6 +19,37 @@ const ADDR_TAG_IPV6: u8 = 6;
 #[derive(Debug, Clone)]
 pub enum SystemCommand {
     AddNode { node_id: NodeId, addr: SocketAddr },
+}
+
+impl SystemCommand {
+    pub fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
+        match self {
+            Self::AddNode { node_id, addr } => {
+                writer.write_all(&[0])?;
+                writer.write_all(&node_id.get().to_be_bytes())?;
+                encode_socket_addr(&mut writer, *addr)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {
+        let cmd_tag = read_u8(&mut reader)?;
+        match cmd_tag {
+            0 => {
+                let node_id = read_u64(&mut reader)?;
+                let addr = decode_socket_addr(&mut reader)?;
+                Ok(Self::AddNode {
+                    node_id: NodeId::new(node_id),
+                    addr,
+                })
+            }
+            _ => Err(Error::new(
+                ErrorKind::InvalidData,
+                format!("Unknown system command tag: {cmd_tag}"),
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -50,24 +83,12 @@ impl Message {
     }
 
     // TODO: Add CommandLog
-    pub fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
+    pub fn encode<W: Write>(&self, mut writer: W, command_log: &CommandLog) -> std::io::Result<()> {
         match self {
             Self::JoinCall { seqno, from } => {
                 writer.write_all(&[MESSAGE_TAG_CLUSTER_CALL])?;
                 writer.write_all(&seqno.to_be_bytes())?;
-
-                match from {
-                    SocketAddr::V4(addr) => {
-                        writer.write_all(&[ADDR_TAG_IPV4])?;
-                        writer.write_all(&addr.ip().octets())?;
-                        writer.write_all(&addr.port().to_be_bytes())?;
-                    }
-                    SocketAddr::V6(addr) => {
-                        writer.write_all(&[ADDR_TAG_IPV6])?;
-                        writer.write_all(&addr.ip().octets())?;
-                        writer.write_all(&addr.port().to_be_bytes())?;
-                    }
-                }
+                encode_socket_addr(&mut writer, *from)?;
             }
             Self::JoinReply {
                 seqno,
@@ -82,36 +103,19 @@ impl Message {
             Self::RaftMessageCast { seqno, msg } => {
                 writer.write_all(&[MESSAGE_TAG_RAFT_MESSAGE_CAST])?;
                 writer.write_all(&seqno.to_be_bytes())?;
-                encode_raft_message(&mut writer, msg)?;
+                encode_raft_message(&mut writer, msg, command_log)?;
             }
         }
         Ok(())
     }
 
-    pub fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {
+    pub fn decode<R: Read>(mut reader: R, log: &mut CommandLog) -> std::io::Result<Self> {
         let msg_tag = read_u8(&mut reader)?;
         let seqno = read_u32(&mut reader)?;
         match msg_tag {
             MESSAGE_TAG_CLUSTER_CALL => {
-                let addr_tag = read_u8(&mut reader)?;
-                match addr_tag {
-                    ADDR_TAG_IPV4 => {
-                        let ip = read_u32(&mut reader)?;
-                        let port = read_u16(&mut reader)?;
-                        let from = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(ip)), port);
-                        Ok(Self::JoinCall { seqno, from })
-                    }
-                    ADDR_TAG_IPV6 => {
-                        let ip = read_u128(&mut reader)?;
-                        let port = read_u16(&mut reader)?;
-                        let from = SocketAddr::new(IpAddr::V6(Ipv6Addr::from(ip)), port);
-                        Ok(Self::JoinCall { seqno, from })
-                    }
-                    _ => Err(Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Unknown address tag: {addr_tag}"),
-                    )),
-                }
+                let from = decode_socket_addr(&mut reader)?;
+                Ok(Self::JoinCall { seqno, from })
             }
             MESSAGE_TAG_CLUSTER_REPLY => {
                 let node_id = read_u64(&mut reader)?;
@@ -123,7 +127,7 @@ impl Message {
                 })
             }
             MESSAGE_TAG_RAFT_MESSAGE_CAST => {
-                let msg = decode_raft_message(&mut reader)?;
+                let msg = decode_raft_message(&mut reader, log)?;
                 Ok(Self::RaftMessageCast { seqno, msg })
             }
             _ => Err(Error::new(
@@ -236,7 +240,12 @@ fn decode_log_position<R: Read>(reader: &mut R) -> std::io::Result<LogPosition> 
     })
 }
 
-fn encode_log_entry<W: Write>(writer: &mut W, entry: LogEntry) -> std::io::Result<()> {
+fn encode_log_entry<W: Write>(
+    writer: &mut W,
+    pos: LogPosition,
+    entry: LogEntry,
+    log: &CommandLog,
+) -> std::io::Result<()> {
     match entry {
         LogEntry::Term(t) => {
             writer.write_all(&[0])?;
@@ -247,13 +256,19 @@ fn encode_log_entry<W: Write>(writer: &mut W, entry: LogEntry) -> std::io::Resul
             encode_cluster_config(writer, &c)?;
         }
         LogEntry::Command => {
-            todo!(); // TODO: mapping to actual command
+            writer.write_all(&[2])?;
+            let command = log.get(&pos.index).expect("TODO");
+            command.encode(writer)?;
         }
     }
     Ok(())
 }
 
-fn decode_log_entry<R: Read>(reader: &mut R) -> std::io::Result<LogEntry> {
+fn decode_log_entry<R: Read>(
+    reader: &mut R,
+    prev: LogPosition,
+    log: &mut CommandLog,
+) -> std::io::Result<LogEntry> {
     let tag = read_u8(reader)?;
     match tag {
         0 => {
@@ -262,7 +277,10 @@ fn decode_log_entry<R: Read>(reader: &mut R) -> std::io::Result<LogEntry> {
         }
         1 => decode_cluster_config(reader).map(LogEntry::ClusterConfig),
         2 => {
-            todo!()
+            let command = SystemCommand::decode(reader)?;
+            let index = LogIndex::new(prev.index.get() + 1);
+            log.insert(index, command);
+            Ok(LogEntry::Command)
         }
         _ => Err(Error::new(
             ErrorKind::InvalidData,
@@ -313,7 +331,11 @@ fn decode_cluster_config<R: Read>(reader: &mut R) -> std::io::Result<ClusterConf
     })
 }
 
-fn encode_raft_message<W: Write>(writer: &mut W, msg: &raftbare::Message) -> std::io::Result<()> {
+fn encode_raft_message<W: Write>(
+    writer: &mut W,
+    msg: &raftbare::Message,
+    log: &CommandLog,
+) -> std::io::Result<()> {
     match msg {
         raftbare::Message::RequestVoteCall {
             header,
@@ -343,8 +365,8 @@ fn encode_raft_message<W: Write>(writer: &mut W, msg: &raftbare::Message) -> std
 
             // TODO: limit the number of entries to not exceed the maximum message size
             writer.write_all(&(entries.len() as u32).to_be_bytes())?;
-            for entry in entries.iter() {
-                encode_log_entry(writer, entry)?;
+            for (pos, entry) in entries.iter_with_positions() {
+                encode_log_entry(writer, pos, entry, log)?;
             }
         }
         raftbare::Message::AppendEntriesReply {
@@ -359,7 +381,10 @@ fn encode_raft_message<W: Write>(writer: &mut W, msg: &raftbare::Message) -> std
     Ok(())
 }
 
-fn decode_raft_message<R: Read>(reader: &mut R) -> std::io::Result<raftbare::Message> {
+fn decode_raft_message<R: Read>(
+    reader: &mut R,
+    log: &mut CommandLog,
+) -> std::io::Result<raftbare::Message> {
     let tag = read_u8(reader)?;
     match tag {
         0 => {
@@ -385,7 +410,8 @@ fn decode_raft_message<R: Read>(reader: &mut R) -> std::io::Result<raftbare::Mes
             let entry_count = read_u32(reader)?;
             let mut entries = LogEntries::new(prev_position);
             for _ in 0..entry_count {
-                entries.push(decode_log_entry(reader)?);
+                let pos = entries.last_position();
+                entries.push(decode_log_entry(reader, pos, log)?);
             }
             Ok(raftbare::Message::AppendEntriesCall {
                 header,
@@ -404,6 +430,42 @@ fn decode_raft_message<R: Read>(reader: &mut R) -> std::io::Result<raftbare::Mes
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Unknown raft message tag: {tag}"),
+        )),
+    }
+}
+
+fn encode_socket_addr<W: Write>(writer: &mut W, addr: SocketAddr) -> std::io::Result<()> {
+    match addr {
+        SocketAddr::V4(v4) => {
+            writer.write_all(&[ADDR_TAG_IPV4])?;
+            writer.write_all(&v4.ip().octets())?;
+            writer.write_all(&v4.port().to_be_bytes())?;
+        }
+        SocketAddr::V6(v6) => {
+            writer.write_all(&[ADDR_TAG_IPV6])?;
+            writer.write_all(&v6.ip().octets())?;
+            writer.write_all(&v6.port().to_be_bytes())?;
+        }
+    }
+    Ok(())
+}
+
+fn decode_socket_addr<R: Read>(reader: &mut R) -> std::io::Result<SocketAddr> {
+    let addr_tag = read_u8(reader)?;
+    match addr_tag {
+        ADDR_TAG_IPV4 => {
+            let ip = read_u32(reader)?;
+            let port = read_u16(reader)?;
+            Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(ip)), port))
+        }
+        ADDR_TAG_IPV6 => {
+            let ip = read_u128(reader)?;
+            let port = read_u16(reader)?;
+            Ok(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(ip)), port))
+        }
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Unknown address tag: {addr_tag}"),
         )),
     }
 }
