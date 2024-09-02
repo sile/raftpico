@@ -32,6 +32,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8adc4bb1803a324070e64a98ae98f38934d91957a99cfb3a43dcbc01bc56439"
 
 [[package]]
+name = "orfail"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aba2212a0fddd290c8209fb9b0393382435ede29c24a71f245d7fa92f0f3442e"
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -68,6 +74,7 @@ checksum = "521ebfab7fe9ba8789839797173869e9c649d70853845b94d9123249fc073ad7"
 name = "raftpico"
 version = "0.1.0"
 dependencies = [
+ "orfail",
  "raftbare",
  "rand",
 ]
