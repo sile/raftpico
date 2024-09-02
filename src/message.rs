@@ -47,6 +47,7 @@ impl Message {
     }
 
     // TODO: Use writer
+    // TODO: Add CommandLog
     pub fn encode(&self, buf: &mut Vec<u8>) {
         match self {
             Self::JoinCall { seqno, from } => {

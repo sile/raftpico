@@ -26,6 +26,9 @@ pub trait Command: Sized {
     fn decode(buf: &[u8]) -> Self;
 }
 
+// TODO: remove old entries
+pub type CommandLog = BTreeMap<LogIndex, SystemCommand>;
+
 #[derive(Debug)]
 pub struct RaftNode<M: Machine> {
     machine: M,
@@ -33,7 +36,7 @@ pub struct RaftNode<M: Machine> {
     socket: UdpSocket,
     local_addr: SocketAddr,
     seqno: u32,
-    command_log: Vec<(LogIndex, M::Command)>,
+    command_log: CommandLog,
     election_timeout: Option<Instant>,
 
     join_promise: Option<CommitPromise>, // TODO
@@ -57,7 +60,7 @@ impl<M: Machine> RaftNode<M> {
             socket,
             local_addr,
             seqno: 0,
-            command_log: Vec::new(),
+            command_log: CommandLog::new(),
             election_timeout: None,
 
             join_promise: None,
@@ -228,11 +231,13 @@ impl<M: Machine> RaftNode<M> {
             self.peer_addrs.insert(node_id, peer_addr);
 
             // TODO: propose system command
-            let _command = SystemCommand::AddNode {
+            let command = SystemCommand::AddNode {
                 node_id,
                 addr: peer_addr,
             };
-            self.bare_node.propose_command(); // TODO: handle redirect
+            let promise = self.bare_node.propose_command(); // TODO: handle redirect
+            self.command_log
+                .insert(promise.log_position().index, command);
 
             let new_config = self.bare_node.config().to_joint_consensus(&[node_id], &[]);
             let promise = self.bare_node.propose_config(new_config);
