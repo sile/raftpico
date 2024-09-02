@@ -1,4 +1,7 @@
-use raftbare::{ClusterConfig, CommitPromise, LogEntry, LogIndex, LogPosition, NodeId, Term};
+use raftbare::{
+    ClusterConfig, CommitPromise, LogEntries, LogEntry, LogIndex, LogPosition, MessageSeqNo,
+    NodeId, Term,
+};
 use std::{
     io::{Error, ErrorKind, Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -207,10 +210,30 @@ fn encode_raft_message_header<W: Write>(
     Ok(())
 }
 
+fn decode_raft_message_header<R: Read>(reader: &mut R) -> std::io::Result<raftbare::MessageHeader> {
+    let from = read_u64(reader)?;
+    let term = read_u64(reader)?;
+    let seqno = read_u64(reader)?;
+    Ok(raftbare::MessageHeader {
+        from: NodeId::new(from),
+        term: Term::new(term),
+        seqno: MessageSeqNo::new(seqno),
+    })
+}
+
 fn encode_log_position<W: Write>(writer: &mut W, position: LogPosition) -> std::io::Result<()> {
     writer.write_all(&position.term.get().to_be_bytes())?;
     writer.write_all(&position.index.get().to_be_bytes())?;
     Ok(())
+}
+
+fn decode_log_position<R: Read>(reader: &mut R) -> std::io::Result<LogPosition> {
+    let term = read_u64(reader)?;
+    let index = read_u64(reader)?;
+    Ok(LogPosition {
+        term: Term::new(term),
+        index: LogIndex::new(index),
+    })
 }
 
 fn encode_log_entry<W: Write>(writer: &mut W, entry: LogEntry) -> std::io::Result<()> {
@@ -230,6 +253,24 @@ fn encode_log_entry<W: Write>(writer: &mut W, entry: LogEntry) -> std::io::Resul
     Ok(())
 }
 
+fn decode_log_entry<R: Read>(reader: &mut R) -> std::io::Result<LogEntry> {
+    let tag = read_u8(reader)?;
+    match tag {
+        0 => {
+            let term = read_u64(reader)?;
+            Ok(LogEntry::Term(Term::new(term)))
+        }
+        1 => decode_cluster_config(reader).map(LogEntry::ClusterConfig),
+        2 => {
+            todo!()
+        }
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Unknown log entry tag: {tag}"),
+        )),
+    }
+}
+
 fn encode_cluster_config<W: Write>(writer: &mut W, config: &ClusterConfig) -> std::io::Result<()> {
     writer.write_all(&(config.voters.len() as u16).to_be_bytes())?;
     for voter in &config.voters {
@@ -247,6 +288,29 @@ fn encode_cluster_config<W: Write>(writer: &mut W, config: &ClusterConfig) -> st
     }
 
     Ok(())
+}
+
+fn decode_cluster_config<R: Read>(reader: &mut R) -> std::io::Result<ClusterConfig> {
+    let voters_len = read_u16(reader)?;
+    let voters = (0..voters_len)
+        .map(|_| read_u64(reader).map(NodeId::new))
+        .collect::<std::io::Result<_>>()?;
+
+    let new_voters_len = read_u16(reader)?;
+    let new_voters = (0..new_voters_len)
+        .map(|_| read_u64(reader).map(NodeId::new))
+        .collect::<std::io::Result<_>>()?;
+
+    let non_voters_len = read_u16(reader)?;
+    let non_voters = (0..non_voters_len)
+        .map(|_| read_u64(reader).map(NodeId::new))
+        .collect::<std::io::Result<_>>()?;
+
+    Ok(ClusterConfig {
+        voters,
+        new_voters,
+        non_voters,
+    })
 }
 
 fn encode_raft_message<W: Write>(writer: &mut W, msg: &raftbare::Message) -> std::io::Result<()> {
@@ -275,6 +339,7 @@ fn encode_raft_message<W: Write>(writer: &mut W, msg: &raftbare::Message) -> std
             writer.write_all(&[2])?;
             encode_raft_message_header(writer, header)?;
             writer.write_all(&commit_index.get().to_be_bytes())?;
+            encode_log_position(writer, entries.prev_position())?;
 
             // TODO: limit the number of entries to not exceed the maximum message size
             writer.write_all(&(entries.len() as u32).to_be_bytes())?;
@@ -295,5 +360,29 @@ fn encode_raft_message<W: Write>(writer: &mut W, msg: &raftbare::Message) -> std
 }
 
 fn decode_raft_message<R: Read>(reader: &mut R) -> std::io::Result<raftbare::Message> {
-    todo!()
+    let tag = read_u8(reader)?;
+    match tag {
+        0 => todo!(),
+        1 => todo!(),
+        2 => {
+            let header = decode_raft_message_header(reader)?;
+            let commit_index = LogIndex::new(read_u64(reader)?);
+            let prev_position = decode_log_position(reader)?;
+            let entry_count = read_u32(reader)?;
+            let mut entries = LogEntries::new(prev_position);
+            for _ in 0..entry_count {
+                entries.push(decode_log_entry(reader)?);
+            }
+            Ok(raftbare::Message::AppendEntriesCall {
+                header,
+                commit_index,
+                entries,
+            })
+        }
+        3 => todo!(),
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Unknown raft message tag: {tag}"),
+        )),
+    }
 }
