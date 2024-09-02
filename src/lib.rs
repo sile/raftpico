@@ -136,14 +136,15 @@ impl<M: Machine> RaftNode<M> {
 
             // TODO: while
             let mut recv_buf = [0; 2048];
-            let Some((size, _addr)) = maybe_would_block(self.socket.recv_from(&mut recv_buf))?
+            let Some((size, addr)) = maybe_would_block(self.socket.recv_from(&mut recv_buf))?
             else {
                 continue;
             };
             assert!(size >= 5); // seqno (4) + tag (1)
             assert!(size <= 1205); // TODO
             let recv_msg = Message::decode(&recv_buf[..size])?;
-            self.handle_message(recv_msg)?;
+            self.handle_message(addr, recv_msg)?;
+            self.run_one()?; // TODO
         }
 
         Err(Error::new(ErrorKind::TimedOut, "join timed out"))
@@ -164,12 +165,12 @@ impl<M: Machine> RaftNode<M> {
         // TODO: propose follower heartbeat command periodically
 
         let mut recv_buf = [0; 2048];
-        if let Some((size, _addr)) = maybe_would_block(self.socket.recv_from(&mut recv_buf))? {
+        if let Some((size, addr)) = maybe_would_block(self.socket.recv_from(&mut recv_buf))? {
             assert!(size >= 5); // seqno (4) + tag (1)
             assert!(size <= 1205); // TODO
 
             let recv_msg = Message::decode(&recv_buf[..size])?;
-            self.handle_message(recv_msg)?;
+            self.handle_message(addr, recv_msg)?;
         }
 
         while let Some(action) = self.bare_node.actions_mut().next() {
@@ -195,7 +196,7 @@ impl<M: Machine> RaftNode<M> {
         &self.machine
     }
 
-    fn handle_message(&mut self, msg: Message) -> std::io::Result<()> {
+    fn handle_message(&mut self, from: SocketAddr, msg: Message) -> std::io::Result<()> {
         match msg {
             Message::JoinCall { seqno, from } => {
                 self.handle_join_call(seqno, from)?;
@@ -214,6 +215,10 @@ impl<M: Machine> RaftNode<M> {
                 self.bare_node = BareNode::start(node_id);
             }
             Message::RaftMessageCast { msg, .. } => {
+                if !self.peer_addrs.contains_key(&msg.from()) {
+                    // TODO:
+                    self.peer_addrs.insert(msg.from(), from);
+                }
                 self.bare_node.handle_message(msg);
             }
         }
@@ -272,8 +277,23 @@ impl<M: Machine> RaftNode<M> {
             Action::BroadcastMessage(msg) => {
                 self.broadcast_message(msg);
             }
+            Action::SendMessage(peer, msg) => {
+                self.send_message(peer, msg);
+            }
             _ => todo!("action: {:?}", action),
         }
+    }
+
+    fn send_message(&mut self, peer: NodeId, msg: raftbare::Message) {
+        let msg = Message::RaftMessageCast {
+            seqno: self.next_seqno(),
+            msg,
+        };
+        let mut buf = Vec::new(); // TODO: reuse
+        msg.encode(&mut buf).expect("TODO");
+
+        let peer_addr = self.peer_addrs.get(&peer).copied().expect("peer addr");
+        self.socket.send_to(&buf, peer_addr).expect("TODO");
     }
 
     fn broadcast_message(&mut self, msg: raftbare::Message) {

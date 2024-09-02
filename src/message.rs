@@ -362,8 +362,22 @@ fn encode_raft_message<W: Write>(writer: &mut W, msg: &raftbare::Message) -> std
 fn decode_raft_message<R: Read>(reader: &mut R) -> std::io::Result<raftbare::Message> {
     let tag = read_u8(reader)?;
     match tag {
-        0 => todo!(),
-        1 => todo!(),
+        0 => {
+            let header = decode_raft_message_header(reader)?;
+            let last_position = decode_log_position(reader)?;
+            Ok(raftbare::Message::RequestVoteCall {
+                header,
+                last_position,
+            })
+        }
+        1 => {
+            let header = decode_raft_message_header(reader)?;
+            let vote_granted = read_u8(reader)? != 0;
+            Ok(raftbare::Message::RequestVoteReply {
+                header,
+                vote_granted,
+            })
+        }
         2 => {
             let header = decode_raft_message_header(reader)?;
             let commit_index = LogIndex::new(read_u64(reader)?);
@@ -379,7 +393,14 @@ fn decode_raft_message<R: Read>(reader: &mut R) -> std::io::Result<raftbare::Mes
                 entries,
             })
         }
-        3 => todo!(),
+        3 => {
+            let header = decode_raft_message_header(reader)?;
+            let last_position = decode_log_position(reader)?;
+            Ok(raftbare::Message::AppendEntriesReply {
+                header,
+                last_position,
+            })
+        }
         _ => Err(Error::new(
             ErrorKind::InvalidData,
             format!("Unknown raft message tag: {tag}"),
