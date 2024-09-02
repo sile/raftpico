@@ -46,24 +46,23 @@ impl Message {
         matches!(self, Self::JoinReply { .. })
     }
 
-    // TODO: Use writer
     // TODO: Add CommandLog
-    pub fn encode(&self, buf: &mut Vec<u8>) {
+    pub fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
         match self {
             Self::JoinCall { seqno, from } => {
-                buf.push(MESSAGE_TAG_CLUSTER_CALL);
-                buf.extend(&seqno.to_be_bytes());
+                writer.write_all(&[MESSAGE_TAG_CLUSTER_CALL])?;
+                writer.write_all(&seqno.to_be_bytes())?;
 
                 match from {
                     SocketAddr::V4(addr) => {
-                        buf.push(ADDR_TAG_IPV4);
-                        buf.extend(&addr.ip().octets());
-                        buf.extend(&addr.port().to_be_bytes());
+                        writer.write_all(&[ADDR_TAG_IPV4])?;
+                        writer.write_all(&addr.ip().octets())?;
+                        writer.write_all(&addr.port().to_be_bytes())?;
                     }
                     SocketAddr::V6(addr) => {
-                        buf.push(ADDR_TAG_IPV6);
-                        buf.extend(&addr.ip().octets());
-                        buf.extend(&addr.port().to_be_bytes());
+                        writer.write_all(&[ADDR_TAG_IPV6])?;
+                        writer.write_all(&addr.ip().octets())?;
+                        writer.write_all(&addr.port().to_be_bytes())?;
                     }
                 }
             }
@@ -72,17 +71,18 @@ impl Message {
                 node_id,
                 promise,
             } => {
-                buf.push(MESSAGE_TAG_CLUSTER_REPLY);
-                buf.extend(&seqno.to_be_bytes());
-                buf.extend(&node_id.get().to_be_bytes());
-                encode_commit_promise(buf, *promise).expect("TODO");
+                writer.write_all(&[MESSAGE_TAG_CLUSTER_REPLY])?;
+                writer.write_all(&seqno.to_be_bytes())?;
+                writer.write_all(&node_id.get().to_be_bytes())?;
+                encode_commit_promise(&mut writer, *promise)?;
             }
             Self::RaftMessageCast { seqno, msg } => {
-                buf.push(MESSAGE_TAG_RAFT_MESSAGE_CAST);
-                buf.extend(&seqno.to_be_bytes());
-                encode_raft_message(buf, msg).expect("TODO");
+                writer.write_all(&[MESSAGE_TAG_RAFT_MESSAGE_CAST])?;
+                writer.write_all(&seqno.to_be_bytes())?;
+                encode_raft_message(&mut writer, msg)?;
             }
         }
+        Ok(())
     }
 
     pub fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {

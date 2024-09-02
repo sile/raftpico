@@ -118,7 +118,7 @@ impl<M: Machine> RaftNode<M> {
         };
 
         let mut send_buf = Vec::new();
-        send_msg.encode(&mut send_buf);
+        send_msg.encode(&mut send_buf)?;
 
         let start_time = Instant::now();
         while timeout.map_or(true, |t| start_time.elapsed() <= t) {
@@ -222,7 +222,7 @@ impl<M: Machine> RaftNode<M> {
 
     fn handle_join_call(&mut self, seqno: u32, peer_addr: SocketAddr) -> std::io::Result<()> {
         let (node_id, promise) = if let Some((&node_id, _)) =
-            self.peer_addrs.iter().find(|(_, &addr)| addr != peer_addr)
+            self.peer_addrs.iter().find(|(_, &addr)| addr == peer_addr)
         {
             (node_id, CommitPromise::Pending(LogPosition::ZERO)) // TODO: use appropriate promise
         } else {
@@ -236,6 +236,7 @@ impl<M: Machine> RaftNode<M> {
                 addr: peer_addr,
             };
             let promise = self.bare_node.propose_command(); // TODO: handle redirect
+            assert!(!promise.is_rejected()); // TODO: handle this case (redirect or retry later)
             self.command_log
                 .insert(promise.log_position().index, command);
 
@@ -252,7 +253,7 @@ impl<M: Machine> RaftNode<M> {
             promise,
         };
         let mut buf = Vec::new(); // TODO: reuse
-        msg.encode(&mut buf);
+        msg.encode(&mut buf)?;
         self.socket.send_to(&buf, peer_addr)?;
         Ok(())
     }
@@ -281,7 +282,7 @@ impl<M: Machine> RaftNode<M> {
             msg,
         };
         let mut buf = Vec::new(); // TODO: reuse
-        msg.encode(&mut buf);
+        msg.encode(&mut buf).expect("TODO");
 
         for id in self.bare_node.peers() {
             let peer_addr = self.peer_addrs.get(&id).copied().expect("peer addr");
