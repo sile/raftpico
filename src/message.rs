@@ -1,4 +1,4 @@
-use raftbare::{CommitPromise, LogIndex, LogPosition, NodeId, Term};
+use raftbare::{ClusterConfig, CommitPromise, LogEntry, LogIndex, LogPosition, NodeId, Term};
 use std::{
     io::{Error, ErrorKind, Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -10,6 +10,11 @@ const MESSAGE_TAG_RAFT_MESSAGE_CAST: u8 = 2;
 
 const ADDR_TAG_IPV4: u8 = 4;
 const ADDR_TAG_IPV6: u8 = 6;
+
+#[derive(Debug, Clone)]
+pub enum SystemCommand {
+    AddNode { node_id: NodeId, addr: SocketAddr },
+}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -191,8 +196,101 @@ fn decode_commit_promise<R: Read>(reader: &mut R) -> std::io::Result<CommitPromi
     }
 }
 
+fn encode_raft_message_header<W: Write>(
+    writer: &mut W,
+    header: &raftbare::MessageHeader,
+) -> std::io::Result<()> {
+    writer.write_all(&header.from.get().to_be_bytes())?;
+    writer.write_all(&header.term.get().to_be_bytes())?;
+    writer.write_all(&header.seqno.get().to_be_bytes())?;
+    Ok(())
+}
+
+fn encode_log_position<W: Write>(writer: &mut W, position: LogPosition) -> std::io::Result<()> {
+    writer.write_all(&position.term.get().to_be_bytes())?;
+    writer.write_all(&position.index.get().to_be_bytes())?;
+    Ok(())
+}
+
+fn encode_log_entry<W: Write>(writer: &mut W, entry: LogEntry) -> std::io::Result<()> {
+    match entry {
+        LogEntry::Term(t) => {
+            writer.write_all(&[0])?;
+            writer.write_all(&t.get().to_be_bytes())?;
+        }
+        LogEntry::ClusterConfig(c) => {
+            writer.write_all(&[1])?;
+            encode_cluster_config(writer, &c)?;
+        }
+        LogEntry::Command => {
+            todo!(); // TODO: mapping to actual command
+        }
+    }
+    Ok(())
+}
+
+fn encode_cluster_config<W: Write>(writer: &mut W, config: &ClusterConfig) -> std::io::Result<()> {
+    writer.write_all(&(config.voters.len() as u16).to_be_bytes())?;
+    for voter in &config.voters {
+        writer.write_all(&voter.get().to_be_bytes())?;
+    }
+
+    writer.write_all(&(config.new_voters.len() as u16).to_be_bytes())?;
+    for voter in &config.new_voters {
+        writer.write_all(&voter.get().to_be_bytes())?;
+    }
+
+    writer.write_all(&(config.non_voters.len() as u16).to_be_bytes())?;
+    for non_voter in &config.non_voters {
+        writer.write_all(&non_voter.get().to_be_bytes())?;
+    }
+
+    Ok(())
+}
+
 fn encode_raft_message<W: Write>(writer: &mut W, msg: &raftbare::Message) -> std::io::Result<()> {
-    todo!()
+    match msg {
+        raftbare::Message::RequestVoteCall {
+            header,
+            last_position,
+        } => {
+            writer.write_all(&[0])?;
+            encode_raft_message_header(writer, header)?;
+            encode_log_position(writer, *last_position)?;
+        }
+        raftbare::Message::RequestVoteReply {
+            header,
+            vote_granted,
+        } => {
+            writer.write_all(&[1])?;
+            encode_raft_message_header(writer, header)?;
+            writer.write_all(&[*vote_granted as u8])?;
+        }
+        raftbare::Message::AppendEntriesCall {
+            header,
+            commit_index,
+            entries,
+        } => {
+            writer.write_all(&[2])?;
+            encode_raft_message_header(writer, header)?;
+            writer.write_all(&commit_index.get().to_be_bytes())?;
+
+            // TODO: limit the number of entries to not exceed the maximum message size
+            writer.write_all(&(entries.len() as u32).to_be_bytes())?;
+            for entry in entries.iter() {
+                encode_log_entry(writer, entry)?;
+            }
+        }
+        raftbare::Message::AppendEntriesReply {
+            header,
+            last_position,
+        } => {
+            writer.write_all(&[3])?;
+            encode_raft_message_header(writer, header)?;
+            encode_log_position(writer, *last_position)?;
+        }
+    }
+    Ok(())
 }
 
 fn decode_raft_message<R: Read>(reader: &mut R) -> std::io::Result<raftbare::Message> {

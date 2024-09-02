@@ -1,4 +1,4 @@
-use message::Message;
+use message::{Message, SystemCommand};
 use raftbare::{
     Action, CommitPromise, LogEntries, LogIndex, LogPosition, Node as BareNode, NodeId, Role,
 };
@@ -226,6 +226,13 @@ impl<M: Machine> RaftNode<M> {
             let node_id = self.next_node_id;
             self.next_node_id = NodeId::new(node_id.get() + 1);
             self.peer_addrs.insert(node_id, peer_addr);
+
+            // TODO: propose system command
+            let _command = SystemCommand::AddNode {
+                node_id,
+                addr: peer_addr,
+            };
+            self.bare_node.propose_command(); // TODO: handle redirect
 
             let new_config = self.bare_node.config().to_joint_consensus(&[node_id], &[]);
             let promise = self.bare_node.propose_config(new_config);
