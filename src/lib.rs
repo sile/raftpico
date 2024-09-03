@@ -5,7 +5,7 @@ use raftbare::{
 use rand::Rng;
 use std::{
     collections::BTreeMap,
-    io::{Error, ErrorKind},
+    io::{Error, ErrorKind, Read, Write},
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
 };
@@ -22,12 +22,12 @@ pub trait Machine: Sized + Default {
 }
 
 pub trait Command: Sized {
-    fn encode(&self, buf: &mut Vec<u8>);
-    fn decode(buf: &[u8]) -> Self;
+    fn encode<W: Write>(&self, writer: W) -> std::io::Result<()>;
+    fn decode<R: Read>(reader: R) -> std::io::Result<Self>;
 }
 
 // TODO: remove old entries
-pub type CommandLog = BTreeMap<LogIndex, SystemCommand>;
+pub type CommandLog<C> = BTreeMap<LogIndex, SystemCommand<C>>;
 
 #[derive(Debug)]
 pub struct RaftNode<M: Machine> {
@@ -36,7 +36,7 @@ pub struct RaftNode<M: Machine> {
     socket: UdpSocket,
     local_addr: SocketAddr,
     seqno: u32,
-    command_log: CommandLog,
+    command_log: CommandLog<M::Command>,
     election_timeout: Option<Instant>,
 
     join_promise: Option<CommitPromise>, // TODO
@@ -99,6 +99,8 @@ impl<M: Machine> RaftNode<M> {
         self.seqno += 1;
         seqno
     }
+
+    // TODO: pub fn leave()
 
     pub fn join(
         &mut self,
@@ -190,6 +192,10 @@ impl<M: Machine> RaftNode<M> {
 
     pub fn role(&self) -> Role {
         self.bare_node.role()
+    }
+
+    pub fn bare_node(&self) -> &BareNode {
+        &self.bare_node
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -331,13 +337,29 @@ impl<M: Machine> RaftNode<M> {
         };
         self.election_timeout = Some(Instant::now() + duration);
     }
-}
 
-// TODO
-// join / leave
-// propose_command()
-// local_query()
-// consistent_query()
+    pub fn propose_command(
+        &mut self,
+        command: M::Command,
+        timeout: Option<Duration>,
+    ) -> std::io::Result<bool> {
+        if self.role().is_leader() {
+            let promise = self.bare_node.propose_command();
+            assert!(!promise.is_rejected());
+
+            self.command_log
+                .insert(promise.log_position().index, SystemCommand::User(command));
+        } else {
+            todo!()
+        }
+        todo!()
+    }
+
+    pub fn sync(&mut self, _timeout: Option<Duration>) -> std::io::Result<bool> {
+        // heartbeat
+        todo!()
+    }
+}
 
 fn maybe_would_block<T>(result: std::io::Result<T>) -> std::io::Result<Option<T>> {
     match result {
@@ -365,10 +387,12 @@ mod tests {
     }
 
     impl Command for () {
-        fn encode(&self, _buf: &mut Vec<u8>) {}
+        fn encode<W: Write>(&self, _writer: W) -> std::io::Result<()> {
+            Ok(())
+        }
 
-        fn decode(_buf: &[u8]) -> Self {
-            ()
+        fn decode<R: Read>(_reader: R) -> std::io::Result<Self> {
+            Ok(())
         }
     }
 
@@ -399,6 +423,7 @@ mod tests {
         node1
             .join(node0_addr, Some(Duration::from_secs(1)))
             .or_fail()?;
+        assert_eq!(node1.node_id(), NodeId::new(1));
 
         Ok(())
     }

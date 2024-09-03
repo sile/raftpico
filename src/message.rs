@@ -1,3 +1,4 @@
+use crate::{Command, CommandLog};
 use raftbare::{
     ClusterConfig, CommitPromise, LogEntries, LogEntry, LogIndex, LogPosition, MessageSeqNo,
     NodeId, Term,
@@ -7,8 +8,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-use crate::CommandLog;
-
 const MESSAGE_TAG_CLUSTER_CALL: u8 = 0;
 const MESSAGE_TAG_CLUSTER_REPLY: u8 = 1;
 const MESSAGE_TAG_RAFT_MESSAGE_CAST: u8 = 2;
@@ -16,18 +15,24 @@ const MESSAGE_TAG_RAFT_MESSAGE_CAST: u8 = 2;
 const ADDR_TAG_IPV4: u8 = 4;
 const ADDR_TAG_IPV6: u8 = 6;
 
+// TODO: rename
 #[derive(Debug, Clone)]
-pub enum SystemCommand {
+pub enum SystemCommand<C> {
     AddNode { node_id: NodeId, addr: SocketAddr },
+    User(C),
 }
 
-impl SystemCommand {
+impl<C: Command> SystemCommand<C> {
     pub fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
         match self {
             Self::AddNode { node_id, addr } => {
                 writer.write_all(&[0])?;
                 writer.write_all(&node_id.get().to_be_bytes())?;
                 encode_socket_addr(&mut writer, *addr)?;
+            }
+            Self::User(cmd) => {
+                writer.write_all(&[1])?;
+                cmd.encode(&mut writer)?
             }
         }
         Ok(())
@@ -43,6 +48,10 @@ impl SystemCommand {
                     node_id: NodeId::new(node_id),
                     addr,
                 })
+            }
+            1 => {
+                let cmd = C::decode(&mut reader)?;
+                Ok(Self::User(cmd))
             }
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
@@ -83,7 +92,11 @@ impl Message {
     }
 
     // TODO: Add CommandLog
-    pub fn encode<W: Write>(&self, mut writer: W, command_log: &CommandLog) -> std::io::Result<()> {
+    pub fn encode<W: Write, C: Command>(
+        &self,
+        mut writer: W,
+        command_log: &CommandLog<C>,
+    ) -> std::io::Result<()> {
         match self {
             Self::JoinCall { seqno, from } => {
                 writer.write_all(&[MESSAGE_TAG_CLUSTER_CALL])?;
@@ -109,7 +122,10 @@ impl Message {
         Ok(())
     }
 
-    pub fn decode<R: Read>(mut reader: R, log: &mut CommandLog) -> std::io::Result<Self> {
+    pub fn decode<R: Read, C: Command>(
+        mut reader: R,
+        log: &mut CommandLog<C>,
+    ) -> std::io::Result<Self> {
         let msg_tag = read_u8(&mut reader)?;
         let seqno = read_u32(&mut reader)?;
         match msg_tag {
@@ -240,11 +256,11 @@ fn decode_log_position<R: Read>(reader: &mut R) -> std::io::Result<LogPosition> 
     })
 }
 
-fn encode_log_entry<W: Write>(
+fn encode_log_entry<W: Write, C: Command>(
     writer: &mut W,
     pos: LogPosition,
     entry: LogEntry,
-    log: &CommandLog,
+    log: &CommandLog<C>,
 ) -> std::io::Result<()> {
     match entry {
         LogEntry::Term(t) => {
@@ -264,10 +280,10 @@ fn encode_log_entry<W: Write>(
     Ok(())
 }
 
-fn decode_log_entry<R: Read>(
+fn decode_log_entry<R: Read, C: Command>(
     reader: &mut R,
     prev: LogPosition,
-    log: &mut CommandLog,
+    log: &mut CommandLog<C>,
 ) -> std::io::Result<LogEntry> {
     let tag = read_u8(reader)?;
     match tag {
@@ -331,10 +347,10 @@ fn decode_cluster_config<R: Read>(reader: &mut R) -> std::io::Result<ClusterConf
     })
 }
 
-fn encode_raft_message<W: Write>(
+fn encode_raft_message<W: Write, C: Command>(
     writer: &mut W,
     msg: &raftbare::Message,
-    log: &CommandLog,
+    log: &CommandLog<C>,
 ) -> std::io::Result<()> {
     match msg {
         raftbare::Message::RequestVoteCall {
@@ -381,9 +397,9 @@ fn encode_raft_message<W: Write>(
     Ok(())
 }
 
-fn decode_raft_message<R: Read>(
+fn decode_raft_message<R: Read, C: Command>(
     reader: &mut R,
-    log: &mut CommandLog,
+    log: &mut CommandLog<C>,
 ) -> std::io::Result<raftbare::Message> {
     let tag = read_u8(reader)?;
     match tag {
