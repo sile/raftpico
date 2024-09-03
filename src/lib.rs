@@ -27,6 +27,24 @@ pub trait Command: Sized {
     fn decode<R: Read>(reader: R) -> std::io::Result<Self>;
 }
 
+impl Command for Vec<u8> {
+    fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
+        let n = self.len() as u16;
+        writer.write_all(&n.to_be_bytes())?;
+        writer.write_all(self)
+    }
+
+    fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {
+        let mut n_buf = [0; 2];
+        reader.read_exact(&mut n_buf)?;
+        let n = u16::from_be_bytes(n_buf) as usize;
+
+        let mut buf = vec![0; n];
+        reader.read_exact(&mut buf)?;
+        Ok(buf)
+    }
+}
+
 // TODO: remove old entries
 pub type CommandLog<C> = BTreeMap<LogIndex, SystemCommand<C>>;
 
@@ -252,6 +270,12 @@ impl<M: Machine> RaftNode<M> {
                 }
                 self.bare_node.handle_message(msg);
             }
+            Message::ProposeCommandCall {
+                seqno,
+                from,
+                command,
+            } => todo!(),
+            Message::ProposeCommandReply { seqno, promise } => todo!(),
         }
         Ok(())
     }

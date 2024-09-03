@@ -76,6 +76,15 @@ pub enum Message {
         seqno: u32, // TODO(?): delete
         msg: raftbare::Message,
     },
+    ProposeCommandCall {
+        seqno: u32,
+        from: SocketAddr,
+        command: SystemCommand<Vec<u8>>, // TODO
+    },
+    ProposeCommandReply {
+        seqno: u32,
+        promise: CommitPromise,
+    },
 }
 
 impl Message {
@@ -84,6 +93,8 @@ impl Message {
             Self::JoinCall { seqno, .. } => *seqno,
             Self::JoinReply { seqno, .. } => *seqno,
             Self::RaftMessageCast { seqno, .. } => *seqno,
+            Self::ProposeCommandCall { seqno, .. } => *seqno,
+            Self::ProposeCommandReply { seqno, .. } => *seqno,
         }
     }
 
@@ -118,6 +129,12 @@ impl Message {
                 writer.write_all(&seqno.to_be_bytes())?;
                 encode_raft_message(&mut writer, msg, command_log)?;
             }
+            Self::ProposeCommandCall {
+                seqno,
+                from,
+                command,
+            } => todo!(),
+            Self::ProposeCommandReply { seqno, promise } => todo!(),
         }
         Ok(())
     }
