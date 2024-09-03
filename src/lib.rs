@@ -62,6 +62,8 @@ pub struct RaftNode<M: Machine> {
 
     last_applied: LogIndex,
 
+    // TODO: max_log_entries, retain_log_entries
+
     // raft state machine (system)
     next_node_id: NodeId,
     peer_addrs: BTreeMap<NodeId, SocketAddr>,
@@ -186,11 +188,7 @@ impl<M: Machine> RaftNode<M> {
         Ok(())
     }
 
-    // pub fn take_snapshot(&mut self) -> std::io::Result<()> {} or max_log_size config
-
     fn run_one(&mut self) -> std::io::Result<()> {
-        // TODO: propose follower heartbeat command periodically
-
         for i in self.last_applied.get() + 1..=self.bare_node.commit_index().get() {
             let i = LogIndex::new(i);
             let entry = self.bare_node.log().entries().get_entry(i).expect("bug");
@@ -203,6 +201,9 @@ impl<M: Machine> RaftNode<M> {
                     }
                     SystemCommand::User(c) => {
                         self.machine.apply(c);
+                        if self.role().is_leader() {
+                            // TODO: hearbeat() to sync followers quickly
+                        }
                     }
                 }
             }
@@ -389,6 +390,8 @@ impl<M: Machine> RaftNode<M> {
         command: M::Command,
         timeout: Option<Duration>,
     ) -> std::io::Result<bool> {
+        let timeout = timeout.map(|t| Instant::now() + t);
+
         let mut promise = if self.role().is_leader() {
             let promise = self.bare_node.propose_command();
             assert!(!promise.is_rejected());
@@ -397,12 +400,11 @@ impl<M: Machine> RaftNode<M> {
                 .insert(promise.log_position().index, SystemCommand::User(command));
             promise
         } else {
-            self.remote_propose_command(command)?
+            self.remote_propose_command(command, timeout)?
         };
 
-        let start_time = Instant::now();
         while promise.poll(&mut self.bare_node).is_pending() {
-            if timeout.map_or(false, |timeout| start_time.elapsed() > timeout) {
+            if timeout.map_or(false, |timeout| timeout < Instant::now()) {
                 return Err(ErrorKind::TimedOut.into());
             }
 
@@ -415,7 +417,11 @@ impl<M: Machine> RaftNode<M> {
     }
 
     // TODO: timeout
-    fn remote_propose_command(&mut self, command: M::Command) -> std::io::Result<CommitPromise> {
+    fn remote_propose_command(
+        &mut self,
+        command: M::Command,
+        timeout: Option<Instant>,
+    ) -> std::io::Result<CommitPromise> {
         todo!()
     }
 
@@ -555,7 +561,18 @@ mod tests {
         assert!(succeeded);
         assert_eq!(node0.machine().value, 42);
 
-        // TODO: propose a command to a follower node (node3)
+        std::thread::spawn(move || {
+            node0.run_while(|| true).expect("node0 aborted");
+        });
+
+        // Propose a command to a follower node (node2)
+        let mut node2 = TestRaftNode::new(auto_addr()).expect("node2");
+        node2
+            .join(node0_addr, Some(Duration::from_secs(1)))
+            .expect("join node1 to node0");
+        node2
+            .propose_command(CalcCommand::Sub(3), Some(Duration::from_secs(1)))
+            .expect("propose command");
 
         Ok(())
     }

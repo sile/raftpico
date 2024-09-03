@@ -11,6 +11,8 @@ use std::{
 const MESSAGE_TAG_CLUSTER_CALL: u8 = 0;
 const MESSAGE_TAG_CLUSTER_REPLY: u8 = 1;
 const MESSAGE_TAG_RAFT_MESSAGE_CAST: u8 = 2;
+const MESSAGE_TAG_PROPOSE_COMMAND_CALL: u8 = 3;
+const MESSAGE_TAG_PROPOSE_COMMAND_REPLY: u8 = 4;
 
 const ADDR_TAG_IPV4: u8 = 4;
 const ADDR_TAG_IPV6: u8 = 6;
@@ -79,6 +81,7 @@ pub enum Message {
     ProposeCommandCall {
         seqno: u32,
         from: SocketAddr,
+        // TOOD: hop count(?)
         command: SystemCommand<Vec<u8>>, // TODO
     },
     ProposeCommandReply {
@@ -133,8 +136,17 @@ impl Message {
                 seqno,
                 from,
                 command,
-            } => todo!(),
-            Self::ProposeCommandReply { seqno, promise } => todo!(),
+            } => {
+                writer.write_all(&[MESSAGE_TAG_PROPOSE_COMMAND_CALL])?;
+                writer.write_all(&seqno.to_be_bytes())?;
+                encode_socket_addr(&mut writer, *from)?;
+                command.encode(&mut writer)?;
+            }
+            Self::ProposeCommandReply { seqno, promise } => {
+                writer.write_all(&[MESSAGE_TAG_PROPOSE_COMMAND_REPLY])?;
+                writer.write_all(&seqno.to_be_bytes())?;
+                encode_commit_promise(&mut writer, *promise)?;
+            }
         }
         Ok(())
     }
@@ -162,6 +174,20 @@ impl Message {
             MESSAGE_TAG_RAFT_MESSAGE_CAST => {
                 let msg = decode_raft_message(&mut reader, log)?;
                 Ok(Self::RaftMessageCast { seqno, msg })
+            }
+            MESSAGE_TAG_PROPOSE_COMMAND_CALL => {
+                let from = decode_socket_addr(&mut reader)?;
+                let command_buf = Vec::<u8>::decode(&mut reader)?;
+                let command = SystemCommand::decode(&command_buf[..])?;
+                Ok(Self::ProposeCommandCall {
+                    seqno,
+                    from,
+                    command,
+                })
+            }
+            MESSAGE_TAG_PROPOSE_COMMAND_REPLY => {
+                let promise = decode_commit_promise(&mut reader)?;
+                Ok(Self::ProposeCommandReply { seqno, promise })
             }
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
