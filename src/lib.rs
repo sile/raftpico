@@ -383,6 +383,7 @@ impl<M: Machine> RaftNode<M> {
         self.election_timeout = Some(Instant::now() + duration);
     }
 
+    // TODO: return promise(?)
     pub fn propose_command(
         &mut self,
         command: M::Command,
@@ -408,6 +409,7 @@ impl<M: Machine> RaftNode<M> {
             std::thread::sleep(Duration::from_millis(5)); // TODO
             self.run_one()?;
         }
+        self.run_one()?; // TODO: note (or only processing apply commands)
 
         Ok(promise.is_accepted())
     }
@@ -526,18 +528,34 @@ mod tests {
 
     #[test]
     fn propose_command() -> orfail::Result<()> {
-        // let mut node0 = TestRaftNode::new(auto_addr()).or_fail()?;
-        // node0.create_cluster().or_fail()?;
+        let mut node0 = TestRaftNode::new(auto_addr()).or_fail()?;
+        node0.create_cluster().or_fail()?;
+        let node0_addr = node0.local_addr();
 
-        // let node0_addr = node0.local_addr();
-        // let mut node1 = TestRaftNode::new(auto_addr()).or_fail()?;
-        // node1
-        //     .join(node0_addr, Some(Duration::from_secs(1)))
-        //     .or_fail()?;
+        std::thread::spawn(move || {
+            let mut node1 = TestRaftNode::new(auto_addr()).expect("node1");
+            node1
+                .join(node0_addr, Some(Duration::from_secs(1)))
+                .expect("join node1 to node0");
+            node1.run_while(|| true).expect("node1 aborted");
+        });
 
-        // std::thread::spawn(move || {
-        //     node0.run_while(|| true).expect("node0 aborted");
-        // });
+        while node0.bare_node.config().voters.len() == 1
+            || node0.bare_node.config().new_voters.len() != 0
+        {
+            node0.run_one().expect("node0 aborted");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Propose a command to the leader node.
+        assert!(node0.role().is_leader());
+        let succeeded = node0
+            .propose_command(CalcCommand::Add(42), Some(Duration::from_secs(1)))
+            .expect("propose command");
+        assert!(succeeded);
+        assert_eq!(node0.machine().value, 42);
+
+        // TODO: propose a command to a follower node (node3)
 
         Ok(())
     }
