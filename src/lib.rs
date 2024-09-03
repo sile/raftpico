@@ -343,16 +343,28 @@ impl<M: Machine> RaftNode<M> {
         command: M::Command,
         timeout: Option<Duration>,
     ) -> std::io::Result<bool> {
-        if self.role().is_leader() {
+        let mut promise = if self.role().is_leader() {
             let promise = self.bare_node.propose_command();
             assert!(!promise.is_rejected());
 
             self.command_log
                 .insert(promise.log_position().index, SystemCommand::User(command));
+            promise
         } else {
-            todo!()
+            todo!("TODO: remote propose")
+        };
+
+        let start_time = Instant::now();
+        while promise.poll(&mut self.bare_node).is_pending() {
+            if timeout.map_or(false, |timeout| start_time.elapsed() > timeout) {
+                return Err(ErrorKind::TimedOut.into());
+            }
+
+            std::thread::sleep(Duration::from_millis(5)); // TODO
+            self.run_one()?;
         }
-        todo!()
+
+        Ok(promise.is_accepted())
     }
 
     pub fn sync(&mut self, _timeout: Option<Duration>) -> std::io::Result<bool> {
