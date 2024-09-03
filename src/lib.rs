@@ -436,29 +436,63 @@ mod tests {
     use super::*;
     use orfail::OrFail;
 
-    impl Machine for () {
-        type Command = ();
+    #[derive(Debug, Default)]
+    struct Calc {
+        value: i32,
+    }
 
-        fn apply(&mut self, _command: &Self::Command) {}
+    impl Machine for Calc {
+        type Command = CalcCommand;
 
-        fn encode(&self, _buf: &mut Vec<u8>) {}
+        fn apply(&mut self, command: &Self::Command) {
+            match command {
+                CalcCommand::Add(value) => self.value += value,
+                CalcCommand::Sub(value) => self.value -= value,
+            }
+        }
 
-        fn decode(_buf: &[u8]) -> Self {
-            ()
+        fn encode(&self, buf: &mut Vec<u8>) {
+            buf.extend_from_slice(&self.value.to_be_bytes());
+        }
+
+        fn decode(buf: &[u8]) -> Self {
+            let value = i32::from_be_bytes(buf.try_into().expect("i32"));
+            Self { value }
         }
     }
 
-    impl Command for () {
-        fn encode<W: Write>(&self, _writer: W) -> std::io::Result<()> {
-            Ok(())
+    enum CalcCommand {
+        Add(i32),
+        Sub(i32),
+    }
+
+    impl Command for CalcCommand {
+        fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
+            match self {
+                Self::Add(value) => {
+                    writer.write_all(&[0])?;
+                    writer.write_all(&value.to_be_bytes())
+                }
+                Self::Sub(value) => {
+                    writer.write_all(&[1])?;
+                    writer.write_all(&value.to_be_bytes())
+                }
+            }
         }
 
-        fn decode<R: Read>(_reader: R) -> std::io::Result<Self> {
-            Ok(())
+        fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {
+            let mut buf = [0; 5];
+            reader.read_exact(&mut buf[..])?;
+            let value = i32::from_be_bytes(buf[1..].try_into().expect("i32"));
+            match buf[0] {
+                0 => Ok(Self::Add(value)),
+                1 => Ok(Self::Sub(value)),
+                _ => Err(std::io::ErrorKind::InvalidData.into()),
+            }
         }
     }
 
-    type TestRaftNode = RaftNode<()>;
+    type TestRaftNode = RaftNode<Calc>;
 
     #[test]
     fn create_cluster() -> orfail::Result<()> {
@@ -486,6 +520,24 @@ mod tests {
             .join(node0_addr, Some(Duration::from_secs(1)))
             .or_fail()?;
         assert_eq!(node1.node_id(), NodeId::new(1));
+
+        Ok(())
+    }
+
+    #[test]
+    fn propose_command() -> orfail::Result<()> {
+        // let mut node0 = TestRaftNode::new(auto_addr()).or_fail()?;
+        // node0.create_cluster().or_fail()?;
+
+        // let node0_addr = node0.local_addr();
+        // let mut node1 = TestRaftNode::new(auto_addr()).or_fail()?;
+        // node1
+        //     .join(node0_addr, Some(Duration::from_secs(1)))
+        //     .or_fail()?;
+
+        // std::thread::spawn(move || {
+        //     node0.run_while(|| true).expect("node0 aborted");
+        // });
 
         Ok(())
     }
