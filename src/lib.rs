@@ -1,6 +1,7 @@
 use message::{Message, SystemCommand};
 use raftbare::{
-    Action, CommitPromise, LogEntries, LogIndex, LogPosition, Node as BareNode, NodeId, Role,
+    Action, CommitPromise, LogEntries, LogEntry, LogIndex, LogPosition, Node as BareNode, NodeId,
+    Role,
 };
 use rand::Rng;
 use std::{
@@ -41,6 +42,8 @@ pub struct RaftNode<M: Machine> {
 
     join_promise: Option<CommitPromise>, // TODO
 
+    last_applied: LogIndex,
+
     // raft state machine (system)
     next_node_id: NodeId,
     peer_addrs: BTreeMap<NodeId, SocketAddr>,
@@ -64,6 +67,8 @@ impl<M: Machine> RaftNode<M> {
             election_timeout: None,
 
             join_promise: None,
+
+            last_applied: LogIndex::ZERO,
 
             next_node_id: NodeId::new(1),
             peer_addrs: BTreeMap::new(),
@@ -149,10 +154,6 @@ impl<M: Machine> RaftNode<M> {
             self.run_one()?; // TODO
         }
 
-        dbg!(self.node_id());
-        dbg!(self.bare_node.commit_index());
-        dbg!(self.join_promise);
-        dbg!(self.bare_node.log().last_position());
         Err(Error::new(ErrorKind::TimedOut, "join timed out"))
     }
 
@@ -167,8 +168,20 @@ impl<M: Machine> RaftNode<M> {
         Ok(())
     }
 
+    // pub fn take_snapshot(&mut self) -> std::io::Result<()> {} or max_log_size config
+
     fn run_one(&mut self) -> std::io::Result<()> {
         // TODO: propose follower heartbeat command periodically
+
+        for i in self.last_applied.get() + 1..=self.bare_node.commit_index().get() {
+            let i = LogIndex::new(i);
+            let entry = self.bare_node.log().entries().get_entry(i).expect("bug");
+            if matches!(entry, LogEntry::Command) {
+                //
+                todo!("apply command to state machine");
+            }
+            self.last_applied = i;
+        }
 
         let mut recv_buf = [0; 2048];
         while let Some((size, addr)) = maybe_would_block(self.socket.recv_from(&mut recv_buf))? {
@@ -351,7 +364,7 @@ impl<M: Machine> RaftNode<M> {
                 .insert(promise.log_position().index, SystemCommand::User(command));
             promise
         } else {
-            todo!("TODO: remote propose")
+            self.remote_propose_command(command)?
         };
 
         let start_time = Instant::now();
@@ -365,6 +378,11 @@ impl<M: Machine> RaftNode<M> {
         }
 
         Ok(promise.is_accepted())
+    }
+
+    // TODO: timeout
+    fn remote_propose_command(&mut self, command: M::Command) -> std::io::Result<CommitPromise> {
+        todo!()
     }
 
     pub fn sync(&mut self, _timeout: Option<Duration>) -> std::io::Result<bool> {
