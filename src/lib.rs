@@ -5,7 +5,7 @@ use raftbare::{
 };
 use rand::Rng;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{Error, ErrorKind, Read, Write},
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
@@ -68,6 +68,10 @@ pub struct RaftNode<M: Machine> {
     // raft state machine (system)
     next_node_id: NodeId,
     peer_addrs: BTreeMap<NodeId, SocketAddr>,
+
+    // TODO:
+    replies: BTreeMap<(u32, SocketAddr), Message>,
+    recv_replies: BTreeSet<u32>,
 }
 
 impl<M: Machine> RaftNode<M> {
@@ -94,6 +98,9 @@ impl<M: Machine> RaftNode<M> {
 
             next_node_id: NodeId::new(1),
             peer_addrs: BTreeMap::new(),
+
+            replies: BTreeMap::new(),
+            recv_replies: BTreeSet::new(),
         })
     }
 
@@ -205,6 +212,7 @@ impl<M: Machine> RaftNode<M> {
                         self.machine.apply(c);
                         if self.role().is_leader() {
                             // TODO: hearbeat() to sync followers quickly
+                            self.bare_node.heartbeat();
                         }
                     }
                 }
@@ -281,7 +289,10 @@ impl<M: Machine> RaftNode<M> {
                 self.handle_propose_command_call(seqno, from, command)?;
             }
             Message::ProposeCommandReply { seqno, promise } => {
-                let _ = seqno; // TODO: handle
+                if !self.recv_replies.insert(seqno) {
+                    return Ok(());
+                }
+
                 self.propose_promise = Some(promise);
             }
         }
@@ -313,16 +324,20 @@ impl<M: Machine> RaftNode<M> {
             }
         }
 
-        // TODO: seqno check
+        let reply = if let Some(m) = self.replies.get(&(seqno, from)).cloned() {
+            m
+        } else {
+            let command = command.to_typed()?;
+            let promise = self.bare_node.propose_command();
+            assert!(!promise.is_rejected());
+            self.command_log
+                .insert(promise.log_position().index, command);
 
-        let command = command.to_typed()?;
-        let promise = self.bare_node.propose_command();
-        assert!(!promise.is_rejected());
+            let m = Message::ProposeCommandReply { seqno, promise };
+            self.replies.insert((seqno, from), m.clone());
+            m
+        };
 
-        self.command_log
-            .insert(promise.log_position().index, command);
-
-        let reply = Message::ProposeCommandReply { seqno, promise };
         let mut buf = Vec::new();
         reply.encode(&mut buf, &self.command_log)?;
         self.socket.send_to(&buf, from)?;
