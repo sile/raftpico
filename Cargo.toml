@@ -8,6 +8,7 @@ raftbare = "0.1.1"
 rand = "0.8.5"
 
 [dev-dependencies]
+clap = { version = "4.5.16", features = ["derive"] }
 orfail = "1.1.0"
 
 [patch.'crates-io']
