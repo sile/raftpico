@@ -277,9 +277,56 @@ impl<M: Machine> RaftNode<M> {
                 seqno,
                 from,
                 command,
-            } => todo!(),
-            Message::ProposeCommandReply { seqno, promise } => todo!(),
+            } => {
+                self.handle_propose_command_call(seqno, from, command)?;
+            }
+            Message::ProposeCommandReply { seqno, promise } => {
+                let _ = seqno; // TODO: handle
+                self.propose_promise = Some(promise);
+            }
         }
+        Ok(())
+    }
+
+    fn handle_propose_command_call(
+        &mut self,
+        seqno: u32,
+        from: SocketAddr,
+        command: SystemCommand<Vec<u8>>,
+    ) -> std::io::Result<()> {
+        if !self.role().is_leader() {
+            if let Some(maybe_leader) = self.bare_node.voted_for() {
+                // Redirect.
+                let addr = self.peer_addrs.get(&maybe_leader).expect("bug");
+                let msg = Message::ProposeCommandCall {
+                    seqno,
+                    from,
+                    command,
+                };
+
+                let mut buf = Vec::new();
+                msg.encode(&mut buf, &self.command_log)?;
+                self.socket.send_to(&buf, *addr)?;
+                return Ok(());
+            } else {
+                todo!();
+            }
+        }
+
+        // TODO: seqno check
+
+        let command = command.to_typed()?;
+        let promise = self.bare_node.propose_command();
+        assert!(!promise.is_rejected());
+
+        self.command_log
+            .insert(promise.log_position().index, command);
+
+        let reply = Message::ProposeCommandReply { seqno, promise };
+        let mut buf = Vec::new();
+        reply.encode(&mut buf, &self.command_log)?;
+        self.socket.send_to(&buf, from)?;
+
         Ok(())
     }
 

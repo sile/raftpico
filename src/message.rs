@@ -24,6 +24,20 @@ pub enum SystemCommand<C> {
     User(C),
 }
 
+impl SystemCommand<Vec<u8>> {
+    pub fn to_typed<C: Command>(self) -> std::io::Result<SystemCommand<C>> {
+        match self {
+            SystemCommand::AddNode { node_id, addr } => {
+                Ok(SystemCommand::AddNode { node_id, addr })
+            }
+            SystemCommand::User(cmd) => {
+                let cmd = C::decode(&mut cmd.as_slice())?;
+                Ok(SystemCommand::User(cmd))
+            }
+        }
+    }
+}
+
 impl<C: Command> SystemCommand<C> {
     pub fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
         match self {
