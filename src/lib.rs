@@ -58,7 +58,8 @@ pub struct RaftNode<M: Machine> {
     command_log: CommandLog<M::Command>,
     election_timeout: Option<Instant>,
 
-    join_promise: Option<CommitPromise>, // TODO
+    join_promise: Option<CommitPromise>,    // TODO
+    propose_promise: Option<CommitPromise>, // TODO
 
     last_applied: LogIndex,
 
@@ -87,6 +88,7 @@ impl<M: Machine> RaftNode<M> {
             election_timeout: None,
 
             join_promise: None,
+            propose_promise: None,
 
             last_applied: LogIndex::ZERO,
 
@@ -422,7 +424,40 @@ impl<M: Machine> RaftNode<M> {
         command: M::Command,
         timeout: Option<Instant>,
     ) -> std::io::Result<CommitPromise> {
-        todo!()
+        let mut command_buf = Vec::new();
+        command.encode(&mut command_buf)?;
+
+        let msg = Message::ProposeCommandCall {
+            seqno: self.next_seqno(),
+            from: self.local_addr,
+            command: SystemCommand::User(command_buf),
+        };
+        let mut buf = Vec::new(); // TODO: reuse
+        msg.encode(&mut buf, &self.command_log)?;
+
+        while timeout.map_or(true, |timeout| timeout > Instant::now()) {
+            let Some(maybe_leader) = self.bare_node.voted_for() else {
+                std::thread::sleep(Duration::from_millis(5)); // TODO
+                self.run_one()?;
+                continue;
+            };
+
+            let addr = self
+                .peer_addrs
+                .get(&maybe_leader)
+                .copied()
+                .expect("leader addr"); // TODO
+            self.socket.send_to(&buf, addr)?;
+            self.run_one()?;
+
+            if let Some(promise) = self.propose_promise.take() {
+                return Ok(promise);
+            }
+
+            std::thread::sleep(Duration::from_millis(5)); // TODO
+        }
+
+        Err(ErrorKind::TimedOut.into())
     }
 
     pub fn sync(&mut self, _timeout: Option<Duration>) -> std::io::Result<bool> {
@@ -570,12 +605,16 @@ mod tests {
         node2
             .join(node0_addr, Some(Duration::from_secs(1)))
             .expect("join node1 to node0");
-        node2
+        let succeeded = node2
             .propose_command(CalcCommand::Sub(3), Some(Duration::from_secs(1)))
             .expect("propose command");
+        assert!(succeeded);
+        assert_eq!(node2.machine().value, 39);
 
         Ok(())
     }
+
+    // TODO: leave, sync
 
     fn addr(s: &str) -> SocketAddr {
         s.parse().expect("parse addr")

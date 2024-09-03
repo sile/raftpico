@@ -140,7 +140,10 @@ impl Message {
                 writer.write_all(&[MESSAGE_TAG_PROPOSE_COMMAND_CALL])?;
                 writer.write_all(&seqno.to_be_bytes())?;
                 encode_socket_addr(&mut writer, *from)?;
-                command.encode(&mut writer)?;
+
+                let mut buf = Vec::new(); // TODO
+                command.encode(&mut buf)?;
+                buf.encode(&mut writer)?;
             }
             Self::ProposeCommandReply { seqno, promise } => {
                 writer.write_all(&[MESSAGE_TAG_PROPOSE_COMMAND_REPLY])?;
