@@ -16,7 +16,7 @@ pub mod message;
 pub trait Machine: Sized + Default {
     type Command: Command;
 
-    fn apply(&mut self, command: Self::Command);
+    fn apply(&mut self, command: &Self::Command);
 
     fn encode(&self, buf: &mut Vec<u8>);
     fn decode(buf: &[u8]) -> Self;
@@ -177,8 +177,16 @@ impl<M: Machine> RaftNode<M> {
             let i = LogIndex::new(i);
             let entry = self.bare_node.log().entries().get_entry(i).expect("bug");
             if matches!(entry, LogEntry::Command) {
-                //
-                todo!("apply command to state machine");
+                let command = self.command_log.get(&i).expect("bug");
+                match command {
+                    SystemCommand::AddNode { node_id, addr } => {
+                        // TODO:
+                        self.peer_addrs.insert(*node_id, *addr);
+                    }
+                    SystemCommand::User(c) => {
+                        self.machine.apply(c);
+                    }
+                }
             }
             self.last_applied = i;
         }
@@ -407,7 +415,7 @@ mod tests {
     impl Machine for () {
         type Command = ();
 
-        fn apply(&mut self, _command: Self::Command) {}
+        fn apply(&mut self, _command: &Self::Command) {}
 
         fn encode(&self, _buf: &mut Vec<u8>) {}
 
