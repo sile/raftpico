@@ -9,3 +9,6 @@ rand = "0.8.5"
 
 [dev-dependencies]
 orfail = "1.1.0"
+
+[patch.'crates-io']
+raftbare = { path = "../raftbare/" }

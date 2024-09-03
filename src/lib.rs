@@ -147,6 +147,10 @@ impl<M: Machine> RaftNode<M> {
             self.run_one()?; // TODO
         }
 
+        dbg!(self.node_id());
+        dbg!(self.bare_node.commit_index());
+        dbg!(self.join_promise);
+        dbg!(self.bare_node.log().last_position());
         Err(Error::new(ErrorKind::TimedOut, "join timed out"))
     }
 
@@ -165,7 +169,7 @@ impl<M: Machine> RaftNode<M> {
         // TODO: propose follower heartbeat command periodically
 
         let mut recv_buf = [0; 2048];
-        if let Some((size, addr)) = maybe_would_block(self.socket.recv_from(&mut recv_buf))? {
+        while let Some((size, addr)) = maybe_would_block(self.socket.recv_from(&mut recv_buf))? {
             assert!(size >= 5); // seqno (4) + tag (1)
             assert!(size <= 1205); // TODO
 
