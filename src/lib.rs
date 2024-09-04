@@ -430,9 +430,8 @@ impl<M: Machine> RaftNode<M> {
         }
     }
 
-    fn append_log_entries(&mut self, entries: LogEntries) {
-        // todo
-        eprintln!("{:?}", entries);
+    fn append_log_entries(&mut self, _entries: LogEntries) {
+        // TODO: truncate canceled entries
     }
 
     fn set_election_timeout(&mut self) {

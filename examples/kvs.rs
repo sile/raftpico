@@ -1,6 +1,9 @@
 use std::{
     collections::HashMap,
-    io::prelude::{Read, Write},
+    io::{
+        prelude::{Read, Write},
+        Error, ErrorKind,
+    },
     net::SocketAddr,
     time::Duration,
 };
@@ -8,6 +11,7 @@ use std::{
 use clap::Parser;
 use orfail::OrFail;
 use raftpico::{Command, Machine, RaftNode};
+use serde::{Deserialize, Serialize};
 
 const TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -74,15 +78,23 @@ impl Machine for KvsMachine {
     }
 }
 
-#[derive(Debug)]
-enum KvsCommand {}
+#[derive(Debug, Serialize, Deserialize)]
+enum KvsCommand {
+    Put {
+        key: String,
+        value: serde_json::Value,
+    },
+    Delete {
+        key: String,
+    },
+}
 
 impl Command for KvsCommand {
     fn encode<W: Write>(&self, writer: W) -> std::io::Result<()> {
-        todo!()
+        serde_json::to_writer(writer, self).map_err(|e| Error::new(ErrorKind::InvalidData, e))
     }
 
     fn decode<R: Read>(reader: R) -> std::io::Result<Self> {
-        todo!()
+        serde_json::from_reader(reader).map_err(|e| Error::new(ErrorKind::InvalidData, e))
     }
 }
