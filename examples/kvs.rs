@@ -66,26 +66,47 @@ impl Machine for KvsMachine {
     type Command = KvsCommand;
 
     fn apply(&mut self, command: &Self::Command) {
+        match command {
+            KvsCommand::Put { key, value, result } => {
+                let updated = self.kvs.insert(key.clone(), value.clone()).is_some();
+                if let Some(result) = result {
+                    let _ = result.send(updated);
+                }
+            }
+            KvsCommand::Delete { key, result } => {
+                let deleted = self.kvs.remove(key).is_some();
+                if let Some(result) = result {
+                    let _ = result.send(deleted);
+                }
+            }
+        }
+    }
+
+    fn encode<W: Write>(&self, _writer: W) -> std::io::Result<()> {
         todo!()
     }
 
-    fn encode(&self, buf: &mut Vec<u8>) {
-        todo!()
-    }
-
-    fn decode(buf: &[u8]) -> Self {
+    fn decode<R: Read>(_reader: R) -> std::io::Result<Self> {
         todo!()
     }
 }
+
+type ApplyResult<T> = std::sync::mpsc::Sender<T>;
 
 #[derive(Debug, Serialize, Deserialize)]
 enum KvsCommand {
     Put {
         key: String,
         value: serde_json::Value,
+
+        #[serde(default, skip)]
+        result: Option<ApplyResult<bool>>,
     },
     Delete {
         key: String,
+
+        #[serde(default, skip)]
+        result: Option<ApplyResult<bool>>,
     },
 }
 

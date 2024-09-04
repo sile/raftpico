@@ -16,10 +16,11 @@ pub mod message;
 pub trait Machine: Sized + Default {
     type Command: Command;
 
+    // TODO: command: Self::Command
     fn apply(&mut self, command: &Self::Command);
 
-    fn encode(&self, buf: &mut Vec<u8>);
-    fn decode(buf: &[u8]) -> Self;
+    fn encode<W: Write>(&self, writer: W) -> std::io::Result<()>;
+    fn decode<R: Read>(reader: R) -> std::io::Result<Self>;
 }
 
 pub trait Command: Sized {
@@ -55,7 +56,7 @@ pub struct RaftNode<M: Machine> {
     socket: UdpSocket,
     local_addr: SocketAddr,
     seqno: u32,
-    command_log: CommandLog<M::Command>,
+    command_log: CommandLog<M::Command>, // TODO: CommandLog<CommandVec> and manage unapplied_commands
     election_timeout: Option<Instant>,
 
     join_promise: Option<CommitPromise>,    // TODO
@@ -555,13 +556,15 @@ mod tests {
             }
         }
 
-        fn encode(&self, buf: &mut Vec<u8>) {
-            buf.extend_from_slice(&self.value.to_be_bytes());
+        fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
+            writer.write_all(&self.value.to_be_bytes())
         }
 
-        fn decode(buf: &[u8]) -> Self {
-            let value = i32::from_be_bytes(buf.try_into().expect("i32"));
-            Self { value }
+        fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {
+            let mut buf = [0; 4];
+            reader.read_exact(&mut buf[..])?;
+            let value = i32::from_be_bytes(buf);
+            Ok(Self { value })
         }
     }
 
