@@ -2,9 +2,9 @@ use std::{
     collections::HashMap,
     io::{
         prelude::{Read, Write},
-        Error, ErrorKind,
+        BufRead, Error, ErrorKind,
     },
-    net::SocketAddr,
+    net::{SocketAddr, TcpStream},
     time::Duration,
 };
 
@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 const TIMEOUT: Duration = Duration::from_secs(3);
 
+// TODO: struct
 #[derive(Parser)]
 enum Args {
     Run {
@@ -53,8 +54,128 @@ fn run(addr: SocketAddr, init_cluster: bool, join: Option<SocketAddr>) -> orfail
     } else if let Some(contact_addr) = join {
         node.join(contact_addr, Some(TIMEOUT)).or_fail()?;
     }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let listener = std::net::TcpListener::bind(addr).or_fail()?;
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let stream = stream.or_fail().unwrap_or_else(|e| panic!("{e}"));
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                // TODO: write error response if failed
+                handle_client(stream, tx)
+                    .or_fail()
+                    .unwrap_or_else(|e| panic!("{e}"))
+            });
+        }
+    });
+
     node.run_while(|| true).or_fail()?;
     Ok(())
+}
+
+fn handle_client(
+    mut stream: TcpStream,
+    tx: std::sync::mpsc::Sender<KvsCommand>,
+) -> orfail::Result<()> {
+    let reader = std::io::BufReader::new(stream.try_clone().or_fail()?);
+    for line in reader.lines() {
+        let line = line.or_fail()?;
+        let request: JsonRpcRequest = serde_json::from_str(&line).or_fail()?;
+        let (id, result_rx, command) = request.into_command();
+        tx.send(command).or_fail()?;
+
+        let result = result_rx.recv().or_fail()?;
+        let response = JsonRpcOkResponse {
+            jsonrpc: JsonRpcVersion2,
+            result: OldValue { old_value: result },
+            id,
+        };
+        let mut response = serde_json::to_string(&response).or_fail()?;
+        response.push('\n');
+        stream.write_all(response.as_bytes()).or_fail()?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename = "2.0")]
+pub struct JsonRpcVersion2;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RequestId {
+    Number(i64),
+    String(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsonRpcOkResponse {
+    jsonrpc: JsonRpcVersion2,
+    result: OldValue,
+    id: RequestId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OldValue {
+    old_value: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "method", rename_all = "snake_case")]
+pub enum JsonRpcRequest {
+    Put {
+        jsonrpc: JsonRpcVersion2,
+        params: PutParams,
+        id: RequestId,
+    },
+    Delete {
+        jsonrpc: JsonRpcVersion2,
+        params: DeleteParams,
+        id: RequestId,
+    },
+}
+
+impl JsonRpcRequest {
+    pub fn into_command(
+        self,
+    ) -> (
+        RequestId,
+        std::sync::mpsc::Receiver<Option<serde_json::Value>>,
+        KvsCommand,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        match self {
+            JsonRpcRequest::Put { params, id, .. } => (
+                id,
+                rx,
+                KvsCommand::Put {
+                    key: params.key,
+                    value: params.value,
+                    result_tx: Some(tx),
+                },
+            ),
+            JsonRpcRequest::Delete { params, id, .. } => (
+                id,
+                rx,
+                KvsCommand::Delete {
+                    key: params.key,
+                    result_tx: Some(tx),
+                },
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PutParams {
+    pub key: String,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteParams {
+    pub key: String,
 }
 
 #[derive(Debug, Default)]
@@ -67,16 +188,20 @@ impl Machine for KvsMachine {
 
     fn apply(&mut self, command: &Self::Command) {
         match command {
-            KvsCommand::Put { key, value, result } => {
-                let updated = self.kvs.insert(key.clone(), value.clone()).is_some();
-                if let Some(result) = result {
-                    let _ = result.send(updated);
+            KvsCommand::Put {
+                key,
+                value,
+                result_tx,
+            } => {
+                let result = self.kvs.insert(key.clone(), value.clone());
+                if let Some(tx) = result_tx {
+                    let _ = tx.send(result);
                 }
             }
-            KvsCommand::Delete { key, result } => {
-                let deleted = self.kvs.remove(key).is_some();
-                if let Some(result) = result {
-                    let _ = result.send(deleted);
+            KvsCommand::Delete { key, result_tx } => {
+                let result = self.kvs.remove(key);
+                if let Some(tx) = result_tx {
+                    let _ = tx.send(result);
                 }
             }
         }
@@ -91,7 +216,7 @@ impl Machine for KvsMachine {
     }
 }
 
-type ApplyResult<T> = std::sync::mpsc::Sender<T>;
+type ApplyResult = std::sync::mpsc::Sender<Option<serde_json::Value>>;
 
 #[derive(Debug, Serialize, Deserialize)]
 enum KvsCommand {
@@ -100,13 +225,13 @@ enum KvsCommand {
         value: serde_json::Value,
 
         #[serde(default, skip)]
-        result: Option<ApplyResult<bool>>,
+        result_tx: Option<ApplyResult>,
     },
     Delete {
         key: String,
 
         #[serde(default, skip)]
-        result: Option<ApplyResult<bool>>,
+        result_tx: Option<ApplyResult>,
     },
 }
 
