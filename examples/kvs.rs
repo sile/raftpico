@@ -5,6 +5,7 @@ use std::{
         BufRead, Error, ErrorKind,
     },
     net::{SocketAddr, TcpStream},
+    sync::mpsc::RecvTimeoutError,
     time::Duration,
 };
 
@@ -70,7 +71,17 @@ fn run(addr: SocketAddr, init_cluster: bool, join: Option<SocketAddr>) -> orfail
         }
     });
 
-    node.run_while(|| true).or_fail()?;
+    loop {
+        node.run_one().or_fail()?;
+        match rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(command) => {
+                node.propose_command(command, None).or_fail()?;
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
     Ok(())
 }
 
@@ -82,12 +93,13 @@ fn handle_client(
     for line in reader.lines() {
         let line = line.or_fail()?;
         let request: JsonRpcRequest = serde_json::from_str(&line).or_fail()?;
+        dbg!(&request);
         let (id, result_rx, command) = request.into_command();
         tx.send(command).or_fail()?;
 
         let result = result_rx.recv().or_fail()?;
         let response = JsonRpcOkResponse {
-            jsonrpc: JsonRpcVersion2,
+            jsonrpc: JsonRpcVersion::V2,
             result: OldValue { old_value: result },
             id,
         };
@@ -98,9 +110,11 @@ fn handle_client(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename = "2.0")]
-pub struct JsonRpcVersion2;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum JsonRpcVersion {
+    #[serde(rename = "2.0")]
+    V2,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -111,7 +125,7 @@ pub enum RequestId {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcOkResponse {
-    jsonrpc: JsonRpcVersion2,
+    jsonrpc: JsonRpcVersion,
     result: OldValue,
     id: RequestId,
 }
@@ -125,12 +139,12 @@ pub struct OldValue {
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum JsonRpcRequest {
     Put {
-        jsonrpc: JsonRpcVersion2,
+        jsonrpc: JsonRpcVersion,
         params: PutParams,
         id: RequestId,
     },
     Delete {
-        jsonrpc: JsonRpcVersion2,
+        jsonrpc: JsonRpcVersion,
         params: DeleteParams,
         id: RequestId,
     },
@@ -219,7 +233,7 @@ impl Machine for KvsMachine {
 type ApplyResult = std::sync::mpsc::Sender<Option<serde_json::Value>>;
 
 #[derive(Debug, Serialize, Deserialize)]
-enum KvsCommand {
+pub enum KvsCommand {
     Put {
         key: String,
         value: serde_json::Value,

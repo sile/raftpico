@@ -198,7 +198,7 @@ impl<M: Machine> RaftNode<M> {
         Ok(())
     }
 
-    fn run_one(&mut self) -> std::io::Result<()> {
+    pub fn run_one(&mut self) -> std::io::Result<()> {
         for i in self.last_applied.get() + 1..=self.bare_node.commit_index().get() {
             let i = LogIndex::new(i);
             let entry = self.bare_node.log().entries().get_entry(i).expect("bug");
