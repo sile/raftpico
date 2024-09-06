@@ -12,6 +12,7 @@ use std::{
 };
 
 pub mod message;
+pub mod node;
 
 pub trait Machine: Sized + Default {
     type Command: Command;
