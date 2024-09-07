@@ -1,6 +1,11 @@
-use std::{collections::BTreeMap, io::ErrorKind, net::SocketAddr, time::Duration};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    io::ErrorKind,
+    net::SocketAddr,
+    time::Duration,
+};
 
-use jsonlrpc::JsonlStream;
+use jsonlrpc::{JsonRpcVersion, JsonlStream};
 use mio::{
     event::Event,
     net::{TcpListener, TcpStream},
@@ -36,6 +41,8 @@ pub enum ConnectionPhase {
 pub struct Connection {
     stream: JsonlStream<TcpStream>,
     phase: ConnectionPhase,
+    pub is_client: bool,
+    pub ongoing_requests: VecDeque<TaggedMessage>,
 }
 
 impl Connection {
@@ -43,6 +50,8 @@ impl Connection {
         Self {
             stream: JsonlStream::new(stream),
             phase,
+            is_client: phase == ConnectionPhase::Connecting,
+            ongoing_requests: VecDeque::new(),
         }
     }
 }
@@ -57,6 +66,7 @@ pub struct Node<M> {
     events: Option<Events>,
     connections: BTreeMap<Token, Connection>,
     addr_to_token: BTreeMap<SocketAddr, Token>,
+    next_request_id: u64,
 }
 
 impl<M: Machine> Node<M> {
@@ -85,6 +95,7 @@ impl<M: Machine> Node<M> {
             events: Some(events),
             connections: BTreeMap::new(),
             addr_to_token: BTreeMap::new(),
+            next_request_id: 0,
         })
     }
 
@@ -118,6 +129,13 @@ impl<M: Machine> Node<M> {
         &self.machine
     }
 
+    // TODO: priv
+    pub fn next_request_id(&mut self) -> u64 {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        id
+    }
+
     pub fn create_cluster(&mut self) -> bool {
         if self.id() != Self::UNINIT_NODE_ID {
             return false;
@@ -144,14 +162,13 @@ impl<M: Machine> Node<M> {
 
         self.inner = raftbare::Node::start(Self::JOINING_NODE_ID);
 
-        self.send_message(contact_node_addr, &"join")?; // TODO
+        let request = TaggedMessage::join(self.next_request_id(), self.addr());
+        self.send_message(contact_node_addr, request)?; // TODO
+
         Ok(())
     }
 
-    fn send_message<T>(&mut self, dest: SocketAddr, message: &T) -> std::io::Result<()>
-    where
-        T: Serialize,
-    {
+    fn send_message(&mut self, dest: SocketAddr, message: TaggedMessage) -> std::io::Result<()> {
         if !self.addr_to_token.contains_key(&dest) {
             self.connect(dest)?;
         }
@@ -159,13 +176,25 @@ impl<M: Machine> Node<M> {
         let Some(token) = self.addr_to_token.get(&dest).copied() else {
             unreachable!();
         };
-        let Some(connection) = self.connections.get_mut(&token) else {
+        let Some(conn) = self.connections.get_mut(&token) else {
             unreachable!();
         };
 
         // TODO: max buffer size check
         // TODO: error handling
-        let _ = connection.stream.write_object(message);
+        let _ = conn.stream.write_object(&message);
+        if !conn.stream.write_buf().is_empty() {
+            // TODO
+            self.poller.registry().reregister(
+                conn.stream.inner_mut(),
+                token,
+                Interest::WRITABLE,
+            )?;
+        }
+
+        if !message.is_notification() {
+            conn.ongoing_requests.push_back(message);
+        }
 
         Ok(())
     }
@@ -242,6 +271,7 @@ impl<M: Machine> Node<M> {
             would_block(conn.stream.flush().map_err(|e| e.into()))
                 .unwrap_or_else(|e| todo!("{:?}", e));
             if conn.stream.write_buf().is_empty() {
+                // TODO: or deregister?
                 self.poller.registry().reregister(
                     conn.stream.inner_mut(),
                     event.token(),
@@ -251,15 +281,26 @@ impl<M: Machine> Node<M> {
         }
 
         // Read.
-        if let Some(object) = would_block(
-            conn.stream
-                .read_object::<serde_json::Value>()
-                .map_err(|e| e.into()),
-        )
-        .unwrap_or_else(|e| {
-            todo!("{:?}", e);
-        }) {
-            todo!("OBJECT {:?}", object);
+        let message = match conn.ongoing_requests.front() {
+            None => would_block(
+                conn.stream
+                    .read_object::<TaggedMessage>()
+                    .map(Message::Tagged)
+                    .map_err(|e| e.into()),
+            ),
+            Some(TaggedMessage::Join { .. }) => {
+                // TODO: check id
+                would_block(
+                    conn.stream
+                        .read_object::<Response<JoinResult>>()
+                        .map(Message::JoinResponse)
+                        .map_err(|e| e.into()),
+                )
+            }
+        };
+
+        if let Ok(Some(message)) = message {
+            todo!("MESSAGE {:?}", message);
         }
 
         self.connections.insert(event.token(), conn);
@@ -299,6 +340,60 @@ fn would_block<T>(result: std::io::Result<T>) -> std::io::Result<Option<T>> {
         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+// TODO: remove
+#[derive(Debug, Clone)]
+pub enum Message {
+    Tagged(TaggedMessage),
+    JoinResponse(Response<JoinResult>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Response<T> {
+    pub jsonrpc: JsonRpcVersion,
+    pub id: u64,
+    pub result: T,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinResult {
+    pub promise: CommitPromiseObject,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitPromiseObject {
+    pub term: u64,
+    pub index: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "method")]
+pub enum TaggedMessage {
+    Join {
+        jsonrpc: JsonRpcVersion,
+        id: u64,
+        params: JoinParams,
+    },
+}
+
+impl TaggedMessage {
+    pub fn is_notification(&self) -> bool {
+        false
+    }
+
+    pub fn join(id: u64, new_node_addr: SocketAddr) -> Self {
+        Self::Join {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            params: JoinParams { new_node_addr },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinParams {
+    pub new_node_addr: SocketAddr,
 }
 
 #[cfg(test)]
