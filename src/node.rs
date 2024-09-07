@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, io::ErrorKind, net::SocketAddr, time::Duration}
 
 use jsonlrpc::JsonlStream;
 use mio::{
+    event::Event,
     net::{TcpListener, TcpStream},
     Events, Interest, Poll, Token,
 };
@@ -192,10 +193,8 @@ impl<M: Machine> Node<M> {
             did_something = true;
             if event.token() == Self::SERVER_TOKEN {
                 self.handle_listener()?;
-            } else if let Some(stream) = self.connections.remove(&event.token()) {
-                //TODO
-                //   stream.handle_event(event, &mut self.inner);
-                todo!();
+            } else if let Some(connection) = self.connections.remove(&event.token()) {
+                self.handle_connection_event(connection, event)?;
             } else {
                 todo!();
             }
@@ -203,6 +202,68 @@ impl<M: Machine> Node<M> {
 
         self.events = Some(events);
         Ok(did_something)
+    }
+
+    fn handle_connection_event(
+        &mut self,
+        mut conn: Connection,
+        event: &Event,
+    ) -> std::io::Result<()> {
+        match conn.phase {
+            ConnectionPhase::Connecting => {
+                if let Some(e) = conn.stream.inner().take_error().unwrap_or_else(|e| Some(e)) {
+                    // TODO: notify error
+                    eprintln!("Deregister. Error: {:?}", e);
+                    self.poller.registry().deregister(conn.stream.inner_mut())?;
+                    return Ok(());
+                }
+
+                match conn.stream.inner().peer_addr() {
+                    Ok(_) => {
+                        eprintln!("Connected to {:?}", conn.stream.inner().peer_addr()); // TODO
+                        conn.phase = ConnectionPhase::Connected;
+                    }
+                    Err(e) if e.kind() == ErrorKind::NotConnected => {
+                        self.connections.insert(event.token(), conn);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("Deregister2. Error: {:?}", e);
+                        self.poller.registry().deregister(conn.stream.inner_mut())?;
+                        return Ok(());
+                    }
+                }
+            }
+            ConnectionPhase::Connected => {}
+        }
+
+        // Write.
+        if !conn.stream.write_buf().is_empty() {
+            would_block(conn.stream.flush().map_err(|e| e.into()))
+                .unwrap_or_else(|e| todo!("{:?}", e));
+            if conn.stream.write_buf().is_empty() {
+                self.poller.registry().reregister(
+                    conn.stream.inner_mut(),
+                    event.token(),
+                    Interest::READABLE,
+                )?;
+            }
+        }
+
+        // Read.
+        if let Some(object) = would_block(
+            conn.stream
+                .read_object::<serde_json::Value>()
+                .map_err(|e| e.into()),
+        )
+        .unwrap_or_else(|e| {
+            todo!("{:?}", e);
+        }) {
+            todo!("OBJECT {:?}", object);
+        }
+
+        self.connections.insert(event.token(), conn);
+        Ok(())
     }
 
     fn next_token(&self) -> Token {
