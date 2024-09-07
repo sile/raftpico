@@ -4,10 +4,21 @@ use mio::Poll;
 use raftbare::{NodeId, Role};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug)]
+pub struct MachineContext {}
+
+impl MachineContext {
+    pub fn reply<T>(&self, _reply: &T)
+    where
+        T: Serialize,
+    {
+    }
+}
+
 pub trait Machine: Default + Serialize + for<'a> Deserialize<'a> {
     type Command: Serialize + for<'a> Deserialize<'a>;
 
-    fn apply(&mut self, command: Self::Command);
+    fn apply(&mut self, ctx: &MachineContext, command: Self::Command);
 }
 
 #[derive(Debug)]
