@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
+use std::{collections::BTreeMap, io::ErrorKind, net::SocketAddr, time::Duration};
 
 use jsonlrpc::JsonlStream;
 use mio::{
@@ -25,24 +25,49 @@ pub trait Machine: Serialize + for<'a> Deserialize<'a> {
     fn apply(&mut self, ctx: &MachineContext, command: Self::Command);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionPhase {
+    Connecting,
+    Connected,
+}
+
+#[derive(Debug)]
+pub struct Connection {
+    stream: JsonlStream<TcpStream>,
+    phase: ConnectionPhase,
+}
+
+impl Connection {
+    pub fn new(stream: TcpStream, phase: ConnectionPhase) -> Self {
+        Self {
+            stream: JsonlStream::new(stream),
+            phase,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Node<M> {
     inner: raftbare::Node,
     machine: M,
     listener: TcpListener,
+    local_addr: SocketAddr,
     poller: Poll,
     events: Option<Events>,
-    streams: BTreeMap<Token, JsonlStream<TcpStream>>,
+    connections: BTreeMap<Token, Connection>,
+    addr_to_token: BTreeMap<SocketAddr, Token>,
 }
 
 impl<M: Machine> Node<M> {
     pub const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
+    pub const JOINING_NODE_ID: NodeId = NodeId::new(u64::MAX - 1);
 
     const SERVER_TOKEN: Token = Token(0);
 
     // TODO: io result ?
     pub fn new(addr: SocketAddr, machine: M) -> serde_json::Result<Self> {
         let mut listener = TcpListener::bind(addr).map_err(serde_json::Error::io)?;
+        let local_addr = listener.local_addr().map_err(serde_json::Error::io)?;
 
         let poller = Poll::new().map_err(serde_json::Error::io)?;
         let events = Events::with_capacity(256); // TODO: configurable
@@ -54,14 +79,20 @@ impl<M: Machine> Node<M> {
             inner: raftbare::Node::start(Self::UNINIT_NODE_ID),
             machine,
             listener,
+            local_addr,
             poller,
             events: Some(events),
-            streams: BTreeMap::new(),
+            connections: BTreeMap::new(),
+            addr_to_token: BTreeMap::new(),
         })
     }
 
     pub fn id(&self) -> NodeId {
         self.inner.id()
+    }
+
+    pub fn addr(&self) -> SocketAddr {
+        self.local_addr
     }
 
     pub fn role(&self) -> Role {
@@ -100,6 +131,56 @@ impl<M: Machine> Node<M> {
         promise.is_accepted()
     }
 
+    pub fn join(&mut self, contact_node_addr: SocketAddr) -> std::io::Result<()> {
+        if self.id() == Self::JOINING_NODE_ID {
+            return Err(std::io::Error::new(ErrorKind::InvalidInput, "Joining"));
+        } else if self.id() != Self::UNINIT_NODE_ID {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                "Already initialized node",
+            ));
+        }
+
+        self.inner = raftbare::Node::start(Self::JOINING_NODE_ID);
+
+        self.send_message(contact_node_addr, &"join")?; // TODO
+        Ok(())
+    }
+
+    fn send_message<T>(&mut self, dest: SocketAddr, message: &T) -> std::io::Result<()>
+    where
+        T: Serialize,
+    {
+        if !self.addr_to_token.contains_key(&dest) {
+            self.connect(dest)?;
+        }
+
+        let Some(token) = self.addr_to_token.get(&dest).copied() else {
+            unreachable!();
+        };
+        let Some(connection) = self.connections.get_mut(&token) else {
+            unreachable!();
+        };
+
+        // TODO: max buffer size check
+        // TODO: error handling
+        let _ = connection.stream.write_object(message);
+
+        Ok(())
+    }
+
+    fn connect(&mut self, addr: SocketAddr) -> std::io::Result<()> {
+        let mut stream = TcpStream::connect(addr)?;
+        let token = self.next_token();
+        self.poller
+            .registry()
+            .register(&mut stream, token, Interest::WRITABLE)?;
+        self.connections
+            .insert(token, Connection::new(stream, ConnectionPhase::Connecting));
+        self.addr_to_token.insert(addr, token);
+        Ok(())
+    }
+
     pub fn poll_one(&mut self, timeout: Option<Duration>) -> std::io::Result<bool> {
         let Some(mut events) = self.events.take() else {
             todo!();
@@ -111,7 +192,7 @@ impl<M: Machine> Node<M> {
             did_something = true;
             if event.token() == Self::SERVER_TOKEN {
                 self.handle_listener()?;
-            } else if let Some(stream) = self.streams.remove(&event.token()) {
+            } else if let Some(stream) = self.connections.remove(&event.token()) {
                 //TODO
                 //   stream.handle_event(event, &mut self.inner);
                 todo!();
@@ -126,7 +207,7 @@ impl<M: Machine> Node<M> {
 
     fn next_token(&self) -> Token {
         let last = self
-            .streams
+            .connections
             .last_key_value()
             .map(|(k, _)| *k)
             .unwrap_or(Self::SERVER_TOKEN);
@@ -142,11 +223,11 @@ impl<M: Machine> Node<M> {
             self.poller
                 .registry()
                 .register(&mut stream, token, Interest::READABLE)?;
-            let stream = JsonlStream::new(stream);
 
             // TODO: handle initial read
 
-            self.streams.insert(token, stream);
+            self.connections
+                .insert(token, Connection::new(stream, ConnectionPhase::Connected));
         }
     }
 }
@@ -170,6 +251,8 @@ mod tests {
         fn apply(&mut self, _ctx: &MachineContext, _command: Self::Command) {}
     }
 
+    const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(5));
+
     #[test]
     fn create_cluster() -> orfail::Result<()> {
         let mut node = Node::new(auto_addr(), ()).or_fail()?;
@@ -177,6 +260,23 @@ mod tests {
 
         node.create_cluster().or_fail()?;
         assert_eq!(node.id(), NodeId::new(0));
+
+        Ok(())
+    }
+
+    #[test]
+    fn join() -> orfail::Result<()> {
+        let mut node0 = Node::new(auto_addr(), ()).or_fail()?;
+        node0.create_cluster().or_fail()?;
+
+        let mut node1 = Node::new(auto_addr(), ()).or_fail()?;
+        node1.join(node0.addr()).or_fail()?;
+        assert_eq!(node1.id(), Node::<()>::JOINING_NODE_ID);
+
+        while node1.id() == Node::<()>::JOINING_NODE_ID {
+            node0.poll_one(POLL_TIMEOUT).or_fail()?;
+            node1.poll_one(POLL_TIMEOUT).or_fail()?;
+        }
 
         Ok(())
     }
