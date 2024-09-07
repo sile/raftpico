@@ -1,6 +1,10 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
 
-use mio::{net::TcpListener, Events, Interest, Poll, Token};
+use jsonlrpc::JsonlStream;
+use mio::{
+    net::{TcpListener, TcpStream},
+    Events, Interest, Poll, Token,
+};
 use raftbare::{NodeId, Role};
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +32,7 @@ pub struct Node<M> {
     listener: TcpListener,
     poller: Poll,
     events: Option<Events>,
-    next_token: Token,
+    streams: BTreeMap<Token, JsonlStream<TcpStream>>,
 }
 
 impl<M: Machine> Node<M> {
@@ -52,7 +56,7 @@ impl<M: Machine> Node<M> {
             listener,
             poller,
             events: Some(events),
-            next_token: Token(1),
+            streams: BTreeMap::new(),
         })
     }
 
@@ -105,9 +109,14 @@ impl<M: Machine> Node<M> {
 
         for event in events.iter() {
             did_something = true;
-            match event.token() {
-                Self::SERVER_TOKEN => self.handle_listener()?,
-                _ => todo!(),
+            if event.token() == Self::SERVER_TOKEN {
+                self.handle_listener()?;
+            } else if let Some(stream) = self.streams.remove(&event.token()) {
+                //TODO
+                //   stream.handle_event(event, &mut self.inner);
+                todo!();
+            } else {
+                todo!();
             }
         }
 
@@ -115,12 +124,29 @@ impl<M: Machine> Node<M> {
         Ok(did_something)
     }
 
+    fn next_token(&self) -> Token {
+        let last = self
+            .streams
+            .last_key_value()
+            .map(|(k, _)| *k)
+            .unwrap_or(Self::SERVER_TOKEN);
+        Token(last.0 + 1)
+    }
+
     fn handle_listener(&mut self) -> std::io::Result<()> {
         loop {
-            let Some((stream, _addr)) = would_block(self.listener.accept())? else {
+            let Some((mut stream, _addr)) = would_block(self.listener.accept())? else {
                 return Ok(());
             };
-            todo!()
+            let token = self.next_token();
+            self.poller
+                .registry()
+                .register(&mut stream, token, Interest::READABLE)?;
+            let stream = JsonlStream::new(stream);
+
+            // TODO: handle initial read
+
+            self.streams.insert(token, stream);
         }
     }
 }
