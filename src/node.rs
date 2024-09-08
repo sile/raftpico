@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     io::ErrorKind,
+    marker::PhantomData,
     net::SocketAddr,
     time::{Duration, Instant},
 };
@@ -109,15 +110,17 @@ pub struct SystemMachine {
 
 // TODO: RaftClient
 #[derive(Debug, Clone)]
-pub struct NodeHandle {
+pub struct NodeHandle<M> {
     addr: SocketAddr,
-    // TODO: _command: PhantomData<M::Command>,
-    // TODO: _query: PhantomData<M::Query>,
+    _machine: PhantomData<M>,
 }
 
-impl NodeHandle {
+impl<M: Machine> NodeHandle<M> {
     pub fn new(addr: SocketAddr) -> Self {
-        Self { addr }
+        Self {
+            addr,
+            _machine: PhantomData,
+        }
     }
 
     // TODO: return error object instead of false?
@@ -150,6 +153,27 @@ impl NodeHandle {
             jsonrpc: JsonRpcVersion::V2,
             id: RequestId::Number(0),
             params: JoinParams { contact_addr },
+        })?;
+        Ok(response.result)
+    }
+
+    pub fn propose_command<T>(&self, command: M::Command) -> std::io::Result<T>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        let stream = std::net::TcpStream::connect(self.addr)?;
+
+        // TODO:
+        stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+
+        let mut client = RpcClient::new(stream); // TODO: reuse client
+
+        let command = Command::UserCommand(serde_json::to_value(command)?);
+        let response: Response<T> = client.call(&Message::Propose {
+            jsonrpc: JsonRpcVersion::V2,
+            id: RequestId::Number(0),
+            params: ProposeParams { command },
         })?;
         Ok(response.result)
     }
@@ -224,7 +248,7 @@ impl<M: Machine> Node<M> {
         self.local_addr
     }
 
-    pub fn handle(&self) -> NodeHandle {
+    pub fn handle(&self) -> NodeHandle<M> {
         NodeHandle::new(self.addr())
     }
 
@@ -1091,20 +1115,24 @@ impl Caller {
 
 #[cfg(test)]
 mod tests {
+    use rand::seq::SliceRandom;
+
     use super::*;
 
-    impl Machine for () {
-        type Command = ();
+    impl Machine for usize {
+        type Command = usize;
 
-        fn apply(&mut self, _ctx: &MachineContext, _command: Self::Command) {}
+        fn apply(&mut self, _ctx: &MachineContext, command: Self::Command) {
+            *self += command;
+        }
     }
 
     const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(10));
 
     #[test]
     fn create_cluster() {
-        let mut node = Node::new(auto_addr(), ()).expect("Node::new() failed");
-        assert_eq!(node.id(), Node::<()>::UNINIT_NODE_ID);
+        let mut node = Node::new(auto_addr(), 0).expect("Node::new() failed");
+        assert_eq!(node.id(), Node::<usize>::UNINIT_NODE_ID);
 
         let handle = node.handle();
 
@@ -1128,7 +1156,7 @@ mod tests {
 
     #[test]
     fn join() {
-        let mut seed_node = Node::new(auto_addr(), ()).expect("Node::new() failed");
+        let mut seed_node = Node::new(auto_addr(), 0).expect("Node::new() failed");
         let seed_node_addr = seed_node.addr();
         dbg!(seed_node_addr);
         let handle = seed_node.handle();
@@ -1141,7 +1169,7 @@ mod tests {
         let created = handle.create_cluster().expect("create_cluster() failed");
         assert_eq!(created, true);
 
-        let mut node = Node::new(auto_addr(), ()).expect("Node::new() failed");
+        let mut node = Node::new(auto_addr(), 0).expect("Node::new() failed");
         let handle = node.handle();
 
         std::thread::scope(|s| {
@@ -1153,12 +1181,55 @@ mod tests {
                 for _ in 0..200 {
                     node.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
                 }
-                assert_ne!(node.id(), Node::<()>::UNINIT_NODE_ID);
-                assert_ne!(node.id(), Node::<()>::JOINING_NODE_ID);
+                assert_ne!(node.id(), Node::<usize>::UNINIT_NODE_ID);
+                assert_ne!(node.id(), Node::<usize>::JOINING_NODE_ID);
             });
         });
 
         assert_ne!(node.id(), NodeId::new(0));
+    }
+
+    #[test]
+    fn propose_command() {
+        let mut clients = Vec::new();
+
+        let mut node0 = Node::new(auto_addr(), 0).expect("Node::new() failed");
+        let node0_addr = node0.addr();
+        clients.push(node0.handle());
+
+        std::thread::spawn(move || {
+            for _ in 0..200 {
+                node0.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
+            }
+        });
+        let created = clients[0]
+            .create_cluster()
+            .expect("create_cluster() failed");
+        assert_eq!(created, true);
+
+        for _ in 0..2 {
+            let mut node = Node::new(auto_addr(), 0).expect("Node::new() failed");
+            clients.push(node.handle());
+
+            std::thread::spawn(move || {
+                for _ in 0..200 {
+                    node.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
+                }
+            });
+
+            clients
+                .last()
+                .unwrap()
+                .join(node0_addr)
+                .expect("join() failed");
+        }
+
+        let result: usize = clients
+            .choose(&mut rand::thread_rng())
+            .unwrap()
+            .propose_command(3)
+            .expect("propose_command() failed");
+        assert_eq!(result, 3);
     }
 
     fn auto_addr() -> SocketAddr {
