@@ -619,16 +619,19 @@ mod tests {
         assert_eq!(node.id(), Node::<()>::UNINIT_NODE_ID);
 
         let handle = node.handle();
-        std::thread::spawn(move || {
-            let created = handle.create_cluster().unwrap_or_else(|e| {
-                panic!("Error: {e}");
+
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let created = handle.create_cluster().expect("create_cluster() failed");
+                assert_eq!(created, true);
             });
-            assert_eq!(created, true);
+            s.spawn(|| {
+                while node.id() == Node::<()>::UNINIT_NODE_ID {
+                    node.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
+                }
+            });
         });
 
-        while node.id() == Node::<()>::UNINIT_NODE_ID {
-            node.poll_one(POLL_TIMEOUT).or_fail()?;
-        }
         assert_eq!(node.id(), NodeId::new(0));
 
         Ok(())
