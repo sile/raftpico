@@ -11,7 +11,7 @@ use mio::{
     net::{TcpListener, TcpStream},
     Events, Interest, Poll, Token,
 };
-use raftbare::{Action, CommitPromise, LogIndex, Role};
+use raftbare::{Action, CommitPromise, LogIndex, LogPosition, Role};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -96,9 +96,6 @@ pub enum Command {
         id: Option<NodeId>,
         // TODO: Add instance_id(?)
         addr: SocketAddr,
-
-        // TODO: note
-        #[serde(default, skip_serializing)]
         caller: Option<Caller>,
     },
     UserCommand(serde_json::Value),
@@ -178,6 +175,7 @@ pub struct Node<M> {
     election_timeout_time: Option<Instant>,
 
     pending_calls: BTreeMap<RequestId, (Token, RequestId)>,
+    callers: BTreeMap<LogIndex, Caller>,
 }
 
 impl<M: Machine> Node<M> {
@@ -199,6 +197,7 @@ impl<M: Machine> Node<M> {
             .map_err(serde_json::Error::io)?;
         Ok(Self {
             pending_calls: BTreeMap::new(),
+            callers: BTreeMap::new(),
             inner: raftbare::Node::start(Self::UNINIT_NODE_ID.0),
             instance_id: rand::random(),
             machine,
@@ -274,19 +273,14 @@ impl<M: Machine> Node<M> {
         promise
     }
 
-    fn send_message(&mut self, dest: SocketAddr, message: Message) -> std::io::Result<()> {
-        //eprintln!("[{}] Send: {:?} -> {:?} ", self.instance_id, message, dest);
-        if !self.addr_to_token.contains_key(&dest) {
-            self.connect(dest)?;
-        }
-
-        let Some(token) = self.addr_to_token.get(&dest).copied() else {
-            unreachable!();
-        };
+    // TODO:rename
+    fn send_message_by_token<T: Serialize>(
+        &mut self,
+        token: Token,
+        message: &T,
+    ) -> std::io::Result<()> {
         let Some(conn) = self.connections.get_mut(&token) else {
-            dbg!(dest);
             dbg!(token);
-            dbg!(&message);
             unreachable!(); // or TODO
         };
 
@@ -301,6 +295,25 @@ impl<M: Machine> Node<M> {
                 Interest::WRITABLE,
             )?;
         }
+
+        Ok(())
+    }
+
+    fn send_message(&mut self, dest: SocketAddr, message: Message) -> std::io::Result<()> {
+        //eprintln!("[{}] Send: {:?} -> {:?} ", self.instance_id, message, dest);
+        if !self.addr_to_token.contains_key(&dest) {
+            self.connect(dest)?;
+        }
+
+        let Some(token) = self.addr_to_token.get(&dest).copied() else {
+            unreachable!();
+        };
+
+        self.send_message_by_token(token, &message)?;
+
+        let Some(conn) = self.connections.get_mut(&token) else {
+            unreachable!(); // or TODO
+        };
 
         // TODO
         if let Message::Propose { id, params, .. } = message {
@@ -413,14 +426,10 @@ impl<M: Machine> Node<M> {
                     "[{}] apply Join: id={:?}, addr={:?}",
                     self.instance_id, id, addr
                 );
-                let is_initial = id.is_some();
-
-                if caller.is_some() {
-                    todo!();
-                }
+                let is_initial = *id == Some(NodeId::new(0));
 
                 // TODO: addr duplicate check
-                let id = id.clone().unwrap_or(NodeId::new(index.get()));
+                let id = id.clone().expect("bug");
                 self.system_machine.members.insert(*addr, id);
                 self.system_machine.address_table.insert(id, *addr);
                 // if let Some((_addr, token, request_id)) = self.pending_commands.remove(&index) {
@@ -435,6 +444,13 @@ impl<M: Machine> Node<M> {
 
                     // TODO: re propose if leader is changed before committed
                 }
+
+                if let Some(caller) = caller {
+                    if id == self.id() {
+                        let reply = Response::new(caller.request_id.clone(), true);
+                        self.send_message_by_token(caller.token(), &reply)?;
+                    }
+                };
             }
             Command::UserCommand(_) => todo!(),
         }
@@ -467,6 +483,7 @@ impl<M: Machine> Node<M> {
             self.handle_action(action)?;
         }
 
+        // TODO: skip until node id is fixed
         let old_last_applied = self.last_applied;
         while self.last_applied < self.inner.commit_index() {
             let index = LogIndex::new(self.last_applied.get() + 1);
@@ -607,6 +624,15 @@ impl<M: Machine> Node<M> {
     }
 
     fn handle_commit_promise(&mut self, res: Response<CommitPromiseObject>) -> std::io::Result<()> {
+        let promise = res.result.to_promise();
+
+        // TODO: note
+        if self.id() == Self::JOINING_NODE_ID && !promise.is_rejected() {
+            let node_id = raftbare::NodeId::new(promise.log_position().index.get());
+            eprintln!("[{}] Reset node id to {:?}", self.instance_id, node_id);
+            self.inner = raftbare::Node::start(node_id);
+        }
+
         let Some((token, request_id)) = self.pending_calls.remove(&res.id) else {
             // TODO: already disconnected
             return Ok(());
@@ -721,11 +747,20 @@ impl<M: Machine> Node<M> {
         &mut self,
         conn: &mut Connection,
         id: RequestId,
-        ProposeParams { command }: ProposeParams,
+        ProposeParams { mut command }: ProposeParams,
     ) -> std::io::Result<()> {
         if !self.role().is_leader() {
             // TODO: response to redirect to leader
             todo!();
+        }
+
+        if let Command::Join { id, .. } = &mut command {
+            if id.is_none() {
+                // TODO: note
+                *id = Some(NodeId::new(
+                    self.inner.log().last_position().index.get() + 1,
+                ));
+            }
         }
 
         let promise = self.propose_command(command);
@@ -786,16 +821,18 @@ impl<M: Machine> Node<M> {
         self.inner = raftbare::Node::start(Self::JOINING_NODE_ID.0);
 
         let request_id = self.next_request_id();
+
+        let command = Command::Join {
+            id: None,
+            addr: self.addr(),
+
+            // TODO: note about id
+            caller: Some(Caller::new(self.id(), conn.token, todo_request_id.clone())),
+        };
         let msg = Message::Propose {
             jsonrpc: JsonRpcVersion::V2,
             id: request_id.clone(),
-            params: ProposeParams {
-                command: Command::Join {
-                    id: None,
-                    addr: self.addr(),
-                    caller: Some(Caller::new(conn.token, todo_request_id.clone())),
-                },
-            },
+            params: ProposeParams { command },
         };
         self.send_message(contact_addr, msg)?;
 
@@ -880,6 +917,21 @@ pub struct JoinResult {
 pub struct CommitPromiseObject {
     pub term: u64,
     pub index: u64,
+    // TODO: add state?
+}
+
+impl CommitPromiseObject {
+    pub fn to_promise(&self) -> CommitPromise {
+        let position = raftbare::LogPosition {
+            term: raftbare::Term::new(self.term),
+            index: LogIndex::new(self.index),
+        };
+        if position == LogPosition::INVALID {
+            CommitPromise::Rejected(position)
+        } else {
+            CommitPromise::Pending(position)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1018,16 +1070,22 @@ pub struct JoinParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Caller {
+    pub node_id: NodeId,
     pub token: usize,
     pub request_id: RequestId,
 }
 
 impl Caller {
-    pub fn new(token: Token, request_id: RequestId) -> Self {
+    pub fn new(node_id: NodeId, token: Token, request_id: RequestId) -> Self {
         Self {
+            node_id,
             token: token.0,
             request_id,
         }
+    }
+
+    pub fn token(&self) -> Token {
+        Token(self.token)
     }
 }
 
