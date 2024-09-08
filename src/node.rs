@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jsonlrpc::{JsonRpcVersion, JsonlStream};
+use jsonlrpc::{JsonRpcVersion, JsonlStream, Request, RpcClient};
 use mio::{
     event::Event,
     net::{TcpListener, TcpStream},
@@ -95,6 +95,41 @@ pub struct SystemMachine {
     pub members: BTreeMap<SocketAddr, NodeId>,
 }
 
+#[derive(Debug, Clone)]
+pub struct NodeHandle {
+    addr: SocketAddr,
+    // TODO: _command: PhantomData<M::Command>,
+    // TODO: _query: PhantomData<M::Query>,
+}
+
+impl NodeHandle {
+    fn new(addr: SocketAddr) -> Self {
+        Self { addr }
+    }
+
+    pub fn create_cluster(&self) -> std::io::Result<bool> {
+        let stream = std::net::TcpStream::connect(self.addr)?;
+        let mut client = RpcClient::new(stream);
+
+        #[derive(Serialize, Deserialize)]
+        struct Req(Message);
+
+        impl Request for Req {
+            type Response = Response<bool>;
+
+            fn is_notification(&self) -> bool {
+                false
+            }
+        }
+
+        let Some(response) = client.call(&Req(Message::CreateCluster))? else {
+            unreachable!();
+        };
+
+        Ok(response.result)
+    }
+}
+
 #[derive(Debug)]
 pub struct Node<M> {
     inner: raftbare::Node,
@@ -152,6 +187,10 @@ impl<M: Machine> Node<M> {
 
     pub fn addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    pub fn handle(&self) -> NodeHandle {
+        NodeHandle::new(self.addr())
     }
 
     pub fn role(&self) -> Role {
@@ -519,6 +558,7 @@ pub struct CommitPromiseObject {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
 pub enum Message {
+    CreateCluster,
     Join {
         jsonrpc: JsonRpcVersion,
         id: u64,
