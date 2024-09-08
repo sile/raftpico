@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jsonlrpc::{JsonRpcVersion, JsonlStream, Request, RpcClient};
+use jsonlrpc::{JsonRpcVersion, JsonlStream, RpcClient};
 use mio::{
     event::Event,
     net::{TcpListener, TcpStream},
@@ -95,6 +95,7 @@ pub struct SystemMachine {
     pub members: BTreeMap<SocketAddr, NodeId>,
 }
 
+// TODO: RaftClient
 #[derive(Debug, Clone)]
 pub struct NodeHandle {
     addr: SocketAddr,
@@ -111,25 +112,12 @@ impl NodeHandle {
         let stream = std::net::TcpStream::connect(self.addr)?;
         let mut client = RpcClient::new(stream);
 
-        #[derive(Serialize, Deserialize)]
-        struct Req(Message);
-
-        impl Request for Req {
-            type Response = Response<bool>;
-
-            fn is_notification(&self) -> bool {
-                false
-            }
-        }
-
-        let Some(response) = client.call(&Req(Message::CreateCluster))? else {
-            unreachable!();
-        };
-
+        let response: Response<bool> = client.call(&Message::CreateCluster)?;
         Ok(response.result)
     }
 }
 
+// TODO: RaftServer
 #[derive(Debug)]
 pub struct Node<M> {
     inner: raftbare::Node,
@@ -558,7 +546,7 @@ pub struct CommitPromiseObject {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
 pub enum Message {
-    CreateCluster,
+    CreateCluster, // TODO: add options (e.g., election timeout)
     Join {
         jsonrpc: JsonRpcVersion,
         id: u64,
