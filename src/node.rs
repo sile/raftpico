@@ -43,7 +43,7 @@ pub struct Connection {
     stream: JsonlStream<TcpStream>,
     phase: ConnectionPhase,
     pub is_client: bool,
-    pub ongoing_requests: VecDeque<Message>,
+    pub ongoing_proposes: VecDeque<(RequestId, ProposeParams)>,
 }
 
 impl Connection {
@@ -52,7 +52,7 @@ impl Connection {
             stream: JsonlStream::new(stream),
             phase,
             is_client: phase == ConnectionPhase::Connecting,
-            ongoing_requests: VecDeque::new(),
+            ongoing_proposes: VecDeque::new(),
         }
     }
 }
@@ -83,10 +83,13 @@ impl From<NodeId> for u64 {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Command {
-    Join { id: NodeId, addr: SocketAddr },
+    Join {
+        id: Option<NodeId>,
+        addr: SocketAddr,
+    },
     UserCommand(serde_json::Value),
 }
 
@@ -122,6 +125,10 @@ impl NodeHandle {
 
     pub fn join(&self, contact_addr: SocketAddr) -> std::io::Result<bool> {
         let stream = std::net::TcpStream::connect(self.addr)?;
+
+        // TODO:
+        stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+
         let mut client = RpcClient::new(stream); // TODO: reuse client
 
         let response: Response<bool> = client.call(&Message::Join {
@@ -137,6 +144,7 @@ impl NodeHandle {
 #[derive(Debug)]
 pub struct Node<M> {
     inner: raftbare::Node,
+    instance_id: u64,
     machine: M,
     listener: TcpListener,
     local_addr: SocketAddr,
@@ -170,6 +178,7 @@ impl<M: Machine> Node<M> {
             .map_err(serde_json::Error::io)?;
         Ok(Self {
             inner: raftbare::Node::start(Self::UNINIT_NODE_ID.0),
+            instance_id: rand::random(),
             machine,
             listener,
             local_addr,
@@ -220,10 +229,10 @@ impl<M: Machine> Node<M> {
     }
 
     // TODO: priv
-    pub fn next_request_id(&mut self) -> u64 {
+    pub fn next_request_id(&mut self) -> RequestId {
         let id = self.next_request_id;
         self.next_request_id += 1;
-        id
+        RequestId::Number(id as i64) // TODO
     }
 
     fn propose_command(&mut self, command: Command) -> CommitPromise {
@@ -235,67 +244,49 @@ impl<M: Machine> Node<M> {
         promise
     }
 
-    // TODO: delete
-    // pub fn join(&mut self, contact_node_addr: SocketAddr) -> std::io::Result<()> {
-    //     if self.id() == Self::JOINING_NODE_ID {
-    //         return Err(std::io::Error::new(ErrorKind::InvalidInput, "Joining"));
-    //     } else if self.id() != Self::UNINIT_NODE_ID {
-    //         return Err(std::io::Error::new(
-    //             ErrorKind::InvalidInput,
-    //             "Already initialized node",
-    //         ));
-    //     }
+    fn send_message(&mut self, dest: SocketAddr, message: Message) -> std::io::Result<()> {
+        if !self.addr_to_token.contains_key(&dest) {
+            self.connect(dest)?;
+        }
 
-    //     self.inner = raftbare::Node::start(Self::JOINING_NODE_ID.0);
+        let Some(token) = self.addr_to_token.get(&dest).copied() else {
+            unreachable!();
+        };
+        let Some(conn) = self.connections.get_mut(&token) else {
+            unreachable!();
+        };
 
-    //     let request = Message::join(self.next_request_id(), self.addr());
-    //     self.send_message(contact_node_addr, request)?; // TODO
+        // TODO: max buffer size check
+        // TODO: error handling
+        let _ = conn.stream.write_object(&message);
+        if !conn.stream.write_buf().is_empty() {
+            // TODO
+            self.poller.registry().reregister(
+                conn.stream.inner_mut(),
+                token,
+                Interest::WRITABLE,
+            )?;
+        }
 
-    //     Ok(())
-    // }
+        // TODO
+        if let Message::Propose { id, params, .. } = message {
+            conn.ongoing_proposes.push_back((id, params));
+        }
 
-    // fn send_message(&mut self, dest: SocketAddr, message: Message) -> std::io::Result<()> {
-    //     if !self.addr_to_token.contains_key(&dest) {
-    //         self.connect(dest)?;
-    //     }
+        Ok(())
+    }
 
-    //     let Some(token) = self.addr_to_token.get(&dest).copied() else {
-    //         unreachable!();
-    //     };
-    //     let Some(conn) = self.connections.get_mut(&token) else {
-    //         unreachable!();
-    //     };
-
-    //     // TODO: max buffer size check
-    //     // TODO: error handling
-    //     let _ = conn.stream.write_object(&message);
-    //     if !conn.stream.write_buf().is_empty() {
-    //         // TODO
-    //         self.poller.registry().reregister(
-    //             conn.stream.inner_mut(),
-    //             token,
-    //             Interest::WRITABLE,
-    //         )?;
-    //     }
-
-    //     if !message.is_notification() {
-    //         conn.ongoing_requests.push_back(message);
-    //     }
-
-    //     Ok(())
-    // }
-
-    // fn connect(&mut self, addr: SocketAddr) -> std::io::Result<()> {
-    //     let mut stream = TcpStream::connect(addr)?;
-    //     let token = self.next_token();
-    //     self.poller
-    //         .registry()
-    //         .register(&mut stream, token, Interest::WRITABLE)?;
-    //     self.connections
-    //         .insert(token, Connection::new(stream, ConnectionPhase::Connecting));
-    //     self.addr_to_token.insert(addr, token);
-    //     Ok(())
-    // }
+    fn connect(&mut self, addr: SocketAddr) -> std::io::Result<()> {
+        let mut stream = TcpStream::connect(addr)?;
+        let token = self.next_token();
+        self.poller
+            .registry()
+            .register(&mut stream, token, Interest::WRITABLE)?;
+        self.connections
+            .insert(token, Connection::new(stream, ConnectionPhase::Connecting));
+        self.addr_to_token.insert(addr, token);
+        Ok(())
+    }
 
     fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
         match action {
@@ -328,8 +319,9 @@ impl<M: Machine> Node<M> {
         };
         match command {
             Command::Join { id, addr } => {
-                // TODO: addr check
-                self.system_machine.members.insert(*addr, *id);
+                // TODO: addr duplicate check
+                let id = id.clone().unwrap_or(NodeId::new(index.get()));
+                self.system_machine.members.insert(*addr, id);
             }
             Command::UserCommand(_) => todo!(),
         }
@@ -425,36 +417,33 @@ impl<M: Machine> Node<M> {
         }
 
         // Read.
-        let result = match conn.ongoing_requests.front() {
-            None => would_block(conn.stream.read_object::<Message>().map_err(|e| e.into()))
-                .and_then(|m| {
-                    if let Some(m) = m {
-                        self.handle_incoming_message(&mut conn, m)
-                    } else {
-                        Ok(())
-                    }
-                }),
-            Some(Message::CreateCluster { .. }) => todo!(),
-            Some(Message::Join { .. }) => would_block(
-                conn.stream
-                    .read_object::<Response<JoinResult>>()
-                    .map_err(|e| e.into()),
-            )
-            .and_then(|m| {
-                if let Some(m) = m {
-                    self.handle_join_response(&mut conn, m)
-                } else {
-                    Ok(())
+        loop {
+            let result = match conn.ongoing_proposes.front() {
+                None => would_block(conn.stream.read_object::<Message>().map_err(|e| e.into()))
+                    .and_then(|m| {
+                        if let Some(m) = m {
+                            self.handle_incoming_message(&mut conn, m)?;
+                            Ok(true)
+                        } else {
+                            Ok(false)
+                        }
+                    }),
+                Some((id, params)) => {
+                    dbg!(id, params);
+                    todo!();
                 }
-            }),
-        };
+            };
 
-        if let Err(e) = result {
-            eprintln!("Deregister3. Error: {:?}", e); // TODO: maybe result error response object
-            self.poller.registry().deregister(conn.stream.inner_mut())?;
-        } else {
-            self.connections.insert(event.token(), conn);
+            match result {
+                Err(e) => {
+                    eprintln!("Deregister3. Error: {:?}", e); // TODO: maybe result error response object
+                    self.poller.registry().deregister(conn.stream.inner_mut())?;
+                }
+                Ok(false) => break,
+                Ok(true) => {}
+            }
         }
+        self.connections.insert(event.token(), conn);
         Ok(())
     }
 
@@ -465,8 +454,18 @@ impl<M: Machine> Node<M> {
     ) -> std::io::Result<()> {
         match msg {
             Message::CreateCluster { id, .. } => self.handle_create_cluster(conn, id),
-            Message::Join { id, params, .. } => self.handle_join_request(conn, id, params),
+            Message::Join { id, params, .. } => self.handle_join(conn, id, params),
+            Message::Propose { id, params, .. } => self.handle_propose(conn, id, params),
         }
+    }
+
+    fn handle_propose(
+        &mut self,
+        conn: &mut Connection,
+        id: RequestId,
+        params: ProposeParams,
+    ) -> std::io::Result<()> {
+        todo!()
     }
 
     fn handle_create_cluster(
@@ -487,8 +486,8 @@ impl<M: Machine> Node<M> {
         assert!(promise.is_accepted());
 
         let mut promise = self.propose_command(Command::Join {
-            id: node_id,
-            addr: self.local_addr,
+            id: Some(node_id),
+            addr: self.addr(),
         });
         promise.poll(&mut self.inner);
         assert!(promise.is_accepted());
@@ -499,22 +498,36 @@ impl<M: Machine> Node<M> {
         Ok(())
     }
 
-    fn handle_join_request(
+    fn handle_join(
         &mut self,
-        conn: &mut Connection,
-        request_id: RequestId,
-        params: JoinParams,
+        _conn: &mut Connection,
+        _request_id: RequestId,
+        JoinParams { contact_addr }: JoinParams,
     ) -> std::io::Result<()> {
-        // TODO: redirect to leader
-        todo!()
-    }
+        if self.id() == Self::JOINING_NODE_ID {
+            todo!()
+        }
+        if self.id() != Self::UNINIT_NODE_ID {
+            todo!()
+        }
 
-    fn handle_join_response(
-        &mut self,
-        conn: &mut Connection,
-        msg: Response<JoinResult>,
-    ) -> std::io::Result<()> {
-        todo!()
+        self.inner = raftbare::Node::start(Self::JOINING_NODE_ID.0);
+
+        let msg = Message::Propose {
+            jsonrpc: JsonRpcVersion::V2,
+            id: self.next_request_id(),
+            params: ProposeParams {
+                command: Command::Join {
+                    id: None,
+                    addr: self.addr(),
+                },
+            },
+        };
+        self.send_message(contact_addr, msg)?;
+
+        // TODO: handle reply
+
+        Ok(())
     }
 
     fn next_token(&self) -> Token {
@@ -581,7 +594,7 @@ pub struct CommitPromiseObject {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "method")]
+#[serde(tag = "method", rename_all = "snake_case")]
 pub enum Message {
     CreateCluster {
         jsonrpc: JsonRpcVersion,
@@ -593,12 +606,22 @@ pub enum Message {
         id: RequestId,
         params: JoinParams,
     },
+    Propose {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: ProposeParams,
+    },
 }
 
 impl Message {
     pub fn is_notification(&self) -> bool {
         false
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProposeParams {
+    pub command: Command,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -609,7 +632,6 @@ pub struct JoinParams {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orfail::OrFail;
 
     impl Machine for () {
         type Command = ();
@@ -645,7 +667,7 @@ mod tests {
     fn join() {
         let mut seed_node = Node::new(auto_addr(), ()).expect("Node::new() failed");
         let seed_node_addr = seed_node.addr();
-        std::thread::spawn(move || loop {
+        let seed_thread = std::thread::spawn(move || loop {
             seed_node.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
         });
 
@@ -658,7 +680,10 @@ mod tests {
                 assert_eq!(joined, true);
             });
             s.spawn(|| {
-                while node.id() == Node::<()>::UNINIT_NODE_ID {
+                while (node.id() == Node::<()>::UNINIT_NODE_ID
+                    || node.id() == Node::<()>::JOINING_NODE_ID)
+                    && !seed_thread.is_finished()
+                {
                     node.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
                 }
             });

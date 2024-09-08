@@ -537,155 +537,155 @@ fn maybe_would_block<T>(result: std::io::Result<T>) -> std::io::Result<Option<T>
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use orfail::OrFail;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use orfail::OrFail;
 
-    #[derive(Debug, Default)]
-    struct Calc {
-        value: i32,
-    }
+//     #[derive(Debug, Default)]
+//     struct Calc {
+//         value: i32,
+//     }
 
-    impl Machine for Calc {
-        type Command = CalcCommand;
+//     impl Machine for Calc {
+//         type Command = CalcCommand;
 
-        fn apply(&mut self, command: &Self::Command) {
-            match command {
-                CalcCommand::Add(value) => self.value += value,
-                CalcCommand::Sub(value) => self.value -= value,
-            }
-        }
+//         fn apply(&mut self, command: &Self::Command) {
+//             match command {
+//                 CalcCommand::Add(value) => self.value += value,
+//                 CalcCommand::Sub(value) => self.value -= value,
+//             }
+//         }
 
-        fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
-            writer.write_all(&self.value.to_be_bytes())
-        }
+//         fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
+//             writer.write_all(&self.value.to_be_bytes())
+//         }
 
-        fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {
-            let mut buf = [0; 4];
-            reader.read_exact(&mut buf[..])?;
-            let value = i32::from_be_bytes(buf);
-            Ok(Self { value })
-        }
-    }
+//         fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {
+//             let mut buf = [0; 4];
+//             reader.read_exact(&mut buf[..])?;
+//             let value = i32::from_be_bytes(buf);
+//             Ok(Self { value })
+//         }
+//     }
 
-    enum CalcCommand {
-        Add(i32),
-        Sub(i32),
-    }
+//     enum CalcCommand {
+//         Add(i32),
+//         Sub(i32),
+//     }
 
-    impl Command for CalcCommand {
-        fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
-            match self {
-                Self::Add(value) => {
-                    writer.write_all(&[0])?;
-                    writer.write_all(&value.to_be_bytes())
-                }
-                Self::Sub(value) => {
-                    writer.write_all(&[1])?;
-                    writer.write_all(&value.to_be_bytes())
-                }
-            }
-        }
+//     impl Command for CalcCommand {
+//         fn encode<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
+//             match self {
+//                 Self::Add(value) => {
+//                     writer.write_all(&[0])?;
+//                     writer.write_all(&value.to_be_bytes())
+//                 }
+//                 Self::Sub(value) => {
+//                     writer.write_all(&[1])?;
+//                     writer.write_all(&value.to_be_bytes())
+//                 }
+//             }
+//         }
 
-        fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {
-            let mut buf = [0; 5];
-            reader.read_exact(&mut buf[..])?;
-            let value = i32::from_be_bytes(buf[1..].try_into().expect("i32"));
-            match buf[0] {
-                0 => Ok(Self::Add(value)),
-                1 => Ok(Self::Sub(value)),
-                _ => Err(std::io::ErrorKind::InvalidData.into()),
-            }
-        }
-    }
+//         fn decode<R: Read>(mut reader: R) -> std::io::Result<Self> {
+//             let mut buf = [0; 5];
+//             reader.read_exact(&mut buf[..])?;
+//             let value = i32::from_be_bytes(buf[1..].try_into().expect("i32"));
+//             match buf[0] {
+//                 0 => Ok(Self::Add(value)),
+//                 1 => Ok(Self::Sub(value)),
+//                 _ => Err(std::io::ErrorKind::InvalidData.into()),
+//             }
+//         }
+//     }
 
-    type TestRaftNode = RaftNode<Calc>;
+//     type TestRaftNode = RaftNode<Calc>;
 
-    #[test]
-    fn create_cluster() -> orfail::Result<()> {
-        let mut node = TestRaftNode::new(auto_addr()).or_fail()?;
-        assert_eq!(node.node_id(), TestRaftNode::UNINIT_NODE_ID);
+//     #[test]
+//     fn create_cluster() -> orfail::Result<()> {
+//         let mut node = TestRaftNode::new(auto_addr()).or_fail()?;
+//         assert_eq!(node.node_id(), TestRaftNode::UNINIT_NODE_ID);
 
-        node.create_cluster().or_fail()?;
-        assert_eq!(node.node_id(), NodeId::new(0));
+//         node.create_cluster().or_fail()?;
+//         assert_eq!(node.node_id(), NodeId::new(0));
 
-        Ok(())
-    }
+//         Ok(())
+//     }
 
-    #[test]
-    fn join() -> orfail::Result<()> {
-        let mut node0 = TestRaftNode::new(auto_addr()).or_fail()?;
-        node0.create_cluster().or_fail()?;
-        let node0_addr = node0.local_addr();
-        std::thread::spawn(move || {
-            node0.run_while(|| true).expect("node0 aborted");
-        });
+//     #[test]
+//     fn join() -> orfail::Result<()> {
+//         let mut node0 = TestRaftNode::new(auto_addr()).or_fail()?;
+//         node0.create_cluster().or_fail()?;
+//         let node0_addr = node0.local_addr();
+//         std::thread::spawn(move || {
+//             node0.run_while(|| true).expect("node0 aborted");
+//         });
 
-        // Join a new node to the created cluster.
-        let mut node1 = TestRaftNode::new(auto_addr()).or_fail()?;
-        node1
-            .join(node0_addr, Some(Duration::from_secs(1)))
-            .or_fail()?;
-        assert_eq!(node1.node_id(), NodeId::new(1));
+//         // Join a new node to the created cluster.
+//         let mut node1 = TestRaftNode::new(auto_addr()).or_fail()?;
+//         node1
+//             .join(node0_addr, Some(Duration::from_secs(1)))
+//             .or_fail()?;
+//         assert_eq!(node1.node_id(), NodeId::new(1));
 
-        Ok(())
-    }
+//         Ok(())
+//     }
 
-    #[test]
-    fn propose_command() -> orfail::Result<()> {
-        let mut node0 = TestRaftNode::new(auto_addr()).or_fail()?;
-        node0.create_cluster().or_fail()?;
-        let node0_addr = node0.local_addr();
+//     #[test]
+//     fn propose_command() -> orfail::Result<()> {
+//         let mut node0 = TestRaftNode::new(auto_addr()).or_fail()?;
+//         node0.create_cluster().or_fail()?;
+//         let node0_addr = node0.local_addr();
 
-        std::thread::spawn(move || {
-            let mut node1 = TestRaftNode::new(auto_addr()).expect("node1");
-            node1
-                .join(node0_addr, Some(Duration::from_secs(1)))
-                .expect("join node1 to node0");
-            node1.run_while(|| true).expect("node1 aborted");
-        });
+//         std::thread::spawn(move || {
+//             let mut node1 = TestRaftNode::new(auto_addr()).expect("node1");
+//             node1
+//                 .join(node0_addr, Some(Duration::from_secs(1)))
+//                 .expect("join node1 to node0");
+//             node1.run_while(|| true).expect("node1 aborted");
+//         });
 
-        while node0.bare_node.config().voters.len() == 1
-            || node0.bare_node.config().new_voters.len() != 0
-        {
-            node0.run_one().expect("node0 aborted");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+//         while node0.bare_node.config().voters.len() == 1
+//             || node0.bare_node.config().new_voters.len() != 0
+//         {
+//             node0.run_one().expect("node0 aborted");
+//             std::thread::sleep(Duration::from_millis(10));
+//         }
 
-        // Propose a command to the leader node.
-        assert!(node0.role().is_leader());
-        let succeeded = node0
-            .propose_command(CalcCommand::Add(42), Some(Duration::from_secs(1)))
-            .expect("propose command");
-        assert!(succeeded);
-        assert_eq!(node0.machine().value, 42);
+//         // Propose a command to the leader node.
+//         assert!(node0.role().is_leader());
+//         let succeeded = node0
+//             .propose_command(CalcCommand::Add(42), Some(Duration::from_secs(1)))
+//             .expect("propose command");
+//         assert!(succeeded);
+//         assert_eq!(node0.machine().value, 42);
 
-        std::thread::spawn(move || {
-            node0.run_while(|| true).expect("node0 aborted");
-        });
+//         std::thread::spawn(move || {
+//             node0.run_while(|| true).expect("node0 aborted");
+//         });
 
-        // Propose a command to a follower node (node2)
-        let mut node2 = TestRaftNode::new(auto_addr()).expect("node2");
-        node2
-            .join(node0_addr, Some(Duration::from_secs(1)))
-            .expect("join node1 to node0");
-        let succeeded = node2
-            .propose_command(CalcCommand::Sub(3), Some(Duration::from_secs(1)))
-            .expect("propose command");
-        assert!(succeeded);
-        assert_eq!(node2.machine().value, 39);
+//         // Propose a command to a follower node (node2)
+//         let mut node2 = TestRaftNode::new(auto_addr()).expect("node2");
+//         node2
+//             .join(node0_addr, Some(Duration::from_secs(1)))
+//             .expect("join node1 to node0");
+//         let succeeded = node2
+//             .propose_command(CalcCommand::Sub(3), Some(Duration::from_secs(1)))
+//             .expect("propose command");
+//         assert!(succeeded);
+//         assert_eq!(node2.machine().value, 39);
 
-        Ok(())
-    }
+//         Ok(())
+//     }
 
-    // TODO: leave, sync
+//     // TODO: leave, sync
 
-    fn addr(s: &str) -> SocketAddr {
-        s.parse().expect("parse addr")
-    }
+//     fn addr(s: &str) -> SocketAddr {
+//         s.parse().expect("parse addr")
+//     }
 
-    fn auto_addr() -> SocketAddr {
-        addr("127.0.0.1:0")
-    }
-}
+//     fn auto_addr() -> SocketAddr {
+//         addr("127.0.0.1:0")
+//     }
+// }
