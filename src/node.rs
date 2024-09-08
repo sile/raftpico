@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jsonlrpc::{JsonRpcVersion, JsonlStream, RpcClient};
+use jsonlrpc::{JsonRpcVersion, JsonlStream, RequestId, RpcClient};
 use mio::{
     event::Event,
     net::{TcpListener, TcpStream},
@@ -104,15 +104,18 @@ pub struct NodeHandle {
 }
 
 impl NodeHandle {
-    fn new(addr: SocketAddr) -> Self {
+    pub fn new(addr: SocketAddr) -> Self {
         Self { addr }
     }
 
     pub fn create_cluster(&self) -> std::io::Result<bool> {
         let stream = std::net::TcpStream::connect(self.addr)?;
-        let mut client = RpcClient::new(stream);
+        let mut client = RpcClient::new(stream); // TODO: reuse client
 
-        let response: Response<bool> = client.call(&Message::CreateCluster)?;
+        let response: Response<bool> = client.call(&Message::CreateCluster {
+            jsonrpc: JsonRpcVersion::V2,
+            id: RequestId::Number(0),
+        })?;
         Ok(response.result)
     }
 }
@@ -210,30 +213,8 @@ impl<M: Machine> Node<M> {
         id
     }
 
-    pub fn create_cluster(&mut self) -> bool {
-        if self.id() != Self::UNINIT_NODE_ID {
-            return false;
-        }
-
-        let node_id = NodeId::new(0);
-        self.inner = raftbare::Node::start(node_id.0);
-
-        let mut promise = self.inner.create_cluster(&[node_id.0]);
-        promise.poll(&mut self.inner);
-        assert!(promise.is_accepted());
-
-        let mut promise = self.propose_command(Command::Join {
-            id: node_id,
-            addr: self.local_addr,
-        });
-        promise.poll(&mut self.inner);
-        assert!(promise.is_accepted());
-
-        true
-    }
-
     fn propose_command(&mut self, command: Command) -> CommitPromise {
-        let mut promise = self.inner.propose_command();
+        let promise = self.inner.propose_command();
         if !promise.is_rejected() {
             self.command_log
                 .insert(promise.log_position().index, command);
@@ -439,6 +420,7 @@ impl<M: Machine> Node<M> {
                         Ok(())
                     }
                 }),
+            Some(Message::CreateCluster { .. }) => todo!(),
             Some(Message::Join { .. }) => would_block(
                 conn.stream
                     .read_object::<Response<JoinResult>>()
@@ -468,8 +450,39 @@ impl<M: Machine> Node<M> {
         msg: Message,
     ) -> std::io::Result<()> {
         match msg {
+            Message::CreateCluster { id, .. } => self.handle_create_cluster(conn, id),
             Message::Join { id, params, .. } => self.handle_join_request(conn, id, params),
         }
+    }
+
+    fn handle_create_cluster(
+        &mut self,
+        conn: &mut Connection,
+        id: RequestId,
+    ) -> std::io::Result<()> {
+        if self.id() != Self::UNINIT_NODE_ID {
+            // TODO: response false
+            todo!();
+        }
+
+        let node_id = NodeId::new(0);
+        self.inner = raftbare::Node::start(node_id.0);
+
+        let mut promise = self.inner.create_cluster(&[node_id.0]);
+        promise.poll(&mut self.inner);
+        assert!(promise.is_accepted());
+
+        let mut promise = self.propose_command(Command::Join {
+            id: node_id,
+            addr: self.local_addr,
+        });
+        promise.poll(&mut self.inner);
+        assert!(promise.is_accepted());
+
+        let response = Response::new(id, true);
+        conn.stream.write_object(&response)?;
+
+        Ok(())
     }
 
     fn handle_join_request(
@@ -528,8 +541,18 @@ fn would_block<T>(result: std::io::Result<T>) -> std::io::Result<Option<T>> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response<T> {
     pub jsonrpc: JsonRpcVersion,
-    pub id: u64,
+    pub id: RequestId,
     pub result: T,
+}
+
+impl<T> Response<T> {
+    pub fn new(id: RequestId, result: T) -> Self {
+        Self {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            result,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -546,7 +569,11 @@ pub struct CommitPromiseObject {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
 pub enum Message {
-    CreateCluster, // TODO: add options (e.g., election timeout)
+    CreateCluster {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        // TODO: add options (e.g., election timeout)
+    },
     Join {
         jsonrpc: JsonRpcVersion,
         id: u64,
@@ -591,10 +618,18 @@ mod tests {
         let mut node = Node::new(auto_addr(), ()).or_fail()?;
         assert_eq!(node.id(), Node::<()>::UNINIT_NODE_ID);
 
-        node.create_cluster().or_fail()?;
-        assert_eq!(node.id(), NodeId::new(0));
+        let handle = node.handle();
+        std::thread::spawn(move || {
+            let created = handle.create_cluster().unwrap_or_else(|e| {
+                panic!("Error: {e}");
+            });
+            assert_eq!(created, true);
+        });
 
-        node.poll_one(POLL_TIMEOUT).or_fail()?;
+        while node.id() == Node::<()>::UNINIT_NODE_ID {
+            node.poll_one(POLL_TIMEOUT).or_fail()?;
+        }
+        assert_eq!(node.id(), NodeId::new(0));
 
         Ok(())
     }
