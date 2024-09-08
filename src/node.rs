@@ -108,6 +108,7 @@ impl NodeHandle {
         Self { addr }
     }
 
+    // TODO: return error object instead of false?
     pub fn create_cluster(&self) -> std::io::Result<bool> {
         let stream = std::net::TcpStream::connect(self.addr)?;
         let mut client = RpcClient::new(stream); // TODO: reuse client
@@ -115,6 +116,18 @@ impl NodeHandle {
         let response: Response<bool> = client.call(&Message::CreateCluster {
             jsonrpc: JsonRpcVersion::V2,
             id: RequestId::Number(0),
+        })?;
+        Ok(response.result)
+    }
+
+    pub fn join(&self, contact_addr: SocketAddr) -> std::io::Result<bool> {
+        let stream = std::net::TcpStream::connect(self.addr)?;
+        let mut client = RpcClient::new(stream); // TODO: reuse client
+
+        let response: Response<bool> = client.call(&Message::Join {
+            jsonrpc: JsonRpcVersion::V2,
+            id: RequestId::Number(0),
+            params: JoinParams { contact_addr },
         })?;
         Ok(response.result)
     }
@@ -222,66 +235,67 @@ impl<M: Machine> Node<M> {
         promise
     }
 
-    pub fn join(&mut self, contact_node_addr: SocketAddr) -> std::io::Result<()> {
-        if self.id() == Self::JOINING_NODE_ID {
-            return Err(std::io::Error::new(ErrorKind::InvalidInput, "Joining"));
-        } else if self.id() != Self::UNINIT_NODE_ID {
-            return Err(std::io::Error::new(
-                ErrorKind::InvalidInput,
-                "Already initialized node",
-            ));
-        }
+    // TODO: delete
+    // pub fn join(&mut self, contact_node_addr: SocketAddr) -> std::io::Result<()> {
+    //     if self.id() == Self::JOINING_NODE_ID {
+    //         return Err(std::io::Error::new(ErrorKind::InvalidInput, "Joining"));
+    //     } else if self.id() != Self::UNINIT_NODE_ID {
+    //         return Err(std::io::Error::new(
+    //             ErrorKind::InvalidInput,
+    //             "Already initialized node",
+    //         ));
+    //     }
 
-        self.inner = raftbare::Node::start(Self::JOINING_NODE_ID.0);
+    //     self.inner = raftbare::Node::start(Self::JOINING_NODE_ID.0);
 
-        let request = Message::join(self.next_request_id(), self.addr());
-        self.send_message(contact_node_addr, request)?; // TODO
+    //     let request = Message::join(self.next_request_id(), self.addr());
+    //     self.send_message(contact_node_addr, request)?; // TODO
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
-    fn send_message(&mut self, dest: SocketAddr, message: Message) -> std::io::Result<()> {
-        if !self.addr_to_token.contains_key(&dest) {
-            self.connect(dest)?;
-        }
+    // fn send_message(&mut self, dest: SocketAddr, message: Message) -> std::io::Result<()> {
+    //     if !self.addr_to_token.contains_key(&dest) {
+    //         self.connect(dest)?;
+    //     }
 
-        let Some(token) = self.addr_to_token.get(&dest).copied() else {
-            unreachable!();
-        };
-        let Some(conn) = self.connections.get_mut(&token) else {
-            unreachable!();
-        };
+    //     let Some(token) = self.addr_to_token.get(&dest).copied() else {
+    //         unreachable!();
+    //     };
+    //     let Some(conn) = self.connections.get_mut(&token) else {
+    //         unreachable!();
+    //     };
 
-        // TODO: max buffer size check
-        // TODO: error handling
-        let _ = conn.stream.write_object(&message);
-        if !conn.stream.write_buf().is_empty() {
-            // TODO
-            self.poller.registry().reregister(
-                conn.stream.inner_mut(),
-                token,
-                Interest::WRITABLE,
-            )?;
-        }
+    //     // TODO: max buffer size check
+    //     // TODO: error handling
+    //     let _ = conn.stream.write_object(&message);
+    //     if !conn.stream.write_buf().is_empty() {
+    //         // TODO
+    //         self.poller.registry().reregister(
+    //             conn.stream.inner_mut(),
+    //             token,
+    //             Interest::WRITABLE,
+    //         )?;
+    //     }
 
-        if !message.is_notification() {
-            conn.ongoing_requests.push_back(message);
-        }
+    //     if !message.is_notification() {
+    //         conn.ongoing_requests.push_back(message);
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
-    fn connect(&mut self, addr: SocketAddr) -> std::io::Result<()> {
-        let mut stream = TcpStream::connect(addr)?;
-        let token = self.next_token();
-        self.poller
-            .registry()
-            .register(&mut stream, token, Interest::WRITABLE)?;
-        self.connections
-            .insert(token, Connection::new(stream, ConnectionPhase::Connecting));
-        self.addr_to_token.insert(addr, token);
-        Ok(())
-    }
+    // fn connect(&mut self, addr: SocketAddr) -> std::io::Result<()> {
+    //     let mut stream = TcpStream::connect(addr)?;
+    //     let token = self.next_token();
+    //     self.poller
+    //         .registry()
+    //         .register(&mut stream, token, Interest::WRITABLE)?;
+    //     self.connections
+    //         .insert(token, Connection::new(stream, ConnectionPhase::Connecting));
+    //     self.addr_to_token.insert(addr, token);
+    //     Ok(())
+    // }
 
     fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
         match action {
@@ -488,7 +502,7 @@ impl<M: Machine> Node<M> {
     fn handle_join_request(
         &mut self,
         conn: &mut Connection,
-        request_id: u64,
+        request_id: RequestId,
         params: JoinParams,
     ) -> std::io::Result<()> {
         // TODO: redirect to leader
@@ -576,7 +590,7 @@ pub enum Message {
     },
     Join {
         jsonrpc: JsonRpcVersion,
-        id: u64,
+        id: RequestId,
         params: JoinParams,
     },
 }
@@ -585,19 +599,11 @@ impl Message {
     pub fn is_notification(&self) -> bool {
         false
     }
-
-    pub fn join(id: u64, new_node_addr: SocketAddr) -> Self {
-        Self::Join {
-            jsonrpc: JsonRpcVersion::V2,
-            id,
-            params: JoinParams { new_node_addr },
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinParams {
-    pub new_node_addr: SocketAddr,
+    pub contact_addr: SocketAddr,
 }
 
 #[cfg(test)]
@@ -614,8 +620,8 @@ mod tests {
     const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(5));
 
     #[test]
-    fn create_cluster() -> orfail::Result<()> {
-        let mut node = Node::new(auto_addr(), ()).or_fail()?;
+    fn create_cluster() {
+        let mut node = Node::new(auto_addr(), ()).expect("Node::new() failed");
         assert_eq!(node.id(), Node::<()>::UNINIT_NODE_ID);
 
         let handle = node.handle();
@@ -633,26 +639,33 @@ mod tests {
         });
 
         assert_eq!(node.id(), NodeId::new(0));
-
-        Ok(())
     }
 
-    // #[test]
-    // fn join() -> orfail::Result<()> {
-    //     let mut node0 = Node::new(auto_addr(), ()).or_fail()?;
-    //     node0.create_cluster().or_fail()?;
+    #[test]
+    fn join() {
+        let mut seed_node = Node::new(auto_addr(), ()).expect("Node::new() failed");
+        let seed_node_addr = seed_node.addr();
+        std::thread::spawn(move || loop {
+            seed_node.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
+        });
 
-    //     let mut node1 = Node::new(auto_addr(), ()).or_fail()?;
-    //     node1.join(node0.addr()).or_fail()?;
-    //     assert_eq!(node1.id(), Node::<()>::JOINING_NODE_ID);
+        let mut node = Node::new(auto_addr(), ()).expect("Node::new() failed");
+        let handle = node.handle();
 
-    //     while node1.id() == Node::<()>::JOINING_NODE_ID {
-    //         node0.poll_one(POLL_TIMEOUT).or_fail()?;
-    //         node1.poll_one(POLL_TIMEOUT).or_fail()?;
-    //     }
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let joined = handle.join(seed_node_addr).expect("join() failed");
+                assert_eq!(joined, true);
+            });
+            s.spawn(|| {
+                while node.id() == Node::<()>::UNINIT_NODE_ID {
+                    node.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
+                }
+            });
+        });
 
-    //     Ok(())
-    // }
+        assert_ne!(node.id(), NodeId::new(0));
+    }
 
     fn auto_addr() -> SocketAddr {
         addr("127.0.0.1:0")
