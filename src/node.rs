@@ -45,6 +45,8 @@ pub struct Connection {
     addr: SocketAddr,
     token: Token,
     pub is_client: bool, // TODO: remove
+
+    // TODO: btreemap to support concurrent proposes
     pub ongoing_proposes: VecDeque<(RequestId, ProposeParams)>,
 }
 
@@ -101,6 +103,7 @@ pub enum Command {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SystemMachine {
     pub members: BTreeMap<SocketAddr, NodeId>,
+    pub address_table: BTreeMap<NodeId, SocketAddr>,
 }
 
 // TODO: RaftClient
@@ -166,7 +169,6 @@ pub struct Node<M> {
     addr_to_token: BTreeMap<SocketAddr, Token>,
     next_request_id: u64,
     command_log: BTreeMap<LogIndex, Command>,
-    pending_commands: BTreeMap<LogIndex, (SocketAddr, Token, RequestId)>,
     last_applied: LogIndex,
     pub system_machine: SystemMachine, // TODO
     election_timeout_time: Option<Instant>,
@@ -198,7 +200,6 @@ impl<M: Machine> Node<M> {
             poller,
             events: Some(events),
             connections: BTreeMap::new(),
-            pending_commands: BTreeMap::new(),
             max_token_id: Token(1),
             addr_to_token: BTreeMap::new(),
             next_request_id: 0,
@@ -320,10 +321,43 @@ impl<M: Machine> Node<M> {
             Action::SaveCurrentTerm | Action::SaveVotedFor | Action::AppendLogEntries(_) => {
                 // Do nothing as this crate uses in-memory storage.
             }
-            Action::BroadcastMessage(_) => todo!(),
+            Action::BroadcastMessage(m) => self.handle_broadcast_message(m)?,
             Action::SendMessage(_, _) => todo!(),
             Action::InstallSnapshot(_) => todo!(),
         }
+        Ok(())
+    }
+
+    fn handle_broadcast_message(&mut self, msg: raftbare::Message) -> std::io::Result<()> {
+        let msg = match msg {
+            raftbare::Message::RequestVoteCall {
+                header,
+                last_position,
+            } => todo!(),
+            raftbare::Message::RequestVoteReply {
+                header,
+                vote_granted,
+            } => todo!(),
+            raftbare::Message::AppendEntriesCall {
+                header,
+                commit_index,
+                entries,
+            } => Message::new_append_entries_call(header, commit_index, entries, self),
+            raftbare::Message::AppendEntriesReply {
+                header,
+                last_position,
+            } => todo!(),
+        };
+
+        // TODO: remove allocation
+        for peer in self.inner.peers().collect::<Vec<_>>() {
+            let peer = NodeId::new(peer.get());
+            let Some(addr) = self.system_machine.address_table.get(&peer).copied() else {
+                todo!();
+            };
+            self.send_message(addr, msg.clone())?;
+        }
+
         Ok(())
     }
 
@@ -350,17 +384,37 @@ impl<M: Machine> Node<M> {
                     "[{}] apply Join: id={:?}, addr={:?}",
                     self.instance_id, id, addr
                 );
+                let is_initial = id.is_some();
 
                 // TODO: addr duplicate check
                 let id = id.clone().unwrap_or(NodeId::new(index.get()));
                 self.system_machine.members.insert(*addr, id);
-                if let Some((addr, token, request_id)) = self.pending_commands.remove(&index) {
-                    //self.send_message(addr, message)?;
-                    todo!();
+                self.system_machine.address_table.insert(id, *addr);
+                // if let Some((_addr, token, request_id)) = self.pending_commands.remove(&index) {
+                //     let res = Response::new(request_id, true);
+                //     self.reply(token, &res)?;
+                // }
+
+                if !is_initial && self.role().is_leader() {
+                    let new_config = self.inner.config().to_joint_consensus(&[id.0], &[]);
+                    let promise = self.inner.propose_config(new_config);
+                    assert!(!promise.is_rejected()); // TODO: maybe fail here
+
+                    // TODO: re propose if leader is changed before committed
                 }
             }
             Command::UserCommand(_) => todo!(),
         }
+        Ok(())
+    }
+
+    fn reply<T: Serialize>(&mut self, token: Token, res: &T) -> std::io::Result<()> {
+        let Some(conn) = self.connections.get_mut(&token) else {
+            // Already disconnected
+            return Ok(());
+        };
+        let _ = conn.stream.write_object(res);
+        // TODO: remove connection if error
         Ok(())
     }
 
@@ -379,10 +433,17 @@ impl<M: Machine> Node<M> {
         while let Some(action) = self.inner.actions_mut().next() {
             self.handle_action(action)?;
         }
+
+        let old_last_applied = self.last_applied;
         while self.last_applied < self.inner.commit_index() {
             let index = LogIndex::new(self.last_applied.get() + 1);
             self.apply_log_entry(index)?;
             self.last_applied = index;
+        }
+        if old_last_applied != self.last_applied && self.role().is_leader() {
+            // TODO
+            // Quickly sync to followers the latest commit index
+            self.inner.heartbeat();
         }
 
         let Some(mut events) = self.events.take() else {
@@ -470,14 +531,17 @@ impl<M: Machine> Node<M> {
                             Ok(false)
                         }
                     }),
-                Some((_id, _params)) => would_block(
+                Some((expected_id, _params)) => would_block(
                     conn.stream
-                        .read_object::<serde_json::Value>()
+                        .read_object::<Response<bool>>()
                         .map_err(|e| e.into()),
                 )
                 .and_then(|m| {
-                    println!("[{}:{:?}] recv={:?}", self.instance_id, self.id(), m);
-                    if let Some(_) = m {
+                    if let Some(m) = m {
+                        println!("[{}:{:?}] recv={:?}", self.instance_id, self.id(), m);
+                        assert_eq!(m.id, *expected_id);
+                        //self.handle_join_result(&mut conn, m)?;
+
                         todo!();
                     } else {
                         Ok(false)
@@ -513,7 +577,71 @@ impl<M: Machine> Node<M> {
             Message::CreateCluster { id, .. } => self.handle_create_cluster(conn, id),
             Message::Join { id, params, .. } => self.handle_join(conn, id, params),
             Message::Propose { id, params, .. } => self.handle_propose(conn, id, params),
+            Message::Raft { params, .. } => self.handle_raft_message(conn, params),
         }
+    }
+
+    fn handle_raft_message(
+        &mut self,
+        conn: &mut Connection,
+        params: RaftMessageParams,
+    ) -> std::io::Result<()> {
+        match params {
+            RaftMessageParams::AppendEntriesCall {
+                from,
+                term,
+                seqno,
+                commit_index,
+                prev_term,
+                prev_index,
+                entries,
+            } => {
+                let mut raftbare_entries = raftbare::LogEntries::new(raftbare::LogPosition {
+                    term: raftbare::Term::new(prev_term),
+                    index: raftbare::LogIndex::new(prev_index),
+                });
+
+                for (i, entry) in entries.into_iter().enumerate() {
+                    let raftbare_entry = match entry {
+                        LogEntry::Term(t) => raftbare::LogEntry::Term(raftbare::Term::new(t)),
+                        LogEntry::Config { voters, new_voters } => {
+                            let voters = voters
+                                .into_iter()
+                                .map(|x| raftbare::NodeId::new(x.get()))
+                                .collect();
+                            let new_voters = new_voters
+                                .into_iter()
+                                .map(|x| raftbare::NodeId::new(x.get()))
+                                .collect();
+                            raftbare::LogEntry::ClusterConfig(raftbare::ClusterConfig {
+                                voters,
+                                new_voters,
+                                ..Default::default()
+                            })
+                        }
+                        LogEntry::Command(command) => {
+                            let index = LogIndex::new(prev_index + i as u64 + 1);
+                            self.command_log.insert(index, command);
+                            raftbare::LogEntry::Command
+                        }
+                    };
+                    raftbare_entries.push(raftbare_entry);
+                }
+
+                let header = raftbare::MessageHeader {
+                    from: raftbare::NodeId::new(from.get()),
+                    term: raftbare::Term::new(term),
+                    seqno: raftbare::MessageSeqNo::new(seqno),
+                };
+                let msg = raftbare::Message::AppendEntriesCall {
+                    header,
+                    commit_index: LogIndex::new(commit_index),
+                    entries: raftbare_entries,
+                };
+                self.inner.handle_message(msg);
+            }
+        }
+        Ok(())
     }
 
     fn handle_propose(
@@ -529,9 +657,11 @@ impl<M: Machine> Node<M> {
 
         let promise = self.propose_command(command);
 
-        // TODO: reject handling, disconnect handling
-        self.pending_commands
-            .insert(promise.log_position().index, (conn.addr, conn.token, id));
+        // TODO: disconnect handling
+        let _ = conn
+            .stream
+            .write_object(&Response::new_commit_promise(id, promise));
+
         Ok(())
     }
 
@@ -650,6 +780,19 @@ impl<T> Response<T> {
     }
 }
 
+impl Response<CommitPromiseObject> {
+    pub fn new_commit_promise(id: RequestId, promise: CommitPromise) -> Self {
+        Self {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            result: CommitPromiseObject {
+                term: promise.log_position().term.get(),
+                index: promise.log_position().index.get(),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinResult {
     pub promise: CommitPromiseObject,
@@ -679,12 +822,85 @@ pub enum Message {
         id: RequestId,
         params: ProposeParams,
     },
+    Raft {
+        jsonrpc: JsonRpcVersion,
+        params: RaftMessageParams,
+    },
 }
 
 impl Message {
     pub fn is_notification(&self) -> bool {
-        false
+        matches!(self, Self::Raft { .. })
     }
+
+    pub fn new_append_entries_call<M>(
+        header: raftbare::MessageHeader,
+        commit_index: LogIndex,
+        raft_entries: raftbare::LogEntries,
+        node: &Node<M>,
+    ) -> Self {
+        let prev_position = raft_entries.prev_position();
+        let mut entries = Vec::with_capacity(raft_entries.len());
+
+        for (pos, entry) in raft_entries.iter_with_positions() {
+            match entry {
+                raftbare::LogEntry::Term(t) => {
+                    entries.push(LogEntry::Term(t.get()));
+                }
+                raftbare::LogEntry::ClusterConfig(c) => {
+                    entries.push(LogEntry::Config {
+                        voters: c.voters.iter().map(|x| NodeId::new(x.get())).collect(),
+                        new_voters: c.new_voters.iter().map(|x| NodeId::new(x.get())).collect(),
+                    });
+                }
+                raftbare::LogEntry::Command => {
+                    let command = node
+                        .command_log
+                        .get(&pos.index)
+                        .expect("TODO: handle this case (bug or snapshot needed)");
+                    entries.push(LogEntry::Command(command.clone()));
+                }
+            }
+        }
+
+        Self::Raft {
+            jsonrpc: JsonRpcVersion::V2,
+            params: RaftMessageParams::AppendEntriesCall {
+                from: NodeId::new(header.from.get()),
+                term: header.term.get(),
+                seqno: header.seqno.get(),
+                commit_index: commit_index.get(),
+                prev_term: prev_position.term.get(),
+                prev_index: prev_position.index.get(),
+                entries,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RaftMessageParams {
+    AppendEntriesCall {
+        from: NodeId,
+        term: u64,
+        seqno: u64,
+        commit_index: u64,
+        prev_term: u64,
+        prev_index: u64,
+        entries: Vec<LogEntry>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogEntry {
+    Term(u64),
+    Config {
+        voters: Vec<NodeId>,
+        new_voters: Vec<NodeId>,
+    },
+    Command(Command),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
