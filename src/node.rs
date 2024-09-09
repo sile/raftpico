@@ -18,17 +18,28 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
-pub struct MachineContext {}
+pub struct MachineContext {
+    has_caller: bool,
+    result: Option<serde_json::Value>,
+}
 
 impl MachineContext {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(has_caller: bool) -> Self {
+        Self {
+            has_caller,
+            result: None,
+        }
     }
 
-    pub fn reply<T>(&mut self, _reply: &T)
+    pub fn reply<T>(&mut self, reply: &T)
     where
         T: Serialize,
     {
+        if !self.has_caller {
+            return;
+        }
+
+        self.result = Some(serde_json::to_value(reply).expect("TODO"));
     }
 }
 
@@ -542,9 +553,27 @@ impl<M: Machine> Node<M> {
                 };
             }
             Command::UserCommand(command) => {
+                let caller = if self
+                    .pending_promise_queue
+                    .peek()
+                    .map_or(false, |item| item.promise.log_position().index == index)
+                {
+                    let item = self.pending_promise_queue.pop().expect("unreachable");
+                    Some((item.token, item.request_id))
+                } else {
+                    None
+                };
                 let command: M::Command = serde_json::from_value(command.clone()).expect("TODO");
-                let mut ctx = MachineContext::new();
+                let mut ctx = MachineContext::new(caller.is_some());
                 self.machine.apply(&mut ctx, command);
+
+                if let Some(result) = ctx.result {
+                    let Some((token, request_id)) = caller else {
+                        unreachable!();
+                    };
+                    let reply = Response::new(request_id, result);
+                    self.send_message_by_token(token, &reply).expect("TODO");
+                }
             }
         }
         Ok(())
@@ -564,6 +593,17 @@ impl<M: Machine> Node<M> {
 
         while let Some(action) = self.inner.actions_mut().next() {
             self.handle_action(action)?;
+        }
+
+        loop {
+            if let Some(mut item) = self.pending_promise_queue.peek_mut() {
+                if !item.promise.poll(&self.inner).is_rejected() {
+                    break;
+                }
+            } else {
+                break;
+            }
+            self.pending_promise_queue.pop();
         }
 
         // TODO: skip until node id is fixed
@@ -1211,8 +1251,9 @@ mod tests {
     impl Machine for usize {
         type Command = usize;
 
-        fn apply(&mut self, _ctx: &mut MachineContext, command: Self::Command) {
+        fn apply(&mut self, ctx: &mut MachineContext, command: Self::Command) {
             *self += command;
+            ctx.reply(self);
         }
     }
 
