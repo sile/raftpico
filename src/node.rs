@@ -213,11 +213,10 @@ impl<M: Machine> NodeHandle<M> {
         let mut client = RpcClient::new(stream); // TODO: reuse client
 
         // TODO: use another message
-        let command = Command::UserCommand(serde_json::to_value(command)?);
-        let response: Response<T> = client.call(&Message::Propose {
+        let response: Response<T> = client.call(&Message::ProposeUserCommand {
             jsonrpc: JsonRpcVersion::V2,
             id: RequestId::Number(0),
-            params: ProposeParams { command },
+            params: SingleArgParams::new(serde_json::to_value(command)?),
         })?;
         Ok(response.result)
     }
@@ -682,9 +681,21 @@ impl<M: Machine> Node<M> {
         match msg {
             Message::CreateCluster { id, .. } => self.handle_create_cluster(conn, id),
             Message::Join { id, params, .. } => self.handle_join(conn, id, params),
+            Message::ProposeUserCommand { id, params, .. } => {
+                self.handle_propose_user_command(conn, id, params.0 .0)
+            }
             Message::Propose { id, params, .. } => self.handle_remote_propose(conn, id, params),
             Message::Raft { params, .. } => self.handle_raft_message(conn, params),
         }
+    }
+
+    fn handle_propose_user_command(
+        &mut self,
+        conn: &mut Connection<M>,
+        id: RequestId,
+        command: serde_json::Value,
+    ) -> std::io::Result<()> {
+        todo!();
     }
 
     fn handle_raft_message(
@@ -969,8 +980,18 @@ impl CommitPromiseObject {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleArgParams<T>(pub (T,));
+
+impl<T> SingleArgParams<T> {
+    pub fn new(arg: T) -> Self {
+        Self((arg,))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum Message {
+    // API
     CreateCluster {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
@@ -981,6 +1002,13 @@ pub enum Message {
         id: RequestId,
         params: JoinParams,
     },
+    ProposeUserCommand {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: SingleArgParams<serde_json::Value>,
+    },
+
+    // Internals
     Propose {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
