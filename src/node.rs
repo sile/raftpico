@@ -773,6 +773,10 @@ impl<M: Machine> Node<M> {
         command: serde_json::Value,
     ) -> std::io::Result<()> {
         if !self.role().is_leader() {
+            // TODO:
+            // 1. Send internal propose RPC to the leader
+            // 2. Receive the promise from the leader
+            // 3. Enqueue the promise to the pending promise queue
             todo!();
         }
 
@@ -1354,13 +1358,9 @@ mod tests {
                 .expect("join() failed");
         }
 
-        // TODO
-        // let result: usize = clients
-        //     .choose(&mut rand::thread_rng())
-        //     .unwrap()
-        //     .propose_command(3)
-        //     .expect("propose_command() failed");
-        let result: usize = clients[0]
+        let result: usize = clients
+            .choose(&mut rand::thread_rng())
+            .unwrap()
             .propose_command(3)
             .expect("propose_command() failed");
 
