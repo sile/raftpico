@@ -908,7 +908,7 @@ impl<M: Machine> Node<M> {
         let conn = self.connections.get_mut(&token).expect("unreachable");
         conn.async_rpc(
             &mut self.poller,
-            "join",
+            "propose",
             &ProposeParams { command },
             |node, _conn, result| {
                 let params: CommitPromiseObject = serde_json::from_value(result)?;
