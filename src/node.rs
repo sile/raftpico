@@ -235,7 +235,7 @@ pub struct Node<M> {
     connections: BTreeMap<Token, Connection<M>>,
     max_token_id: Token,
     addr_to_token: BTreeMap<SocketAddr, Token>,
-    next_request_id: u64,
+    next_request_id: u64, // TODO: remove
     command_log: BTreeMap<LogIndex, Command>,
     last_applied: LogIndex,
     pub system_machine: SystemMachine, // TODO
@@ -372,15 +372,6 @@ impl<M: Machine> Node<M> {
         };
 
         self.send_message_by_token(token, &message)?;
-
-        let Some(conn) = self.connections.get_mut(&token) else {
-            unreachable!(); // or TODO
-        };
-
-        // TODO
-        // if let Message::Propose { id, params, .. } = message {
-        //     conn.ongoing_proposes.push_back((id, params));
-        // }
 
         Ok(())
     }
@@ -519,16 +510,6 @@ impl<M: Machine> Node<M> {
         Ok(())
     }
 
-    fn reply<T: Serialize>(&mut self, token: Token, res: &T) -> std::io::Result<()> {
-        let Some(conn) = self.connections.get_mut(&token) else {
-            // Already disconnected
-            return Ok(());
-        };
-        let _ = conn.stream.write_object(res);
-        // TODO: remove connection if error
-        Ok(())
-    }
-
     pub fn poll_one(&mut self, timeout: Option<Duration>) -> std::io::Result<bool> {
         // TODO: ajust timeout based on election_timeout_time
 
@@ -639,34 +620,6 @@ impl<M: Machine> Node<M> {
                     .read_object::<serde_json::Value>()
                     .map_err(|e| e.into()),
             );
-            // TODO
-            // let result = match conn.ongoing_proposes.front() {
-            //     None => would_block(conn.stream.read_object::<Message>().map_err(|e| e.into()))
-            //         .and_then(|m| {
-            //             println!("[{}:{:?}] recv={:?}", self.instance_id, self.id(), m);
-            //             if let Some(m) = m {
-            //                 self.handle_incoming_message(&mut conn, m)?;
-            //                 Ok(true)
-            //             } else {
-            //                 Ok(false)
-            //             }
-            //         }),
-            //     Some((expected_id, _params)) => would_block(
-            //         conn.stream
-            //             .read_object::<Response<CommitPromiseObject>>()
-            //             .map_err(|e| e.into()),
-            //     )
-            //     .and_then(|m| {
-            //         if let Some(m) = m {
-            //             println!("[{}:{:?}] recv={:?}", self.instance_id, self.id(), m);
-            //             assert_eq!(m.id, *expected_id);
-            //             self.handle_commit_promise(m)?;
-            //             Ok(true)
-            //         } else {
-            //             Ok(false)
-            //         }
-            //     }),
-            // };
             match result {
                 Err(e) => {
                     eprintln!(
@@ -893,8 +846,6 @@ impl<M: Machine> Node<M> {
         }
 
         self.inner = raftbare::Node::start(Self::JOINING_NODE_ID.0);
-
-        let request_id = self.next_request_id();
 
         let command = Command::Join {
             id: None,
