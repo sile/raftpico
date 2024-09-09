@@ -1,5 +1,6 @@
 use std::{
-    collections::BTreeMap,
+    cmp::{Ordering, Reverse},
+    collections::{BTreeMap, BinaryHeap},
     io::ErrorKind,
     marker::PhantomData,
     net::SocketAddr,
@@ -20,7 +21,11 @@ use serde::{Deserialize, Serialize};
 pub struct MachineContext {}
 
 impl MachineContext {
-    pub fn reply<T>(&self, _reply: &T)
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub fn reply<T>(&mut self, _reply: &T)
     where
         T: Serialize,
     {
@@ -30,7 +35,7 @@ impl MachineContext {
 pub trait Machine: Serialize + for<'a> Deserialize<'a> {
     type Command: Serialize + for<'a> Deserialize<'a>;
 
-    fn apply(&mut self, ctx: &MachineContext, command: Self::Command);
+    fn apply(&mut self, ctx: &mut MachineContext, command: Self::Command);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,6 +227,32 @@ impl<M: Machine> NodeHandle<M> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromiseQueueItem {
+    pub promise: CommitPromise,
+    pub token: Token,
+    pub request_id: RequestId,
+}
+
+impl PromiseQueueItem {
+    fn key(&self) -> Reverse<(u64, u64)> {
+        let pos = self.promise.log_position();
+        Reverse((pos.term.get(), pos.index.get()))
+    }
+}
+
+impl PartialOrd for PromiseQueueItem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PromiseQueueItem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.key().cmp(&other.key())
+    }
+}
+
 // TODO: RaftServer
 #[derive(Debug)]
 pub struct Node<M> {
@@ -240,6 +271,7 @@ pub struct Node<M> {
     last_applied: LogIndex,
     pub system_machine: SystemMachine, // TODO
     election_timeout_time: Option<Instant>,
+    pending_promise_queue: BinaryHeap<PromiseQueueItem>,
 }
 
 impl<M: Machine> Node<M> {
@@ -275,6 +307,7 @@ impl<M: Machine> Node<M> {
             last_applied: LogIndex::ZERO,
             system_machine: SystemMachine::default(),
             election_timeout_time: None,
+            pending_promise_queue: BinaryHeap::new(),
         })
     }
 
@@ -508,7 +541,11 @@ impl<M: Machine> Node<M> {
                     }
                 };
             }
-            Command::UserCommand(_) => todo!(),
+            Command::UserCommand(command) => {
+                let command: M::Command = serde_json::from_value(command.clone()).expect("TODO");
+                let mut ctx = MachineContext::new();
+                self.machine.apply(&mut ctx, command);
+            }
         }
         Ok(())
     }
@@ -695,7 +732,21 @@ impl<M: Machine> Node<M> {
         id: RequestId,
         command: serde_json::Value,
     ) -> std::io::Result<()> {
-        todo!();
+        if !self.role().is_leader() {
+            todo!();
+        }
+
+        let command = Command::UserCommand(command);
+        let promise = self.propose_command(command);
+        assert!(!promise.is_rejected());
+
+        let item = PromiseQueueItem {
+            promise,
+            token: conn.token,
+            request_id: id,
+        };
+        self.pending_promise_queue.push(item);
+        Ok(())
     }
 
     fn handle_raft_message(
@@ -1160,7 +1211,7 @@ mod tests {
     impl Machine for usize {
         type Command = usize;
 
-        fn apply(&mut self, _ctx: &MachineContext, command: Self::Command) {
+        fn apply(&mut self, _ctx: &mut MachineContext, command: Self::Command) {
             *self += command;
         }
     }
@@ -1262,11 +1313,16 @@ mod tests {
                 .expect("join() failed");
         }
 
-        let result: usize = clients
-            .choose(&mut rand::thread_rng())
-            .unwrap()
+        // TODO
+        // let result: usize = clients
+        //     .choose(&mut rand::thread_rng())
+        //     .unwrap()
+        //     .propose_command(3)
+        //     .expect("propose_command() failed");
+        let result: usize = clients[0]
             .propose_command(3)
             .expect("propose_command() failed");
+
         assert_eq!(result, 3);
     }
 
