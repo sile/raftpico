@@ -212,6 +212,7 @@ impl<M: Machine> NodeHandle<M> {
 
         let mut client = RpcClient::new(stream); // TODO: reuse client
 
+        // TODO: use another message
         let command = Command::UserCommand(serde_json::to_value(command)?);
         let response: Response<T> = client.call(&Message::Propose {
             jsonrpc: JsonRpcVersion::V2,
@@ -437,6 +438,7 @@ impl<M: Machine> Node<M> {
         let Some(addr) = self.system_machine.address_table.get(&peer).copied() else {
             todo!();
         };
+        // TODO: drop if write buf is full
         self.send_message(addr, msg.clone())?;
         Ok(())
     }
@@ -450,6 +452,8 @@ impl<M: Machine> Node<M> {
             let Some(addr) = self.system_machine.address_table.get(&peer).copied() else {
                 todo!();
             };
+
+            // TODO: drop if write buf is full
             self.send_message(addr, msg.clone())?;
         }
 
@@ -678,7 +682,7 @@ impl<M: Machine> Node<M> {
         match msg {
             Message::CreateCluster { id, .. } => self.handle_create_cluster(conn, id),
             Message::Join { id, params, .. } => self.handle_join(conn, id, params),
-            Message::Propose { id, params, .. } => self.handle_propose(conn, id, params),
+            Message::Propose { id, params, .. } => self.handle_remote_propose(conn, id, params),
             Message::Raft { params, .. } => self.handle_raft_message(conn, params),
         }
     }
@@ -770,7 +774,7 @@ impl<M: Machine> Node<M> {
         Ok(())
     }
 
-    fn handle_propose(
+    fn handle_remote_propose(
         &mut self,
         conn: &mut Connection<M>,
         id: RequestId,
@@ -855,6 +859,7 @@ impl<M: Machine> Node<M> {
             caller: Some(Caller::new(self.id(), conn.token, todo_request_id.clone())),
         };
 
+        // TODO: error handling
         let token = self.connect(contact_addr)?;
         let conn = self.connections.get_mut(&token).expect("unreachable");
         conn.async_rpc(
@@ -868,17 +873,6 @@ impl<M: Machine> Node<M> {
             },
             || (),
         )?;
-
-        // let msg = Message::Propose {
-        //     jsonrpc: JsonRpcVersion::V2,
-        //     id: request_id.clone(),
-        //     params: ProposeParams { command },
-        // };
-        // self.send_message(contact_addr, msg)?;
-
-        // // TODO: remove entry if disconnected
-        // self.pending_calls
-        //     .insert(request_id, (conn.token, todo_request_id));
 
         Ok(())
     }
@@ -1205,48 +1199,48 @@ mod tests {
         assert_ne!(node.id(), NodeId::new(0));
     }
 
-    // #[test]
-    // fn propose_command() {
-    //     let mut clients = Vec::new();
+    #[test]
+    fn propose_command() {
+        let mut clients = Vec::new();
 
-    //     let mut node0 = Node::new(auto_addr(), 0).expect("Node::new() failed");
-    //     let node0_addr = node0.addr();
-    //     clients.push(node0.handle());
+        let mut node0 = Node::new(auto_addr(), 0).expect("Node::new() failed");
+        let node0_addr = node0.addr();
+        clients.push(node0.handle());
 
-    //     std::thread::spawn(move || {
-    //         for _ in 0..200 {
-    //             node0.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
-    //         }
-    //     });
-    //     let created = clients[0]
-    //         .create_cluster()
-    //         .expect("create_cluster() failed");
-    //     assert_eq!(created, true);
+        std::thread::spawn(move || {
+            for _ in 0..200 {
+                node0.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
+            }
+        });
+        let created = clients[0]
+            .create_cluster()
+            .expect("create_cluster() failed");
+        assert_eq!(created, true);
 
-    //     for _ in 0..2 {
-    //         let mut node = Node::new(auto_addr(), 0).expect("Node::new() failed");
-    //         clients.push(node.handle());
+        for _ in 0..2 {
+            let mut node = Node::new(auto_addr(), 0).expect("Node::new() failed");
+            clients.push(node.handle());
 
-    //         std::thread::spawn(move || {
-    //             for _ in 0..200 {
-    //                 node.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
-    //             }
-    //         });
+            std::thread::spawn(move || {
+                for _ in 0..200 {
+                    node.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
+                }
+            });
 
-    //         clients
-    //             .last()
-    //             .unwrap()
-    //             .join(node0_addr)
-    //             .expect("join() failed");
-    //     }
+            clients
+                .last()
+                .unwrap()
+                .join(node0_addr)
+                .expect("join() failed");
+        }
 
-    //     let result: usize = clients
-    //         .choose(&mut rand::thread_rng())
-    //         .unwrap()
-    //         .propose_command(3)
-    //         .expect("propose_command() failed");
-    //     assert_eq!(result, 3);
-    // }
+        let result: usize = clients
+            .choose(&mut rand::thread_rng())
+            .unwrap()
+            .propose_command(3)
+            .expect("propose_command() failed");
+        assert_eq!(result, 3);
+    }
 
     fn auto_addr() -> SocketAddr {
         addr("127.0.0.1:0")
