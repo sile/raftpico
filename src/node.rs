@@ -158,7 +158,10 @@ pub enum Command {
         addr: SocketAddr,
         caller: Option<Caller>,
     },
-    UserCommand(serde_json::Value),
+    UserCommand {
+        command: serde_json::Value,
+        caller: Caller,
+    },
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -282,7 +285,7 @@ pub struct Node<M> {
     last_applied: LogIndex,
     pub system_machine: SystemMachine, // TODO
     election_timeout_time: Option<Instant>,
-    pending_promise_queue: BinaryHeap<PromiseQueueItem>,
+    pending_promise_queue: BinaryHeap<PromiseQueueItem>, // TODO: remove
 }
 
 impl<M: Machine> Node<M> {
@@ -441,6 +444,8 @@ impl<M: Machine> Node<M> {
             Action::SetElectionTimeout => self.handle_set_election_timeout(),
             Action::SaveCurrentTerm | Action::SaveVotedFor | Action::AppendLogEntries(_) => {
                 // Do nothing as this crate uses in-memory storage.
+
+                // TODO: reject commit log handling (to response to client)
             }
             Action::BroadcastMessage(m) => self.handle_broadcast_message(m)?,
             Action::SendMessage(dest, m) => self.handle_send_message(dest, m)?,
@@ -552,27 +557,26 @@ impl<M: Machine> Node<M> {
                     }
                 };
             }
-            Command::UserCommand(command) => {
-                let caller = if self
-                    .pending_promise_queue
-                    .peek()
-                    .map_or(false, |item| item.promise.log_position().index == index)
-                {
-                    let item = self.pending_promise_queue.pop().expect("unreachable");
-                    Some((item.token, item.request_id))
-                } else {
-                    None
-                };
+            Command::UserCommand { command, caller } => {
+                // TODO
+                // let caller = if self
+                //     .pending_promise_queue
+                //     .peek()
+                //     .map_or(false, |item| item.promise.log_position().index == index)
+                // {
+                //     let item = self.pending_promise_queue.pop().expect("unreachable");
+                //     Some((item.token, item.request_id))
+                // } else {
+                //     None
+                // };
                 let command: M::Command = serde_json::from_value(command.clone()).expect("TODO");
-                let mut ctx = MachineContext::new(caller.is_some());
+                let mut ctx = MachineContext::new(caller.node_id == self.id());
                 self.machine.apply(&mut ctx, command);
 
                 if let Some(result) = ctx.result {
-                    let Some((token, request_id)) = caller else {
-                        unreachable!();
-                    };
-                    let reply = Response::new(request_id, result);
-                    self.send_message_by_token(token, &reply).expect("TODO");
+                    let reply = Response::new(caller.request_id.clone(), result);
+                    self.send_message_by_token(caller.token(), &reply)
+                        .expect("TODO");
                 }
             }
         }
@@ -737,6 +741,7 @@ impl<M: Machine> Node<M> {
         Ok(())
     }
 
+    // TODO: rename
     fn handle_commit_promise(&mut self, promise: CommitPromise) -> std::io::Result<()> {
         // TODO: note
         if self.id() == Self::JOINING_NODE_ID && !promise.is_rejected() {
@@ -772,24 +777,52 @@ impl<M: Machine> Node<M> {
         id: RequestId,
         command: serde_json::Value,
     ) -> std::io::Result<()> {
+        let command = Command::UserCommand {
+            command,
+            caller: Caller::new(self.id(), conn.token, id),
+        };
+
         if !self.role().is_leader() {
-            // TODO:
-            // 1. Send internal propose RPC to the leader
-            // 2. Receive the promise from the leader
-            // 3. Enqueue the promise to the pending promise queue
-            todo!();
+            let Some(maybe_leader) = self.inner.voted_for() else {
+                todo!("reply error");
+            };
+
+            let addr = self
+                .system_machine
+                .address_table
+                .get(&NodeId(maybe_leader))
+                .expect("TODO");
+            let token = self.addr_to_token.get(&addr).expect("TODO");
+            let conn = self.connections.get_mut(token).expect("TODO");
+
+            conn.async_rpc(
+                &mut self.poller,
+                "propose",
+                &ProposeParams { command },
+                |_node, _conn, result| {
+                    let params: CommitPromiseObject = serde_json::from_value(result)?;
+                    let promise = params.to_promise();
+                    if promise.is_rejected() {
+                        todo!();
+                    }
+                    Ok(())
+                },
+                || (),
+            )?;
+
+            return Ok(());
         }
 
-        let command = Command::UserCommand(command);
         let promise = self.propose_command(command);
         assert!(!promise.is_rejected());
 
-        let item = PromiseQueueItem {
-            promise,
-            token: conn.token,
-            request_id: id,
-        };
-        self.pending_promise_queue.push(item);
+        // let item = PromiseQueueItem {
+        //     promise,
+        //     token: conn.token,
+        //     request_id: id,
+        // };
+        // self.pending_promise_queue.push(item);
+
         Ok(())
     }
 
