@@ -699,6 +699,7 @@ impl<M: Machine> Node<M> {
 
         // Read.
         loop {
+            // TODO: batch RPC support
             let result = would_block(
                 conn.stream
                     .read_object::<serde_json::Value>()
