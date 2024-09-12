@@ -1147,6 +1147,7 @@ pub enum Message {
         jsonrpc: JsonRpcVersion,
         params: RaftMessageParams,
     },
+    // TODO: LogStrip { smallest_last_log_index: u64 },
 }
 
 impl Message {
