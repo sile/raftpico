@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use jsonlrpc::{JsonRpcVersion, RequestId, RequestParams};
+use jsonlrpc::{JsonRpcVersion, RequestId};
 use serde::{Deserialize, Serialize};
 
 use crate::command::Command;
@@ -28,12 +28,7 @@ pub enum Request {
     Apply {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
-        params: RequestParams,
-    },
-    Ask {
-        jsonrpc: JsonRpcVersion,
-        id: RequestId,
-        params: RequestParams,
+        params: ApplyParams,
     },
     // TODO: GetMembers, etc
 
@@ -100,4 +95,20 @@ pub struct AskParams {
 
     #[serde(default)]
     pub local: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApplyParams {
+    #[serde(default)]
+    pub kind: ApplyKind,
+    pub args: serde_json::Value,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ApplyKind {
+    #[default]
+    Command,
+    Query,
+    LocalQuery,
 }
