@@ -18,6 +18,11 @@ pub enum Request {
         id: RequestId,
         params: JoinParams,
     },
+    Kick {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: KickParams,
+    },
     Command {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
@@ -33,14 +38,24 @@ pub enum Request {
         id: RequestId,
         params: RequestParams,
     },
-    //
+
     // Internal messages
+    Propose {
+        jsonrpc: JsonRpcVersion,
+        id: u32,
+        params: ProposeParams,
+    },
+    GetSnapshot {
+        jsonrpc: JsonRpcVersion,
+        id: u32,
+    }, //  Raft
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateClusterParams {
     pub min_election_timeout: Seconds,
     pub max_election_timeout: Seconds,
+    // TODO: follower_heartbeat_timeout
 }
 
 // TODO: validate
@@ -70,4 +85,14 @@ impl Seconds {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinParams {
     pub contact_addr: SocketAddr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KickParams {
+    pub target_addr: SocketAddr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProposeParams {
+    // TODO: pub command: Command,
 }
