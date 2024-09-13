@@ -206,7 +206,7 @@ impl<M: Machine> NodeHandle<M> {
 
         let mut client = RpcClient::new(stream); // TODO: reuse client
 
-        let response: Response<bool> = client.call(&Message::CreateCluster {
+        let response: Response<bool> = client.call(&Request::CreateCluster {
             jsonrpc: JsonRpcVersion::V2,
             id: RequestId::Number(0),
         })?;
@@ -222,7 +222,7 @@ impl<M: Machine> NodeHandle<M> {
 
         let mut client = RpcClient::new(stream); // TODO: reuse client
 
-        let response: Response<bool> = client.call(&Message::Join {
+        let response: Response<bool> = client.call(&Request::Join {
             jsonrpc: JsonRpcVersion::V2,
             id: RequestId::Number(0),
             params: JoinParams { contact_addr },
@@ -243,7 +243,7 @@ impl<M: Machine> NodeHandle<M> {
         let mut client = RpcClient::new(stream); // TODO: reuse client
 
         // TODO: use another message
-        let response: Response<T> = client.call(&Message::ProposeUserCommand {
+        let response: Response<T> = client.call(&Request::ProposeUserCommand {
             jsonrpc: JsonRpcVersion::V2,
             id: RequestId::Number(0),
             params: (serde_json::to_value(command)?,),
@@ -419,7 +419,7 @@ impl<M: Machine> Node<M> {
         Ok(())
     }
 
-    fn send_message(&mut self, dest: SocketAddr, message: Message) -> std::io::Result<()> {
+    fn send_message(&mut self, dest: SocketAddr, message: Request) -> std::io::Result<()> {
         //eprintln!("[{}] Send: {:?} -> {:?} ", self.instance_id, message, dest);
         if !self.addr_to_token.contains_key(&dest) {
             self.connect(dest)?;
@@ -465,7 +465,7 @@ impl<M: Machine> Node<M> {
         Ok(())
     }
 
-    fn from_raft_message(&self, msg: raftbare::Message) -> Message {
+    fn from_raft_message(&self, msg: raftbare::Message) -> Request {
         match msg {
             raftbare::Message::RequestVoteCall {
                 header,
@@ -479,11 +479,11 @@ impl<M: Machine> Node<M> {
                 header,
                 commit_index,
                 entries,
-            } => Message::new_append_entries_call(header, commit_index, entries, self),
+            } => Request::new_append_entries_call(header, commit_index, entries, self),
             raftbare::Message::AppendEntriesReply {
                 header,
                 last_position,
-            } => Message::new_append_entries_reply(header, last_position),
+            } => Request::new_append_entries_reply(header, last_position),
         }
     }
 
@@ -740,7 +740,7 @@ impl<M: Machine> Node<M> {
                 Ok(Some(value)) => {
                     let obj = value.as_object().expect("TODO");
                     if obj.contains_key("method") {
-                        let msg: Message = serde_json::from_value(value).expect("TODO");
+                        let msg: Request = serde_json::from_value(value).expect("TODO");
                         self.handle_incoming_message(&mut conn, msg).expect("TODO");
                     } else {
                         let reques_id = obj.get("id").expect("TODO").as_i64().expect("TODO");
@@ -773,16 +773,16 @@ impl<M: Machine> Node<M> {
     fn handle_incoming_message(
         &mut self,
         conn: &mut Connection<M>,
-        msg: Message,
+        msg: Request,
     ) -> std::io::Result<()> {
         match msg {
-            Message::CreateCluster { id, .. } => self.handle_create_cluster(conn, id),
-            Message::Join { id, params, .. } => self.handle_join(conn, id, params),
-            Message::ProposeUserCommand { id, params, .. } => {
+            Request::CreateCluster { id, .. } => self.handle_create_cluster(conn, id),
+            Request::Join { id, params, .. } => self.handle_join(conn, id, params),
+            Request::ProposeUserCommand { id, params, .. } => {
                 self.handle_propose_user_command(conn, id, params.0)
             }
-            Message::Propose { id, params, .. } => self.handle_remote_propose(conn, id, params),
-            Message::Raft { params, .. } => self.handle_raft_message(conn, params),
+            Request::Propose { id, params, .. } => self.handle_remote_propose(conn, id, params),
+            Request::Raft { params, .. } => self.handle_raft_message(conn, params),
         }
     }
 
@@ -1115,7 +1115,7 @@ impl CommitPromiseObject {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
-pub enum Message {
+pub enum Request {
     // API
     CreateCluster {
         jsonrpc: JsonRpcVersion,
@@ -1146,7 +1146,7 @@ pub enum Message {
     // TODO: LogStrip { smallest_last_log_index: u64 },
 }
 
-impl Message {
+impl Request {
     pub fn is_notification(&self) -> bool {
         matches!(self, Self::Raft { .. })
     }
