@@ -25,17 +25,12 @@ pub enum Request {
         id: RequestId,
         params: KickParams,
     },
-    Command {
+    Apply {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         params: RequestParams,
     },
-    Query {
-        jsonrpc: JsonRpcVersion,
-        id: RequestId,
-        params: RequestParams,
-    },
-    LocalQuery {
+    Ask {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         params: RequestParams,
@@ -97,4 +92,12 @@ pub struct KickParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposeParams {
     pub command: Command,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AskParams {
+    pub query: serde_json::Value,
+
+    #[serde(default)]
+    pub local: bool,
 }

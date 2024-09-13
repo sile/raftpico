@@ -7,13 +7,14 @@ use crate::remote_types::{NodeIdDef, TokenDef};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
-    System(SystemCommand),
-    User(serde_json::Value),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SystemCommand {
-    // InstallSnapshot
+    Apply {
+        command: serde_json::Value,
+        caller: RpcCaller,
+    },
+    Ask {
+        query: serde_json::Value,
+        caller: RpcCaller,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
