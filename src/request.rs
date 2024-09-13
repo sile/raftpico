@@ -33,6 +33,7 @@ pub enum Request {
     // TODO: GetMembers, etc
 
     // Internal messages
+    // TODO: Handshake
     Propose {
         jsonrpc: JsonRpcVersion,
         id: u32,
