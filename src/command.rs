@@ -11,10 +11,9 @@ pub enum Command {
         command: serde_json::Value,
         caller: RpcCaller,
     },
-    Ask {
-        query: serde_json::Value,
-        caller: RpcCaller,
-    },
+
+    // Note that this is merged if there are concurrent apply and ask commands
+    Ask,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
