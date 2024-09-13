@@ -3,6 +3,8 @@ use std::net::SocketAddr;
 use jsonlrpc::{JsonRpcVersion, RequestId, RequestParams};
 use serde::{Deserialize, Serialize};
 
+use crate::command::Command;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
 pub enum Request {
@@ -38,6 +40,7 @@ pub enum Request {
         id: RequestId,
         params: RequestParams,
     },
+    // TODO: GetMembers, etc
 
     // Internal messages
     Propose {
@@ -55,7 +58,6 @@ pub enum Request {
 pub struct CreateClusterParams {
     pub min_election_timeout: Seconds,
     pub max_election_timeout: Seconds,
-    // TODO: follower_heartbeat_timeout
 }
 
 // TODO: validate
@@ -94,5 +96,5 @@ pub struct KickParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposeParams {
-    // TODO: pub command: Command,
+    pub command: Command,
 }
