@@ -13,11 +13,14 @@ use mio::{
     net::{TcpListener, TcpStream},
     Events, Interest, Poll, Token,
 };
-use raftbare::{Action, CommitPromise, LogIndex, LogPosition, Role};
+use raftbare::{Action, CommitPromise, LogIndex, LogPosition, NodeId, Role};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::request::JoinParams;
+use crate::{
+    remote_types::{NodeIdDef, NodeIds},
+    request::JoinParams,
+};
 
 #[derive(Debug)]
 pub struct MachineContext {
@@ -125,37 +128,12 @@ pub type OnSuccess<M> =
     fn(&mut Node<M>, &mut Connection<M>, result: serde_json::Value) -> std::io::Result<()>;
 pub type OnFailure = fn() -> ();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(from = "u64", into = "u64")]
-pub struct NodeId(raftbare::NodeId);
-
-impl NodeId {
-    pub const fn new(id: u64) -> Self {
-        Self(raftbare::NodeId::new(id))
-    }
-
-    pub const fn get(self) -> u64 {
-        self.0.get()
-    }
-}
-
-impl From<u64> for NodeId {
-    fn from(id: u64) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<NodeId> for u64 {
-    fn from(id: NodeId) -> Self {
-        id.get()
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Command {
     Join {
-        id: Option<NodeId>,
+        #[serde(with = "NodeIdDef")]
+        id: NodeId,
         // TODO: Add instance_id(?)
         addr: SocketAddr,
         caller: Option<Caller>,
@@ -166,10 +144,45 @@ pub enum Command {
     },
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(into = "SystemMachineMin", from = "SystemMachineMin")]
 pub struct SystemMachine {
     pub members: BTreeMap<SocketAddr, NodeId>,
     pub address_table: BTreeMap<NodeId, SocketAddr>,
+}
+
+impl From<SystemMachineMin> for SystemMachine {
+    fn from(min: SystemMachineMin) -> Self {
+        let mut members = BTreeMap::new();
+        let mut address_table = BTreeMap::new();
+        for (addr, id) in min.members {
+            let id = NodeId::new(id);
+            members.insert(addr, id);
+            address_table.insert(id, addr);
+        }
+
+        Self {
+            members,
+            address_table,
+        }
+    }
+}
+
+impl From<SystemMachine> for SystemMachineMin {
+    fn from(sys: SystemMachine) -> Self {
+        let members = sys
+            .members
+            .into_iter()
+            .map(|(addr, id)| (addr, id.get()))
+            .collect();
+        Self { members }
+    }
+}
+
+// TODO: rename
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SystemMachineMin {
+    pub members: Vec<(SocketAddr, u64)>,
 }
 
 // TODO: RaftClient
@@ -308,7 +321,7 @@ impl<M: Machine> Node<M> {
             .register(&mut listener, Self::SERVER_TOKEN, Interest::READABLE)
             .map_err(serde_json::Error::io)?;
         Ok(Self {
-            inner: raftbare::Node::start(Self::UNINIT_NODE_ID.0),
+            inner: raftbare::Node::start(Self::UNINIT_NODE_ID),
             instance_id: rand::random(),
             machine,
             listener,
@@ -533,10 +546,13 @@ impl<M: Machine> Node<M> {
                     "[{}] apply Join: id={:?}, addr={:?}",
                     self.instance_id, id, addr
                 );
-                let is_initial = *id == Some(NodeId::new(0));
+                let is_initial = *id == NodeId::new(0);
 
                 // TODO: addr duplicate check
-                let id = id.clone().expect("bug");
+                let id = *id;
+                if id == Self::UNINIT_NODE_ID {
+                    todo!("bug");
+                }
                 self.system_machine.members.insert(*addr, id);
                 self.system_machine.address_table.insert(id, *addr);
                 // if let Some((_addr, token, request_id)) = self.pending_commands.remove(&index) {
@@ -545,7 +561,7 @@ impl<M: Machine> Node<M> {
                 // }
 
                 if !is_initial && self.role().is_leader() {
-                    let new_config = self.inner.config().to_joint_consensus(&[id.0], &[]);
+                    let new_config = self.inner.config().to_joint_consensus(&[id], &[]);
                     let promise = self.inner.propose_config(new_config);
                     assert!(!promise.is_rejected()); // TODO: maybe fail here
 
@@ -793,7 +809,7 @@ impl<M: Machine> Node<M> {
             let addr = self
                 .system_machine
                 .address_table
-                .get(&NodeId(maybe_leader))
+                .get(&maybe_leader)
                 .expect("TODO");
             let token = self.addr_to_token.get(&addr).expect("TODO");
             let conn = self.connections.get_mut(token).expect("TODO");
@@ -928,11 +944,8 @@ impl<M: Machine> Node<M> {
         }
 
         if let Command::Join { id, .. } = &mut command {
-            if id.is_none() {
-                // TODO: note
-                *id = Some(NodeId::new(
-                    self.inner.log().last_position().index.get() + 1,
-                ));
+            if *id == Self::UNINIT_NODE_ID {
+                *id = NodeId::new(self.inner.log().last_position().index.get() + 1);
             }
         }
 
@@ -958,14 +971,14 @@ impl<M: Machine> Node<M> {
         }
 
         let node_id = NodeId::new(0);
-        self.inner = raftbare::Node::start(node_id.0);
+        self.inner = raftbare::Node::start(node_id);
 
-        let mut promise = self.inner.create_cluster(&[node_id.0]);
+        let mut promise = self.inner.create_cluster(&[node_id]);
         promise.poll(&mut self.inner);
         assert!(promise.is_accepted());
 
         let mut promise = self.propose_command(Command::Join {
-            id: Some(node_id),
+            id: node_id,
             addr: self.addr(),
             caller: None,
         });
@@ -991,10 +1004,10 @@ impl<M: Machine> Node<M> {
             todo!()
         }
 
-        self.inner = raftbare::Node::start(Self::JOINING_NODE_ID.0);
+        self.inner = raftbare::Node::start(Self::JOINING_NODE_ID);
 
         let command = Command::Join {
-            id: None,
+            id: Self::UNINIT_NODE_ID,
             addr: self.addr(),
 
             // TODO: note about id
@@ -1180,8 +1193,8 @@ impl Message {
                 }
                 raftbare::LogEntry::ClusterConfig(c) => {
                     entries.push(LogEntry::Config {
-                        voters: c.voters.iter().map(|x| NodeId::new(x.get())).collect(),
-                        new_voters: c.new_voters.iter().map(|x| NodeId::new(x.get())).collect(),
+                        voters: c.voters.iter().copied().collect(),
+                        new_voters: c.new_voters.iter().copied().collect(),
                     });
                 }
                 raftbare::LogEntry::Command => {
@@ -1214,6 +1227,7 @@ impl Message {
 #[serde(rename_all = "snake_case")]
 pub enum RaftMessageParams {
     AppendEntriesCall {
+        #[serde(with = "NodeIdDef")]
         from: NodeId,
         from_addr: SocketAddr,
         term: u64,
@@ -1224,6 +1238,7 @@ pub enum RaftMessageParams {
         entries: Vec<LogEntry>,
     },
     AppendEntriesReply {
+        #[serde(with = "NodeIdDef")]
         from: NodeId,
         term: u64,
         seqno: u64,
@@ -1237,8 +1252,8 @@ pub enum RaftMessageParams {
 pub enum LogEntry {
     Term(u64),
     Config {
-        voters: Vec<NodeId>,
-        new_voters: Vec<NodeId>,
+        voters: NodeIds,
+        new_voters: NodeIds,
     },
     Command(Command),
 }
@@ -1250,6 +1265,7 @@ pub struct ProposeParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Caller {
+    #[serde(with = "NodeIdDef")] // TODO
     pub node_id: NodeId,
     pub token: usize,
     pub request_id: RequestId,
