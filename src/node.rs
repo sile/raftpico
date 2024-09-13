@@ -17,6 +17,8 @@ use raftbare::{Action, CommitPromise, LogIndex, LogPosition, Role};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+use crate::request::JoinParams;
+
 #[derive(Debug)]
 pub struct MachineContext {
     has_caller: bool,
@@ -235,7 +237,7 @@ impl<M: Machine> NodeHandle<M> {
         let response: Response<T> = client.call(&Message::ProposeUserCommand {
             jsonrpc: JsonRpcVersion::V2,
             id: RequestId::Number(0),
-            params: SingleArgParams::new(serde_json::to_value(command)?),
+            params: (serde_json::to_value(command)?,),
         })?;
         Ok(response.result)
     }
@@ -765,7 +767,7 @@ impl<M: Machine> Node<M> {
             Message::CreateCluster { id, .. } => self.handle_create_cluster(conn, id),
             Message::Join { id, params, .. } => self.handle_join(conn, id, params),
             Message::ProposeUserCommand { id, params, .. } => {
-                self.handle_propose_user_command(conn, id, params.0 .0)
+                self.handle_propose_user_command(conn, id, params.0)
             }
             Message::Propose { id, params, .. } => self.handle_remote_propose(conn, id, params),
             Message::Raft { params, .. } => self.handle_raft_message(conn, params),
@@ -1109,15 +1111,6 @@ impl CommitPromiseObject {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SingleArgParams<T>(pub (T,));
-
-impl<T> SingleArgParams<T> {
-    pub fn new(arg: T) -> Self {
-        Self((arg,))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum Message {
     // API
@@ -1134,7 +1127,7 @@ pub enum Message {
     ProposeUserCommand {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
-        params: SingleArgParams<serde_json::Value>,
+        params: (serde_json::Value,),
     },
 
     // Internals
@@ -1253,11 +1246,6 @@ pub enum LogEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposeParams {
     pub command: Command,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JoinParams {
-    pub contact_addr: SocketAddr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
