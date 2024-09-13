@@ -23,6 +23,8 @@ pub enum Command {
 }
 
 // TODO: rename
+//
+// TODO: Make it possible to save this instance to reply after at the time a condition is met
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcCaller {
     pub callee_id: NodeIdJson,
