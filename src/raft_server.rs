@@ -41,6 +41,12 @@ impl Default for RaftServerOptions {
 }
 
 #[derive(Debug)]
+pub struct Member {
+    pub node_id: NodeId,
+    pub server_addr: SocketAddr,
+}
+
+#[derive(Debug)]
 pub struct RaftServer<M> {
     listener: TcpListener,
     addr: SocketAddr,
@@ -60,6 +66,7 @@ pub struct RaftServer<M> {
     min_election_timeout: Duration,
     max_election_timeout: Duration,
     max_log_entries_hint: usize,
+    members: BTreeMap<NodeId, Member>,
 }
 
 impl<M: Machine> RaftServer<M> {
@@ -92,14 +99,17 @@ impl<M: Machine> RaftServer<M> {
             events: Some(events),
             rng,
             node: Node::start(UNINIT_NODE_ID),
-            machine,
-            min_election_timeout: DEFAULT_MIN_ELECTION_TIMEOUT,
-            max_election_timeout: DEFAULT_MAX_ELECTION_TIMEOUT,
-            max_log_entries_hint: 0,
             election_timeout: None,
             last_applied_index: LogIndex::ZERO,
             stats: ServerStats::default(),
             commands: BTreeMap::new(),
+
+            // Replicated state
+            machine,
+            min_election_timeout: DEFAULT_MIN_ELECTION_TIMEOUT,
+            max_election_timeout: DEFAULT_MAX_ELECTION_TIMEOUT,
+            max_log_entries_hint: 0,
+            members: BTreeMap::new(),
         })
     }
 
@@ -319,18 +329,45 @@ impl<M: Machine> RaftServer<M> {
         match self.node.log().entries().get_entry(index) {
             Some(LogEntry::Term(_) | LogEntry::ClusterConfig(_)) => {
                 // Do nothing.
-                Ok(())
             }
-            Some(LogEntry::Command) => {
-                todo!()
+            Some(LogEntry::Command) => self.apply_command(index),
+            None => {
+                return Err(std::io::Error::new(
+                    // TODO: unreachable?
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "There is no log entry associated with commit index {}",
+                        index.get()
+                    ),
+                ));
             }
-            None => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!(
-                    "There is no log entry associated with commit index {}",
-                    index.get()
-                ),
-            )),
+        }
+        Ok(())
+    }
+
+    fn apply_command(&mut self, index: LogIndex) {
+        let Some(command) = self.commands.get(&index) else {
+            unreachable!();
+        };
+
+        match command {
+            Command::InitCluster {
+                server_addr,
+                min_election_timeout,
+                max_election_timeout,
+                max_log_entries_hint,
+            } => {
+                self.min_election_timeout = *min_election_timeout;
+                self.max_election_timeout = *max_election_timeout;
+                self.max_log_entries_hint = *max_log_entries_hint;
+
+                let node_id = NodeId::new(0);
+                let member = Member {
+                    node_id,
+                    server_addr: *server_addr,
+                };
+                self.members.insert(node_id, member);
+            }
         }
     }
 
