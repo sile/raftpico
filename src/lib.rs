@@ -14,7 +14,10 @@ pub use stats::ServerStats;
 
 #[cfg(test)]
 mod tests {
-    use std::net::{SocketAddr, TcpStream};
+    use std::{
+        net::{SocketAddr, TcpStream},
+        time::{Duration, Instant},
+    };
 
     use jsonlrpc::{RequestId, RpcClient};
     use request::{CreateClusterResult, Request, Response};
@@ -29,6 +32,9 @@ mod tests {
             from.reply_output(self);
         }
     }
+
+    const TEST_TIMEOUT: Duration = Duration::from_secs(3);
+    const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(100));
 
     #[test]
     fn create_cluster() {
@@ -56,8 +62,9 @@ mod tests {
                 assert_eq!(result.success, false);
             });
             s.spawn(|| {
-                while server.node().is_none() {
-                    server.poll(None).expect("poll() failed");
+                let start_time = Instant::now();
+                while server.node().is_none() && start_time.elapsed() < TEST_TIMEOUT {
+                    server.poll(POLL_TIMEOUT).expect("poll() failed");
                 }
             });
         });
