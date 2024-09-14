@@ -4,11 +4,11 @@ use std::{
 };
 
 use mio::{net::TcpListener, Events, Interest, Poll, Token};
-use raftbare::{Action, Node, NodeId, Role};
+use raftbare::{Action, LogIndex, Node, NodeId, Role};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 
-use crate::{Machine, Stats};
+use crate::{Machine, ServerStats};
 
 const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
 
@@ -43,11 +43,12 @@ pub struct RaftServer<M> {
     min_election_timeout: Duration,
     max_election_timeout: Duration,
     election_timeout: Option<Instant>,
-    stats: Stats,
+    last_applied_index: LogIndex,
+    stats: ServerStats,
 }
 
 impl<M: Machine> RaftServer<M> {
-    pub fn new(listen_addr: SocketAddr, machine: M) -> std::io::Result<Self> {
+    pub fn start(listen_addr: SocketAddr, machine: M) -> std::io::Result<Self> {
         Self::with_options(listen_addr, machine, RaftServerOptions::default())
     }
 
@@ -77,7 +78,8 @@ impl<M: Machine> RaftServer<M> {
             min_election_timeout: DEFAULT_MIN_ELECTION_TIMEOUT,
             max_election_timeout: DEFAULT_MAX_ELECTION_TIMEOUT,
             election_timeout: None,
-            stats: Stats::new(),
+            last_applied_index: LogIndex::ZERO,
+            stats: ServerStats::default(),
         })
     }
 
@@ -86,14 +88,15 @@ impl<M: Machine> RaftServer<M> {
     }
 
     pub fn node(&self) -> Option<&Node> {
-        (self.node.id() == UNINIT_NODE_ID).then(|| &self.node)
+        (!matches!(self.node.id(), UNINIT_NODE_ID)).then(|| &self.node)
     }
 
     pub fn machine(&self) -> &M {
         &self.machine
     }
 
-    pub fn stats(&self) -> &Stats {
+    // TODO: Return Stats
+    pub fn stats(&self) -> &ServerStats {
         &self.stats
     }
 
@@ -113,11 +116,11 @@ impl<M: Machine> RaftServer<M> {
         events: &mut Events,
         timeout: Option<Duration>,
     ) -> std::io::Result<()> {
+        // Timeout and I/O events handling.
         let now = Instant::now();
         let election_timeout = self
             .election_timeout
             .map(|time| time.saturating_duration_since(now));
-
         if let Some(election_timeout) = election_timeout.filter(|&t| t <= timeout.unwrap_or(t)) {
             self.poller.poll(events, Some(election_timeout))?;
             if events.is_empty() {
@@ -128,6 +131,19 @@ impl<M: Machine> RaftServer<M> {
             self.poller.poll(events, timeout)?;
         }
 
+        // Committed log entries handling.
+        for index in self.last_applied_index.get() + 1..=self.node.commit_index().get() {
+            let index = LogIndex::new(index);
+            self.apply(index)?;
+        }
+        if self.last_applied_index != self.node.commit_index() && self.node.role().is_leader() {
+            // Quickly notify followers about the latest commit index.
+            self.node.heartbeat();
+        }
+        self.last_applied_index = self.node.commit_index();
+
+        // Node actions handling.
+        //
         // [NOTE]
         // To consolidate Raft actions as much as possible,
         // the following code is positioned at the end of this method.
@@ -136,6 +152,10 @@ impl<M: Machine> RaftServer<M> {
         }
 
         Ok(())
+    }
+
+    fn apply(&mut self, index: LogIndex) -> std::io::Result<()> {
+        todo!("{:?}", index)
     }
 
     fn handle_action(&mut self, action: Action) {

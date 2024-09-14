@@ -37,7 +37,7 @@ type OutputSender = mpsc::Sender<(Token, serde_json::Result<serde_json::Value>)>
 pub struct From(Option<(Token, OutputSender)>);
 
 impl From {
-    pub fn send_output<T: Serialize>(mut self, output: &T) {
+    pub fn reply_output<T: Serialize>(mut self, output: &T) {
         let Some((token, tx)) = self.0.take() else {
             // There is no need to send the output to a client from this Raft server.
             return;
