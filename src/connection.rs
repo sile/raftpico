@@ -4,10 +4,10 @@ use mio::{net::TcpStream, Token};
 
 #[derive(Debug)]
 pub struct Connection {
-    addr: SocketAddr,
-    token: Token,
-    stream: TcpStream,
-    connected: bool,
+    pub addr: SocketAddr,
+    pub token: Token,
+    pub stream: TcpStream,
+    pub connected: bool,
 }
 
 impl Connection {

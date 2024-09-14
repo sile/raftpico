@@ -183,11 +183,17 @@ impl<M: Machine> RaftServer<M> {
                 .register(&mut stream, token, Interest::READABLE)?;
 
             let connection = Connection::new_connected(addr, token, stream);
-
-            // // TODO: handle initial read
-
-            self.connections.insert(token, connection);
+            self.handle_connection_event(connection);
         }
+    }
+
+    fn handle_connection_event(&mut self, connection: Connection) {
+        let token = connection.token;
+        // dbg!(token);
+        // dbg!(self.connections.len());
+        self.connections.insert(token, connection);
+
+        todo!();
     }
 
     fn next_token(&mut self) -> Token {
