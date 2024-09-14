@@ -3,9 +3,13 @@ use std::net::SocketAddr;
 use jsonlrpc::{
     ErrorCode, ErrorObject, JsonRpcVersion, JsonlStream, RequestObject, ResponseObject,
 };
-use mio::{net::TcpStream, Token};
+use mio::{net::TcpStream, Interest, Token};
+use serde::Serialize;
 
-use crate::request::{is_known_external_method, IncomingMessage};
+use crate::{
+    io::would_block,
+    request::{is_known_external_method, IncomingMessage},
+};
 
 #[derive(Debug)]
 pub struct Connection {
@@ -14,6 +18,7 @@ pub struct Connection {
     pub stream: JsonlStream<TcpStream>,
     pub connected: bool,
     pub kind: ConnectionKind,
+    pub interest: Option<Interest>,
 }
 
 impl Connection {
@@ -24,6 +29,7 @@ impl Connection {
             stream: JsonlStream::new(stream),
             connected: true,
             kind: ConnectionKind::Undefined,
+            interest: None,
         }
     }
 
@@ -43,15 +49,15 @@ impl Connection {
         self.stream.write_buf().len()
     }
 
-    pub fn recv_message(&mut self) -> std::io::Result<Option<IncomingMessage>> {
+    pub fn poll_recv(&mut self) -> std::io::Result<Option<IncomingMessage>> {
         match self.kind {
-            ConnectionKind::Undefined => self.recv_undefined_message(),
+            ConnectionKind::Undefined => would_block(self.recv_undefined_message()),
             ConnectionKind::External => todo!(),
             ConnectionKind::Internal => todo!(),
         }
     }
 
-    fn recv_undefined_message(&mut self) -> std::io::Result<Option<IncomingMessage>> {
+    fn recv_undefined_message(&mut self) -> std::io::Result<IncomingMessage> {
         match self.stream.read_object::<IncomingMessage>() {
             Err(e) if e.is_io() => {
                 return Err(e.into());
@@ -59,14 +65,14 @@ impl Connection {
             Err(_) => {
                 let value = match self.stream.read_object::<serde_json::Value>() {
                     Err(e) => {
-                        self.send_error_response_from_err("Not valid JSON value", &e);
-                        return Ok(None);
+                        self.send_error_response_from_err("Invalid JSON value", &e);
+                        return self.recv_undefined_message();
                     }
                     Ok(value) => value,
                 };
                 match serde_json::from_value::<RequestObject>(value) {
                     Err(e) => {
-                        self.send_error_response_from_err("Not valid JSON-RPC 2.0 request", &e);
+                        self.send_error_response_from_err("Invalid JSON-RPC 2.0 request", &e);
                     }
                     Ok(req) if req.id.is_some() => {
                         self.send_error_response_from_request(req);
@@ -75,9 +81,16 @@ impl Connection {
                         // Do nothing as it is a notification.
                     }
                 }
-                return Ok(None);
+                return self.recv_undefined_message();
             }
-            Ok(_) => todo!(),
+            Ok(m) => {
+                match &m {
+                    IncomingMessage::External(_) => {
+                        self.kind = ConnectionKind::External;
+                    }
+                }
+                Ok(m)
+            }
         }
     }
 
@@ -97,7 +110,7 @@ impl Connection {
             },
             id: req.id,
         };
-        let _ = self.stream.write_object(&response); // TODO: add doc
+        self.send(&response);
     }
 
     fn send_error_response_from_err(&mut self, msg: &str, e: &serde_json::Error) {
@@ -110,7 +123,50 @@ impl Connection {
             },
             id: None,
         };
-        let _ = self.stream.write_object(&response); // TODO: add doc
+        self.send(&response);
+    }
+
+    fn send<T: Serialize>(&mut self, msg: &T) {
+        let start_writing = !self.is_writing();
+        if let Err(e) = self.stream.write_object(msg) {
+            if start_writing && e.io_error_kind() == Some(std::io::ErrorKind::WouldBlock) {
+                self.interest = Some(Interest::READABLE | Interest::WRITABLE);
+            }
+        }
+    }
+
+    pub fn poll_connect(&mut self) -> std::io::Result<bool> {
+        if self.connected {
+            return Ok(true);
+        }
+
+        // See: https://docs.rs/mio/1.0.2/mio/net/struct.TcpStream.html#method.connect
+        self.stream().take_error()?;
+        match self.stream().peer_addr() {
+            Err(e) if e.kind() == std::io::ErrorKind::NotConnected => Ok(false),
+            Err(e) => Err(e),
+            Ok(_) => {
+                self.connected = true;
+                Ok(true)
+            }
+        }
+    }
+
+    pub fn poll_send(&mut self) -> std::io::Result<()> {
+        if !self.is_writing() {
+            return Ok(());
+        }
+
+        match self.stream.flush() {
+            Err(e) if e.io_error_kind() == Some(std::io::ErrorKind::WouldBlock) => {}
+            Err(e) => {
+                return Err(e.into());
+            }
+            Ok(_) => {
+                self.interest = Some(Interest::READABLE);
+            }
+        }
+        Ok(())
     }
 }
 

@@ -35,7 +35,7 @@ mod tests {
         }
     }
 
-    const TEST_TIMEOUT: Duration = Duration::from_secs(3);
+    const TEST_TIMEOUT: Duration = Duration::from_secs(2);
     const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(100));
 
     #[test]

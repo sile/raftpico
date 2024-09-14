@@ -10,7 +10,10 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 
 use crate::{
-    connection::Connection, io::would_block, request::IncomingMessage, Machine, ServerStats,
+    connection::Connection,
+    io::would_block,
+    request::{IncomingMessage, Request},
+    Machine, ServerStats,
 };
 
 const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
@@ -144,8 +147,11 @@ impl<M: Machine> RaftServer<M> {
         for event in events.iter() {
             if event.token() == LISTENER_TOKEN {
                 self.handle_listener_event()?;
+            } else if let Some(connection) = self.connections.remove(&event.token()) {
+                // TODO: Dont remove if possible
+                self.handle_connection_event_or_deregister(connection)?;
             } else {
-                todo!();
+                unreachable!();
             }
         }
 
@@ -199,46 +205,36 @@ impl<M: Machine> RaftServer<M> {
             // TODO: count stats depending on the error kind
             self.poller.registry().deregister(conn.stream_mut())?;
         } else {
-            self.connections.insert(conn.token, conn);
+            let token = conn.token;
+            if let Some(interest) = conn.interest.take() {
+                self.poller
+                    .registry()
+                    .reregister(conn.stream_mut(), token, interest)?;
+            }
+            self.connections.insert(token, conn);
         }
         Ok(())
     }
 
     fn handle_connection_event(&mut self, conn: &mut Connection) -> std::io::Result<()> {
-        // Connect.
-        if !conn.connected {
-            // See: https://docs.rs/mio/1.0.2/mio/net/struct.TcpStream.html#method.connect
-            conn.stream().take_error()?;
-            match conn.stream().peer_addr() {
-                Err(e) if e.kind() == std::io::ErrorKind::NotConnected => return Ok(()),
-                result => {
-                    result?;
-                }
+        if !conn.poll_connect()? {
+            return Ok(());
+        }
+
+        while let Some(msg) = conn.poll_recv()? {
+            match msg {
+                IncomingMessage::External(req) => self.handle_external_request(req)?,
             }
-            conn.connected = true;
         }
 
-        // Read.
-        while let Some(msg) = conn.recv_message()? {
-            todo!();
-        }
-
-        // Write.
-        if conn.is_writing() {
-            // would_block(conn.stream.flush().map_err(|e| e.into()))
-            //     .unwrap_or_else(|e| todo!("{:?}", e));
-            // if conn.stream.write_buf().is_empty() {
-            //     // TODO: or deregister?
-            //     self.poller.registry().reregister(
-            //         conn.stream.inner_mut(),
-            //         event.token(),
-            //         Interest::READABLE,
-            //     )?;
-            // }
-            todo!();
-        }
-
+        conn.poll_send()?;
         Ok(())
+    }
+
+    fn handle_external_request(&mut self, req: Request) -> std::io::Result<()> {
+        match req {
+            Request::CreateCluster { id, params, .. } => todo!(),
+        }
     }
 
     fn next_token(&mut self) -> Token {
