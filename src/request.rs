@@ -67,6 +67,7 @@ impl Request {
 pub struct CreateClusterParams {
     pub min_election_timeout_ms: usize,
     pub max_election_timeout_ms: usize,
+    pub max_log_entries_hint: usize,
 }
 
 impl CreateClusterParams {
@@ -91,6 +92,7 @@ impl Default for CreateClusterParams {
         Self {
             min_election_timeout_ms: 100,
             max_election_timeout_ms: 1000,
+            max_log_entries_hint: 100000,
         }
     }
 }

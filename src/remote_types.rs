@@ -1,24 +1,6 @@
-use mio::Token;
 use raftbare::NodeId;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(into = "usize", from = "usize")]
-pub struct TokenJson(pub Token);
-
-impl From<TokenJson> for usize {
-    fn from(token: TokenJson) -> Self {
-        token.0 .0
-    }
-}
-
-impl From<usize> for TokenJson {
-    fn from(token: usize) -> Self {
-        TokenJson(Token(token))
-    }
-}
-
-// TODO: remove
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(into = "u64", from = "u64")]
 pub struct NodeIdJson(pub NodeId);

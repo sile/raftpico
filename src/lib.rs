@@ -3,10 +3,12 @@
 // pub mod remote_types; // TODO: rename
 // pub mod request;
 
+pub mod command;
 pub mod connection;
 pub mod io;
 mod machine;
 mod raft_server;
+pub mod remote_types;
 pub mod request; // TODO: message?
 pub mod stats; // TODO
 

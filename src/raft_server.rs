@@ -1,15 +1,16 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     net::SocketAddr,
     time::{Duration, Instant},
 };
 
 use mio::{net::TcpListener, Events, Interest, Poll, Token};
-use raftbare::{Action, LogEntries, LogEntry, LogIndex, Node, NodeId, Role};
+use raftbare::{Action, CommitPromise, LogEntry, LogIndex, Node, NodeId, Role};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 
 use crate::{
+    command::Command,
     connection::Connection,
     io::would_block,
     request::{CreateClusterParams, IncomingMessage, JoinError, JoinParams, Request, Response},
@@ -49,12 +50,16 @@ pub struct RaftServer<M> {
     events: Option<Events>, // TODO: Remove Option wrapper if possible
     rng: ChaChaRng,
     node: Node,
-    machine: M,
-    min_election_timeout: Duration,
-    max_election_timeout: Duration,
     election_timeout: Option<Instant>,
     last_applied_index: LogIndex,
     stats: ServerStats,
+    commands: BTreeMap<LogIndex, Command>,
+    machine: M,
+
+    // TODO: Add a struct for following fields
+    min_election_timeout: Duration,
+    max_election_timeout: Duration,
+    max_log_entries_hint: usize,
 }
 
 impl<M: Machine> RaftServer<M> {
@@ -90,9 +95,11 @@ impl<M: Machine> RaftServer<M> {
             machine,
             min_election_timeout: DEFAULT_MIN_ELECTION_TIMEOUT,
             max_election_timeout: DEFAULT_MAX_ELECTION_TIMEOUT,
+            max_log_entries_hint: 0,
             election_timeout: None,
             last_applied_index: LogIndex::ZERO,
             stats: ServerStats::default(),
+            commands: BTreeMap::new(),
         })
     }
 
@@ -263,6 +270,7 @@ impl<M: Machine> RaftServer<M> {
 
         self.min_election_timeout = Duration::from_millis(params.min_election_timeout_ms as u64);
         self.max_election_timeout = Duration::from_millis(params.max_election_timeout_ms as u64);
+        self.max_log_entries_hint = params.max_log_entries_hint;
 
         let node_id = NodeId::new(0);
         self.node = Node::start(node_id);
@@ -271,16 +279,31 @@ impl<M: Machine> RaftServer<M> {
         promise.poll(&mut self.node);
         assert!(promise.is_accepted());
 
-        // TODO:
-        // let mut promise = self.propose_command(Command::Join {
-        //     id: NodeIdJson(node_id),
-        //     addr: self.addr(),
-        //     caller: None,
-        // });
-        // promise.poll(&mut self.node);
-        // assert!(promise.is_accepted());
+        let command = Command::InitCluster {
+            server_addr: self.addr,
+            min_election_timeout: self.min_election_timeout,
+            max_election_timeout: self.max_election_timeout,
+            max_log_entries_hint: self.max_log_entries_hint,
+        };
+        let mut promise = self.propose_command(command);
+        promise.poll(&mut self.node);
+        assert!(promise.is_accepted());
 
         true
+    }
+
+    fn propose_command(&mut self, command: Command) -> CommitPromise {
+        // TODO: if self.pending_query.is_some() {}
+
+        let promise = self.node.propose_command();
+        if !promise.is_rejected() {
+            self.commands.insert(promise.log_position().index, command);
+
+            if self.commands.len() > self.max_log_entries_hint {
+                todo!();
+            }
+        }
+        promise
     }
 
     fn next_token(&mut self) -> Token {
@@ -314,18 +337,13 @@ impl<M: Machine> RaftServer<M> {
     fn handle_action(&mut self, action: Action) {
         match action {
             Action::SetElectionTimeout => self.handle_set_election_timeout(),
-            Action::SaveCurrentTerm | Action::SaveVotedFor => {
+            Action::SaveCurrentTerm | Action::SaveVotedFor | Action::AppendLogEntries(_) => {
                 // Do nothing as this crate uses in-memory storage.
             }
-            Action::AppendLogEntries(entries) => self.handle_append_log_entries(entries),
             Action::BroadcastMessage(_) => todo!(),
             Action::SendMessage(_, _) => todo!(),
             Action::InstallSnapshot(_) => todo!(),
         }
-    }
-
-    fn handle_append_log_entries(&mut self, _entries: LogEntries) {
-        // TODO: log truncate handling
     }
 
     fn handle_set_election_timeout(&mut self) {
