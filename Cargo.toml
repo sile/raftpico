@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 jsonlrpc = "0.1.0"
-log = "0.4.22"
 mio = { version = "1.0.2", features = ["net", "os-poll"] }
 raftbare = "0.1.1"
 rand = "0.8.5"
@@ -15,5 +14,4 @@ serde_json = "1.0.127"
 
 [dev-dependencies]
 clap = { version = "4.5.16", features = ["derive"] }
-env_logger = "0.11.5"
 orfail = "1.1.0"
