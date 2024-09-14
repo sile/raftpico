@@ -10,6 +10,9 @@ pub enum Command {
         max_election_timeout: Duration,
         max_log_entries_hint: usize,
     },
+    InviteServer {
+        server_addr: SocketAddr,
+    },
     // AddMember {
     //     node_id: NodeIdJson,
     //     server_addr: SocketAddr,

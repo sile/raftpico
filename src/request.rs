@@ -63,7 +63,7 @@ impl Request {
             jsonrpc: JsonRpcVersion::V2,
             id,
             params: AddServerParams {
-                contact_server_addr,
+                server_addr: contact_server_addr,
             },
         }
     }
@@ -171,7 +171,7 @@ pub struct CreateClusterResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddServerParams {
-    pub contact_server_addr: SocketAddr,
+    pub server_addr: SocketAddr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,7 +185,9 @@ pub struct AddServerResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AddServerError {
-    AlreadyMember,
+    // TODO
+    ServerNotReady,
+    AlreadyInCluster,
 }
 
 // #[derive(Debug, Clone, Serialize, Deserialize)]

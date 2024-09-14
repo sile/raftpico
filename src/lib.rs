@@ -91,10 +91,10 @@ mod tests {
         let server_addr1 = server1.addr();
         let handle = std::thread::spawn(move || {
             let result: AddServerResult = rpc(
-                server_addr1,
-                Request::add_server(request_id(0), server_addr0),
+                server_addr0,
+                Request::add_server(request_id(0), server_addr1),
             );
-            assert!(result.success);
+            assert_eq!(result.error, None);
         });
         while !handle.is_finished() {
             server0.poll(POLL_TIMEOUT).expect("poll() failed");

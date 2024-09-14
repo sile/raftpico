@@ -47,6 +47,7 @@ impl Default for RaftServerOptions {
 pub struct Member {
     pub node_id: NodeId,
     pub server_addr: SocketAddr,
+    pub inviting: bool,
 }
 
 #[derive(Debug)]
@@ -70,6 +71,7 @@ pub struct RaftServer<M> {
     max_election_timeout: Duration,
     max_log_entries_hint: usize,
     members: BTreeMap<NodeId, Member>,
+    next_node_id: NodeId,
 }
 
 impl<M: Machine> RaftServer<M> {
@@ -113,6 +115,7 @@ impl<M: Machine> RaftServer<M> {
             max_election_timeout: DEFAULT_MAX_ELECTION_TIMEOUT,
             max_log_entries_hint: 0,
             members: BTreeMap::new(),
+            next_node_id: NodeId::new(0),
         })
     }
 
@@ -274,14 +277,20 @@ impl<M: Machine> RaftServer<M> {
 
     fn handle_add_server(
         &mut self,
-        AddServerParams {
-            contact_server_addr,
-        }: AddServerParams,
+        AddServerParams { server_addr }: AddServerParams,
     ) -> Result<(), AddServerError> {
-        if self.node.id() < RESERVED_NODE_ID_START {
-            return Err(AddServerError::AlreadyMember);
+        if self.node.id() >= RESERVED_NODE_ID_START {
+            return Err(AddServerError::ServerNotReady);
         }
 
+        if !self.node.role().is_leader() {
+            // TOOD: remote propos
+            todo!();
+        }
+
+        let command = Command::InviteServer { server_addr };
+        let _promise = self.propose_command(command);
+        // TODO: wait for the command committed then reply
         todo!();
     }
 
@@ -373,12 +382,27 @@ impl<M: Machine> RaftServer<M> {
                 self.max_election_timeout = *max_election_timeout;
                 self.max_log_entries_hint = *max_log_entries_hint;
 
-                let node_id = NodeId::new(0);
+                let node_id = self.next_node_id;
                 let member = Member {
                     node_id,
                     server_addr: *server_addr,
+                    inviting: false,
                 };
                 self.members.insert(node_id, member);
+                self.next_node_id = NodeId::new(node_id.get() + 1);
+            }
+            Command::InviteServer { server_addr } => {
+                let node_id = self.next_node_id;
+                let member = Member {
+                    node_id,
+                    server_addr: *server_addr,
+                    inviting: true,
+                };
+                self.members.insert(node_id, member);
+                self.next_node_id = NodeId::new(node_id.get() + 1);
+
+                // TODO: change cluster config
+                todo!()
             }
         }
     }
