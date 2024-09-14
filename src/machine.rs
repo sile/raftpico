@@ -1,19 +1,20 @@
 use std::sync::mpsc;
 
 use mio::Token;
-use raftbare::Node;
+use raftbare::{LogIndex, Node};
 use serde::{Deserialize, Serialize};
 
 pub trait Machine: Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
 
-    fn handle_input(&mut self, ctx: &mut Context, from: From, input: &Self::Input);
+    fn handle_input(&mut self, ctx: &Context, from: From, input: &Self::Input);
 }
 
 #[derive(Debug)]
 pub struct Context<'a> {
     kind: InputKind,
     node: &'a Node,
+    machine_version: LogIndex,
 }
 
 impl<'a> Context<'a> {
@@ -23,6 +24,10 @@ impl<'a> Context<'a> {
 
     pub fn node(&self) -> &Node {
         self.node
+    }
+
+    pub fn machine_version(&self) -> LogIndex {
+        self.machine_version
     }
 }
 
