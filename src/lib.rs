@@ -22,7 +22,8 @@ mod tests {
     };
 
     use jsonlrpc::{RequestId, RpcClient};
-    use request::{CreateClusterResult, Request, Response};
+    use request::{CreateClusterResult, JoinResult, Request, Response};
+    use serde::{Deserialize, Serialize};
 
     use super::*;
 
@@ -36,7 +37,7 @@ mod tests {
     }
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(2);
-    const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(100));
+    const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(10));
 
     #[test]
     fn create_cluster() {
@@ -66,6 +67,44 @@ mod tests {
             server.poll(POLL_TIMEOUT).expect("poll() failed");
         }
         assert!(server.node().is_some());
+    }
+
+    #[test]
+    fn join() {
+        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        assert!(server0.node().is_none());
+
+        // Create a cluster.
+        let server_addr = server0.addr();
+        let handle = std::thread::spawn(move || {
+            rpc::<CreateClusterResult>(server_addr, Request::create_cluster(request_id(0), None))
+        });
+        while !handle.is_finished() {
+            server0.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
+        assert!(server0.node().is_some());
+
+        // Join to the cluster.
+        let mut server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+
+        let handle = std::thread::spawn(move || {
+            let result: JoinResult = rpc(server_addr, Request::join(request_id(0), server_addr));
+            assert!(result.success);
+        });
+        while !handle.is_finished() {
+            server0.poll(POLL_TIMEOUT).expect("poll() failed");
+            server1.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
+        assert!(server1.node().is_some());
+    }
+
+    fn rpc<T>(server_addr: SocketAddr, request: impl Serialize) -> T
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        let mut client = RpcClient::new(connect(server_addr));
+        let response: Response<T> = client.call(&request).expect("call() failed");
+        response.into_std_result().expect("error response")
     }
 
     fn connect(addr: SocketAddr) -> TcpStream {

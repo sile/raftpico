@@ -12,7 +12,7 @@ use rand_chacha::ChaChaRng;
 use crate::{
     connection::Connection,
     io::would_block,
-    request::{CreateClusterParams, IncomingMessage, Request, Response},
+    request::{CreateClusterParams, IncomingMessage, JoinError, JoinParams, Request, Response},
     Machine, ServerStats,
 };
 
@@ -242,9 +242,18 @@ impl<M: Machine> RaftServer<M> {
                 let response = Response::create_cluster(id, result);
                 conn.send(&response)?;
             }
+            Request::Join { id, params, .. } => {
+                let result = self.handle_join(params);
+                let response = Response::join(id, result);
+                conn.send(&response)?;
+            }
         }
 
         Ok(())
+    }
+
+    fn handle_join(&mut self, params: JoinParams) -> Result<(), JoinError> {
+        todo!();
     }
 
     fn handle_create_cluster(&mut self, params: CreateClusterParams) -> bool {

@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +22,11 @@ pub enum Request {
         #[serde(default)]
         params: CreateClusterParams,
     },
+    Join {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: JoinParams,
+    },
 }
 
 impl Request {
@@ -31,15 +38,27 @@ impl Request {
         }
     }
 
+    pub fn join(id: RequestId, contact_server_addr: SocketAddr) -> Self {
+        Self::Join {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            params: JoinParams {
+                contact_server_addr,
+            },
+        }
+    }
+
     pub fn id(&self) -> &RequestId {
         match self {
-            Request::CreateCluster { id, .. } => id,
+            Self::CreateCluster { id, .. } => id,
+            Self::Join { id, .. } => id,
         }
     }
 
     pub fn validate(&self) -> Option<ErrorObject> {
         match self {
-            Request::CreateCluster { params, .. } => params.validate(),
+            Self::CreateCluster { params, .. } => params.validate(),
+            Self::Join { .. } => None,
         }
     }
 }
@@ -109,30 +128,47 @@ impl Response<CreateClusterResult> {
     }
 }
 
+impl Response<JoinResult> {
+    pub fn join(id: RequestId, result: Result<(), JoinError>) -> Self {
+        let result = JoinResult {
+            success: result.is_ok(),
+            error: result.err(),
+        };
+        Self::Ok {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            result,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateClusterResult {
     pub success: bool,
 }
 
-// use std::net::SocketAddr;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinParams {
+    pub contact_server_addr: SocketAddr,
+}
 
-// use crate::command::Command;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinResult {
+    pub success: bool,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<JoinError>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum JoinError {
+    AlreadyMember,
+}
 
 // #[derive(Debug, Clone, Serialize, Deserialize)]
 // #[serde(tag = "method")]
 // pub enum Request {
-//     // API messages
-//     CreateCluster {
-//         jsonrpc: JsonRpcVersion,
-//         id: RequestId,
-//         #[serde(default, skip_serializing_if = "Option::is_none")]
-//         params: Option<CreateClusterParams>,
-//     },
-//     Join {
-//         jsonrpc: JsonRpcVersion,
-//         id: RequestId,
-//         params: JoinParams,
-//     },
 //     Kick {
 //         jsonrpc: JsonRpcVersion,
 //         id: RequestId,
@@ -180,11 +216,6 @@ pub struct CreateClusterResult {
 //     pub const fn get(self) -> f64 {
 //         self.0
 //     }
-// }
-
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct JoinParams {
-//     pub contact_addr: SocketAddr,
 // }
 
 // #[derive(Debug, Clone, Serialize, Deserialize)]
