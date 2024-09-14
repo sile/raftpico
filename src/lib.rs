@@ -18,7 +18,7 @@ pub use stats::ServerStats;
 mod tests {
     use std::{
         net::{SocketAddr, TcpStream},
-        time::{Duration, Instant},
+        time::Duration,
     };
 
     use jsonlrpc::{RequestId, RpcClient};
@@ -44,32 +44,27 @@ mod tests {
         assert!(server.node().is_none());
 
         let server_addr = server.addr();
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let mut client = RpcClient::new(connect(server_addr));
+        let handle = std::thread::spawn(move || {
+            let mut client = RpcClient::new(connect(server_addr));
 
-                // First call: OK
-                let request = Request::create_cluster(request_id(0), None);
-                let response: Response<CreateClusterResult> =
-                    client.call(&request).expect("call() failed");
-                let result = response.into_std_result().expect("error response");
-                assert_eq!(result.success, true);
+            // First call: OK
+            let request = Request::create_cluster(request_id(0), None);
+            let response: Response<CreateClusterResult> =
+                client.call(&request).expect("call() failed");
+            let result = response.into_std_result().expect("error response");
+            assert_eq!(result.success, true);
 
-                // Second call: NG
-                let request = Request::create_cluster(request_id(1), None);
-                let response: Response<CreateClusterResult> =
-                    client.call(&request).expect("call() failed");
-                let result = response.into_std_result().expect("error response");
-                assert_eq!(result.success, false);
-            });
-            s.spawn(|| {
-                let start_time = Instant::now();
-                while server.node().is_none() && start_time.elapsed() < TEST_TIMEOUT {
-                    server.poll(POLL_TIMEOUT).expect("poll() failed");
-                }
-            });
+            // Second call: NG
+            let request = Request::create_cluster(request_id(1), None);
+            let response: Response<CreateClusterResult> =
+                client.call(&request).expect("call() failed");
+            let result = response.into_std_result().expect("error response");
+            assert_eq!(result.success, false);
         });
 
+        while !handle.is_finished() {
+            server.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
         assert!(server.node().is_some());
     }
 

@@ -61,6 +61,7 @@ impl Connection {
 
     fn recv_external_message(&mut self) -> std::io::Result<Request> {
         // TODO: refactor code
+        // TODO: consider batch request
         match self.stream.read_object::<Request>() {
             Err(e) if e.is_io() => {
                 return Err(e.into());

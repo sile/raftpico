@@ -5,7 +5,7 @@ use std::{
 };
 
 use mio::{net::TcpListener, Events, Interest, Poll, Token};
-use raftbare::{Action, LogIndex, Node, NodeId, Role};
+use raftbare::{Action, LogEntries, LogEntry, LogIndex, Node, NodeId, Role};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 
@@ -284,7 +284,22 @@ impl<M: Machine> RaftServer<M> {
     }
 
     fn apply(&mut self, index: LogIndex) -> std::io::Result<()> {
-        todo!("{:?}", index)
+        match self.node.log().entries().get_entry(index) {
+            Some(LogEntry::Term(_) | LogEntry::ClusterConfig(_)) => {
+                // Do nothing.
+                Ok(())
+            }
+            Some(LogEntry::Command) => {
+                todo!()
+            }
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "There is no log entry associated with commit index {}",
+                    index.get()
+                ),
+            )),
+        }
     }
 
     fn handle_action(&mut self, action: Action) {
@@ -293,11 +308,15 @@ impl<M: Machine> RaftServer<M> {
             Action::SaveCurrentTerm | Action::SaveVotedFor => {
                 // Do nothing as this crate uses in-memory storage.
             }
-            Action::AppendLogEntries(_) => todo!(),
+            Action::AppendLogEntries(entries) => self.handle_append_log_entries(entries),
             Action::BroadcastMessage(_) => todo!(),
             Action::SendMessage(_, _) => todo!(),
             Action::InstallSnapshot(_) => todo!(),
         }
+    }
+
+    fn handle_append_log_entries(&mut self, _entries: LogEntries) {
+        // TODO: log truncate handling
     }
 
     fn handle_set_election_timeout(&mut self) {
