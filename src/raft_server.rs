@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     net::SocketAddr,
     time::{Duration, Instant},
 };
@@ -8,11 +9,11 @@ use raftbare::{Action, LogIndex, Node, NodeId, Role};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 
-use crate::{Machine, ServerStats};
+use crate::{connection::Connection, io::would_block, Machine, ServerStats};
 
 const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
 
-const SERVER_TOKEN: Token = Token(0);
+const LISTENER_TOKEN: Token = Token(0);
 
 const DEFAULT_MIN_ELECTION_TIMEOUT: Duration = Duration::from_millis(100);
 const DEFAULT_MAX_ELECTION_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -34,7 +35,10 @@ impl Default for RaftServerOptions {
 
 #[derive(Debug)]
 pub struct RaftServer<M> {
+    listener: TcpListener,
     addr: SocketAddr,
+    next_token: Token,
+    connections: HashMap<Token, Connection>,
     poller: Poll,
     events: Option<Events>, // TODO: Remove Option wrapper if possible
     rng: ChaChaRng,
@@ -64,12 +68,15 @@ impl<M: Machine> RaftServer<M> {
         let events = Events::with_capacity(options.mio_events_capacity);
         poller
             .registry()
-            .register(&mut listener, SERVER_TOKEN, Interest::READABLE)?;
+            .register(&mut listener, LISTENER_TOKEN, Interest::READABLE)?;
 
         let rng = ChaChaRng::seed_from_u64(options.rng_seed);
 
         Ok(Self {
+            listener,
             addr,
+            next_token: Token(LISTENER_TOKEN.0 + 1),
+            connections: HashMap::new(),
             poller,
             events: Some(events),
             rng,
@@ -131,6 +138,14 @@ impl<M: Machine> RaftServer<M> {
             self.poller.poll(events, timeout)?;
         }
 
+        for event in events.iter() {
+            if event.token() == LISTENER_TOKEN {
+                self.handle_listener_event()?;
+            } else {
+                todo!();
+            }
+        }
+
         // Committed log entries handling.
         for index in self.last_applied_index.get() + 1..=self.node.commit_index().get() {
             let index = LogIndex::new(index);
@@ -152,6 +167,36 @@ impl<M: Machine> RaftServer<M> {
         }
 
         Ok(())
+    }
+
+    fn handle_listener_event(&mut self) -> std::io::Result<()> {
+        loop {
+            let Some((mut stream, addr)) = would_block(self.listener.accept())? else {
+                return Ok(());
+            };
+            self.stats.accept_count += 1;
+
+            let token = self.next_token();
+
+            self.poller
+                .registry()
+                .register(&mut stream, token, Interest::READABLE)?;
+
+            let connection = Connection::new_connected(addr, token, stream);
+
+            // // TODO: handle initial read
+
+            self.connections.insert(token, connection);
+        }
+    }
+
+    fn next_token(&mut self) -> Token {
+        let token = self.next_token;
+        self.next_token = Token(self.next_token.0.wrapping_add(1));
+        while self.next_token == LISTENER_TOKEN || self.connections.contains_key(&self.next_token) {
+            self.next_token = Token(self.next_token.0.wrapping_add(1));
+        }
+        token
     }
 
     fn apply(&mut self, index: LogIndex) -> std::io::Result<()> {

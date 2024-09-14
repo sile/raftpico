@@ -9,6 +9,7 @@ pub struct Stats {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ServerStats {
     pub poll_count: u64,
+    pub accept_count: u64,
     pub election_timeout_set_count: u64,
     pub election_timeout_expired_count: u64,
     pub node: Option<RaftNodeStats>,
