@@ -12,7 +12,7 @@ use rand_chacha::ChaChaRng;
 use crate::{
     connection::Connection,
     io::would_block,
-    request::{IncomingMessage, Request},
+    request::{CreateClusterParams, IncomingMessage, Request, Response},
     Machine, ServerStats,
 };
 
@@ -223,7 +223,7 @@ impl<M: Machine> RaftServer<M> {
 
         while let Some(msg) = conn.poll_recv()? {
             match msg {
-                IncomingMessage::External(req) => self.handle_external_request(req)?,
+                IncomingMessage::External(req) => self.handle_external_request(conn, req)?,
             }
         }
 
@@ -231,10 +231,47 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_external_request(&mut self, req: Request) -> std::io::Result<()> {
+    fn handle_external_request(
+        &mut self,
+        conn: &mut Connection,
+        req: Request,
+    ) -> std::io::Result<()> {
         match req {
-            Request::CreateCluster { id, params, .. } => todo!(),
+            Request::CreateCluster { id, params, .. } => {
+                let result = self.handle_create_cluster(params);
+                let response = Response::create_cluster(id, result);
+                conn.send(&response)?;
+            }
         }
+
+        Ok(())
+    }
+
+    fn handle_create_cluster(&mut self, params: CreateClusterParams) -> bool {
+        if self.node.id() != UNINIT_NODE_ID {
+            return false;
+        }
+
+        self.min_election_timeout = Duration::from_millis(params.min_election_timeout_ms as u64);
+        self.max_election_timeout = Duration::from_millis(params.max_election_timeout_ms as u64);
+
+        let node_id = NodeId::new(0);
+        self.node = Node::start(node_id);
+
+        let mut promise = self.node.create_cluster(&[node_id]);
+        promise.poll(&mut self.node);
+        assert!(promise.is_accepted());
+
+        // TODO:
+        // let mut promise = self.propose_command(Command::Join {
+        //     id: NodeIdJson(node_id),
+        //     addr: self.addr(),
+        //     caller: None,
+        // });
+        // promise.poll(&mut self.node);
+        // assert!(promise.is_accepted());
+
+        true
     }
 
     fn next_token(&mut self) -> Token {

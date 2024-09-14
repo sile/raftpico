@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::{
     io::would_block,
-    request::{is_known_external_method, IncomingMessage},
+    request::{is_known_external_method, IncomingMessage, Request},
 };
 
 #[derive(Debug)]
@@ -52,12 +52,52 @@ impl Connection {
     pub fn poll_recv(&mut self) -> std::io::Result<Option<IncomingMessage>> {
         match self.kind {
             ConnectionKind::Undefined => would_block(self.recv_undefined_message()),
-            ConnectionKind::External => todo!(),
+            ConnectionKind::External => {
+                would_block(self.recv_external_message().map(IncomingMessage::External))
+            }
             ConnectionKind::Internal => todo!(),
         }
     }
 
+    fn recv_external_message(&mut self) -> std::io::Result<Request> {
+        // TODO: refactor code
+        match self.stream.read_object::<Request>() {
+            Err(e) if e.is_io() => {
+                return Err(e.into());
+            }
+            Err(_) => {
+                let value = match self.stream.read_object::<serde_json::Value>() {
+                    Err(e) => {
+                        self.send_error_response_from_err("Invalid JSON value", &e)?;
+                        return self.recv_external_message();
+                    }
+                    Ok(value) => value,
+                };
+                match serde_json::from_value::<RequestObject>(value) {
+                    Err(e) => {
+                        self.send_error_response_from_err("Invalid JSON-RPC 2.0 request", &e)?;
+                    }
+                    Ok(req) if req.id.is_some() => {
+                        self.send_error_response_from_request(req)?;
+                    }
+                    Ok(_) => {
+                        // Do nothing as it is a notification.
+                    }
+                }
+                return self.recv_external_message();
+            }
+            Ok(req) => {
+                if let Some(e) = req.validate() {
+                    self.send_error_response(&req, e)?;
+                    return self.recv_external_message();
+                }
+                Ok(req)
+            }
+        }
+    }
+
     fn recv_undefined_message(&mut self) -> std::io::Result<IncomingMessage> {
+        // TODO: refactor code
         match self.stream.read_object::<IncomingMessage>() {
             Err(e) if e.is_io() => {
                 return Err(e.into());
@@ -65,17 +105,17 @@ impl Connection {
             Err(_) => {
                 let value = match self.stream.read_object::<serde_json::Value>() {
                     Err(e) => {
-                        self.send_error_response_from_err("Invalid JSON value", &e);
+                        self.send_error_response_from_err("Invalid JSON value", &e)?;
                         return self.recv_undefined_message();
                     }
                     Ok(value) => value,
                 };
                 match serde_json::from_value::<RequestObject>(value) {
                     Err(e) => {
-                        self.send_error_response_from_err("Invalid JSON-RPC 2.0 request", &e);
+                        self.send_error_response_from_err("Invalid JSON-RPC 2.0 request", &e)?;
                     }
                     Ok(req) if req.id.is_some() => {
-                        self.send_error_response_from_request(req);
+                        self.send_error_response_from_request(req)?;
                     }
                     Ok(_) => {
                         // Do nothing as it is a notification.
@@ -85,8 +125,12 @@ impl Connection {
             }
             Ok(m) => {
                 match &m {
-                    IncomingMessage::External(_) => {
+                    IncomingMessage::External(req) => {
                         self.kind = ConnectionKind::External;
+                        if let Some(e) = req.validate() {
+                            self.send_error_response(req, e)?;
+                            return self.recv_undefined_message();
+                        }
                     }
                 }
                 Ok(m)
@@ -94,7 +138,16 @@ impl Connection {
         }
     }
 
-    fn send_error_response_from_request(&mut self, req: RequestObject) {
+    fn send_error_response(&mut self, req: &Request, error: ErrorObject) -> std::io::Result<()> {
+        let response = ResponseObject::Err {
+            jsonrpc: JsonRpcVersion::V2,
+            error,
+            id: Some(req.id().clone()),
+        };
+        self.send(&response)
+    }
+
+    fn send_error_response_from_request(&mut self, req: RequestObject) -> std::io::Result<()> {
         let (code, msg) = if is_known_external_method(&req.method) {
             (ErrorCode::METHOD_NOT_FOUND, "Method not found")
         } else {
@@ -110,10 +163,14 @@ impl Connection {
             },
             id: req.id,
         };
-        self.send(&response);
+        self.send(&response)
     }
 
-    fn send_error_response_from_err(&mut self, msg: &str, e: &serde_json::Error) {
+    fn send_error_response_from_err(
+        &mut self,
+        msg: &str,
+        e: &serde_json::Error,
+    ) -> std::io::Result<()> {
         let response = ResponseObject::Err {
             jsonrpc: JsonRpcVersion::V2,
             error: ErrorObject {
@@ -123,17 +180,24 @@ impl Connection {
             },
             id: None,
         };
-        self.send(&response);
+        self.send(&response)
     }
 
-    fn send<T: Serialize>(&mut self, msg: &T) {
+    pub fn send<T: Serialize>(&mut self, msg: &T) -> std::io::Result<()> {
         let start_writing = !self.is_writing();
-        if let Err(e) = self.stream.write_object(msg) {
-            if start_writing && e.io_error_kind() == Some(std::io::ErrorKind::WouldBlock) {
-                self.interest = Some(Interest::READABLE | Interest::WRITABLE);
+        match self.stream.write_object(msg) {
+            Err(e) if e.io_error_kind() == Some(std::io::ErrorKind::WouldBlock) => {
+                if start_writing {
+                    self.interest = Some(Interest::READABLE | Interest::WRITABLE);
+                }
+                Ok(())
             }
+            Err(e) => Err(e.into()),
+            Ok(_) => Ok(()),
         }
     }
+
+    // TODO: try_send()
 
     pub fn poll_connect(&mut self) -> std::io::Result<bool> {
         if self.connected {

@@ -1,6 +1,4 @@
-use std::io;
-
-use jsonlrpc::{ErrorObject, JsonRpcVersion, RequestId};
+use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
 use serde::{Deserialize, Serialize};
 
 pub fn is_known_external_method(method: &str) -> bool {
@@ -19,8 +17,8 @@ pub enum Request {
     CreateCluster {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        params: Option<CreateClusterParams>,
+        #[serde(default)]
+        params: CreateClusterParams,
     },
 }
 
@@ -29,7 +27,19 @@ impl Request {
         Self::CreateCluster {
             jsonrpc: JsonRpcVersion::V2,
             id,
-            params,
+            params: params.unwrap_or_default(),
+        }
+    }
+
+    pub fn id(&self) -> &RequestId {
+        match self {
+            Request::CreateCluster { id, .. } => id,
+        }
+    }
+
+    pub fn validate(&self) -> Option<ErrorObject> {
+        match self {
+            Request::CreateCluster { params, .. } => params.validate(),
         }
     }
 }
@@ -42,14 +52,27 @@ pub struct CreateClusterParams {
 
 impl CreateClusterParams {
     // TODO: -> Option<ErrorObject>
-    pub fn validate(&self) -> io::Result<()> {
-        if self.min_election_timeout_ms > self.max_election_timeout_ms {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "`min_election_timeout_ms` must be less than or equal to `max_election_timeout_ms`",
-            ));
+    pub fn validate(&self) -> Option<ErrorObject> {
+        if self.min_election_timeout_ms <= self.max_election_timeout_ms {
+            return None;
         }
-        Ok(())
+
+        Some(ErrorObject {
+            code: ErrorCode::INVALID_PARAMS,
+            message:
+                "`min_election_timeout_ms` must be less than or equal to `max_election_timeout_ms`"
+                    .to_string(),
+            data: None,
+        })
+    }
+}
+
+impl Default for CreateClusterParams {
+    fn default() -> Self {
+        Self {
+            min_election_timeout_ms: 100,
+            max_election_timeout_ms: 1000,
+        }
     }
 }
 
@@ -72,6 +95,16 @@ impl<T> Response<T> {
         match self {
             Response::Ok { result, .. } => Ok(result),
             Response::Err { error, .. } => Err(error),
+        }
+    }
+}
+
+impl Response<CreateClusterResult> {
+    pub fn create_cluster(id: RequestId, success: bool) -> Self {
+        Self::Ok {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            result: CreateClusterResult { success },
         }
     }
 }
