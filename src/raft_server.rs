@@ -8,7 +8,7 @@ use raftbare::{Action, Node, NodeId, Role};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 
-use crate::Machine;
+use crate::{Machine, Stats};
 
 const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
 
@@ -43,6 +43,7 @@ pub struct RaftServer<M> {
     min_election_timeout: Duration,
     max_election_timeout: Duration,
     election_timeout: Option<Instant>,
+    stats: Stats,
 }
 
 impl<M: Machine> RaftServer<M> {
@@ -76,6 +77,7 @@ impl<M: Machine> RaftServer<M> {
             min_election_timeout: DEFAULT_MIN_ELECTION_TIMEOUT,
             max_election_timeout: DEFAULT_MAX_ELECTION_TIMEOUT,
             election_timeout: None,
+            stats: Stats::new(),
         })
     }
 
@@ -91,7 +93,13 @@ impl<M: Machine> RaftServer<M> {
         &self.machine
     }
 
+    pub fn stats(&self) -> &Stats {
+        &self.stats
+    }
+
     pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        self.stats.poll_count += 1;
+
         let Some(mut events) = self.events.take() else {
             unreachable!();
         };
@@ -113,6 +121,7 @@ impl<M: Machine> RaftServer<M> {
         if let Some(election_timeout) = election_timeout.filter(|&t| t <= timeout.unwrap_or(t)) {
             self.poller.poll(events, Some(election_timeout))?;
             if events.is_empty() {
+                self.stats.election_timeout_expired_count += 1;
                 self.node.handle_election_timeout();
             }
         } else {
@@ -143,6 +152,8 @@ impl<M: Machine> RaftServer<M> {
     }
 
     fn handle_set_election_timeout(&mut self) {
+        self.stats.election_timeout_set_count += 1;
+
         let min = self.min_election_timeout;
         let max = self.max_election_timeout;
         let timeout = match self.node.role() {

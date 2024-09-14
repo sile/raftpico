@@ -5,6 +5,8 @@
 
 mod machine;
 mod raft_server;
+mod stats;
 
 pub use machine::{Context, From, InputKind, Machine};
 pub use raft_server::{RaftServer, RaftServerOptions};
+pub use stats::Stats;
