@@ -3,6 +3,16 @@ use std::io;
 use jsonlrpc::{ErrorObject, JsonRpcVersion, RequestId};
 use serde::{Deserialize, Serialize};
 
+pub fn is_known_external_method(method: &str) -> bool {
+    matches!(method, "CreateCluster")
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum IncomingMessage {
+    External(Request),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
 pub enum Request {

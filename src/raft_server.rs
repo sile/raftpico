@@ -9,7 +9,9 @@ use raftbare::{Action, LogIndex, Node, NodeId, Role};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 
-use crate::{connection::Connection, io::would_block, Machine, ServerStats};
+use crate::{
+    connection::Connection, io::would_block, request::IncomingMessage, Machine, ServerStats,
+};
 
 const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
 
@@ -22,6 +24,7 @@ const DEFAULT_MAX_ELECTION_TIMEOUT: Duration = Duration::from_millis(1000);
 pub struct RaftServerOptions {
     pub mio_events_capacity: usize,
     pub rng_seed: u64,
+    // TODO: max_write_buf_size
 }
 
 impl Default for RaftServerOptions {
@@ -176,6 +179,7 @@ impl<M: Machine> RaftServer<M> {
             };
             self.stats.accept_count += 1;
 
+            let _ = stream.set_nodelay(true);
             let token = self.next_token();
 
             self.poller
@@ -183,17 +187,58 @@ impl<M: Machine> RaftServer<M> {
                 .register(&mut stream, token, Interest::READABLE)?;
 
             let connection = Connection::new_connected(addr, token, stream);
-            self.handle_connection_event(connection);
+            self.handle_connection_event_or_deregister(connection)?;
         }
     }
 
-    fn handle_connection_event(&mut self, connection: Connection) {
-        let token = connection.token;
-        // dbg!(token);
-        // dbg!(self.connections.len());
-        self.connections.insert(token, connection);
+    fn handle_connection_event_or_deregister(
+        &mut self,
+        mut conn: Connection,
+    ) -> std::io::Result<()> {
+        if let Err(_e) = self.handle_connection_event(&mut conn) {
+            // TODO: count stats depending on the error kind
+            self.poller.registry().deregister(conn.stream_mut())?;
+        } else {
+            self.connections.insert(conn.token, conn);
+        }
+        Ok(())
+    }
 
-        todo!();
+    fn handle_connection_event(&mut self, conn: &mut Connection) -> std::io::Result<()> {
+        // Connect.
+        if !conn.connected {
+            // See: https://docs.rs/mio/1.0.2/mio/net/struct.TcpStream.html#method.connect
+            conn.stream().take_error()?;
+            match conn.stream().peer_addr() {
+                Err(e) if e.kind() == std::io::ErrorKind::NotConnected => return Ok(()),
+                result => {
+                    result?;
+                }
+            }
+            conn.connected = true;
+        }
+
+        // Read.
+        while let Some(msg) = conn.recv_message()? {
+            todo!();
+        }
+
+        // Write.
+        if conn.is_writing() {
+            // would_block(conn.stream.flush().map_err(|e| e.into()))
+            //     .unwrap_or_else(|e| todo!("{:?}", e));
+            // if conn.stream.write_buf().is_empty() {
+            //     // TODO: or deregister?
+            //     self.poller.registry().reregister(
+            //         conn.stream.inner_mut(),
+            //         event.token(),
+            //         Interest::READABLE,
+            //     )?;
+            // }
+            todo!();
+        }
+
+        Ok(())
     }
 
     fn next_token(&mut self) -> Token {

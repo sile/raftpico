@@ -7,7 +7,7 @@ pub mod connection;
 pub mod io;
 mod machine;
 mod raft_server;
-pub mod request;
+pub mod request; // TODO: message?
 pub mod stats; // TODO
 
 pub use machine::{Context, From, InputKind, Machine};
@@ -46,8 +46,7 @@ mod tests {
         let server_addr = server.addr();
         std::thread::scope(|s| {
             s.spawn(|| {
-                let stream = TcpStream::connect(server_addr).expect("connect() failed");
-                let mut client = RpcClient::new(stream);
+                let mut client = RpcClient::new(connect(server_addr));
 
                 // First call: OK
                 let request = Request::create_cluster(request_id(0), None);
@@ -72,6 +71,17 @@ mod tests {
         });
 
         assert!(server.node().is_some());
+    }
+
+    fn connect(addr: SocketAddr) -> TcpStream {
+        let stream = TcpStream::connect(addr).expect("connect() failed");
+        stream
+            .set_read_timeout(Some(TEST_TIMEOUT))
+            .expect("set_read_timeout() failed");
+        stream
+            .set_write_timeout(Some(TEST_TIMEOUT))
+            .expect("set_write_timeout() failed");
+        stream
     }
 
     fn auto_addr() -> SocketAddr {
