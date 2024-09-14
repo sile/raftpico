@@ -7,4 +7,4 @@ mod machine;
 mod raft_server;
 
 pub use machine::{Context, From, InputKind, Machine};
-pub use raft_server::RaftServer;
+pub use raft_server::{RaftServer, RaftServerOptions};
