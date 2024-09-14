@@ -13,11 +13,14 @@ use crate::{
     command::Command,
     connection::Connection,
     io::would_block,
-    request::{CreateClusterParams, IncomingMessage, JoinError, JoinParams, Request, Response},
+    request::{
+        AddServerError, AddServerParams, CreateClusterParams, IncomingMessage, Request, Response,
+    },
     Machine, ServerStats,
 };
 
 const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
+const RESERVED_NODE_ID_START: NodeId = NodeId::new(u64::MAX / 2);
 
 const LISTENER_TOKEN: Token = Token(0);
 
@@ -240,7 +243,7 @@ impl<M: Machine> RaftServer<M> {
 
         while let Some(msg) = conn.poll_recv()? {
             match msg {
-                IncomingMessage::External(req) => self.handle_external_request(conn, req)?,
+                IncomingMessage::ExternalRequest(req) => self.handle_external_request(conn, req)?,
             }
         }
 
@@ -259,9 +262,9 @@ impl<M: Machine> RaftServer<M> {
                 let response = Response::create_cluster(id, result);
                 conn.send(&response)?;
             }
-            Request::Join { id, params, .. } => {
-                let result = self.handle_join(params);
-                let response = Response::join(id, result);
+            Request::AddServer { id, params, .. } => {
+                let result = self.handle_add_server(params);
+                let response = Response::add_server(id, result);
                 conn.send(&response)?;
             }
         }
@@ -269,7 +272,16 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_join(&mut self, params: JoinParams) -> Result<(), JoinError> {
+    fn handle_add_server(
+        &mut self,
+        AddServerParams {
+            contact_server_addr,
+        }: AddServerParams,
+    ) -> Result<(), AddServerError> {
+        if self.node.id() < RESERVED_NODE_ID_START {
+            return Err(AddServerError::AlreadyMember);
+        }
+
         todo!();
     }
 

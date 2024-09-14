@@ -24,7 +24,7 @@ mod tests {
     };
 
     use jsonlrpc::{RequestId, RpcClient};
-    use request::{CreateClusterResult, JoinResult, Request, Response};
+    use request::{AddServerResult, CreateClusterResult, Request, Response};
     use serde::{Deserialize, Serialize};
 
     use super::*;
@@ -72,25 +72,28 @@ mod tests {
     }
 
     #[test]
-    fn join() {
+    fn add_server() {
         let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
         assert!(server0.node().is_none());
 
         // Create a cluster.
-        let server_addr = server0.addr();
+        let server_addr0 = server0.addr();
         let handle = std::thread::spawn(move || {
-            rpc::<CreateClusterResult>(server_addr, Request::create_cluster(request_id(0), None))
+            rpc::<CreateClusterResult>(server_addr0, Request::create_cluster(request_id(0), None))
         });
         while !handle.is_finished() {
             server0.poll(POLL_TIMEOUT).expect("poll() failed");
         }
         assert!(server0.node().is_some());
 
-        // Join to the cluster.
+        // Add a server to the cluster.
         let mut server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
-
+        let server_addr1 = server1.addr();
         let handle = std::thread::spawn(move || {
-            let result: JoinResult = rpc(server_addr, Request::join(request_id(0), server_addr));
+            let result: AddServerResult = rpc(
+                server_addr1,
+                Request::add_server(request_id(0), server_addr0),
+            );
             assert!(result.success);
         });
         while !handle.is_finished() {

@@ -10,8 +10,28 @@ pub fn is_known_external_method(method: &str) -> bool {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum IncomingMessage {
-    External(Request),
+    ExternalRequest(Request),
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "method")]
+pub enum InternalRequest {
+    // AddNode {
+    //     jsonrpc: JsonRpcVersion,
+    //     id: RequestId,
+    //     params: AddNodeParams,
+    // },
+}
+
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct AddNodeParams {
+//     pub server_addr: SocketAddr,
+// }
+
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct AddNodeResult {
+//     pub success: bool,
+// }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
@@ -22,10 +42,10 @@ pub enum Request {
         #[serde(default)]
         params: CreateClusterParams,
     },
-    Join {
+    AddServer {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
-        params: JoinParams,
+        params: AddServerParams,
     },
 }
 
@@ -38,11 +58,11 @@ impl Request {
         }
     }
 
-    pub fn join(id: RequestId, contact_server_addr: SocketAddr) -> Self {
-        Self::Join {
+    pub fn add_server(id: RequestId, contact_server_addr: SocketAddr) -> Self {
+        Self::AddServer {
             jsonrpc: JsonRpcVersion::V2,
             id,
-            params: JoinParams {
+            params: AddServerParams {
                 contact_server_addr,
             },
         }
@@ -51,14 +71,14 @@ impl Request {
     pub fn id(&self) -> &RequestId {
         match self {
             Self::CreateCluster { id, .. } => id,
-            Self::Join { id, .. } => id,
+            Self::AddServer { id, .. } => id,
         }
     }
 
     pub fn validate(&self) -> Option<ErrorObject> {
         match self {
             Self::CreateCluster { params, .. } => params.validate(),
-            Self::Join { .. } => None,
+            Self::AddServer { .. } => None,
         }
     }
 }
@@ -130,9 +150,9 @@ impl Response<CreateClusterResult> {
     }
 }
 
-impl Response<JoinResult> {
-    pub fn join(id: RequestId, result: Result<(), JoinError>) -> Self {
-        let result = JoinResult {
+impl Response<AddServerResult> {
+    pub fn add_server(id: RequestId, result: Result<(), AddServerError>) -> Self {
+        let result = AddServerResult {
             success: result.is_ok(),
             error: result.err(),
         };
@@ -150,21 +170,21 @@ pub struct CreateClusterResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JoinParams {
+pub struct AddServerParams {
     pub contact_server_addr: SocketAddr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JoinResult {
+pub struct AddServerResult {
     pub success: bool,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<JoinError>,
+    pub error: Option<AddServerError>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum JoinError {
+pub enum AddServerError {
     AlreadyMember,
 }
 

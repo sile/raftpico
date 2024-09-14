@@ -52,9 +52,10 @@ impl Connection {
     pub fn poll_recv(&mut self) -> std::io::Result<Option<IncomingMessage>> {
         match self.kind {
             ConnectionKind::Undefined => would_block(self.recv_undefined_message()),
-            ConnectionKind::External => {
-                would_block(self.recv_external_message().map(IncomingMessage::External))
-            }
+            ConnectionKind::External => would_block(
+                self.recv_external_message()
+                    .map(IncomingMessage::ExternalRequest),
+            ),
             ConnectionKind::Internal => todo!(),
         }
     }
@@ -126,7 +127,7 @@ impl Connection {
             }
             Ok(m) => {
                 match &m {
-                    IncomingMessage::External(req) => {
+                    IncomingMessage::ExternalRequest(req) => {
                         self.kind = ConnectionKind::External;
                         if let Some(e) = req.validate() {
                             self.send_error_response(req, e)?;
