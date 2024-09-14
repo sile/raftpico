@@ -178,7 +178,7 @@ impl<M: Machine> RaftServer<M> {
         let max = self.max_election_timeout;
         let timeout = match self.node.role() {
             Role::Follower => max,
-            Role::Candidate => self.rng.gen_range(min..max),
+            Role::Candidate => self.rng.gen_range(min..=max),
             Role::Leader => min,
         };
         self.election_timeout = Some(Instant::now() + timeout);

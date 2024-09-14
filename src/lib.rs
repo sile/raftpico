@@ -3,9 +3,9 @@
 // pub mod remote_types; // TODO: rename
 // pub mod request;
 
-pub mod client;
 mod machine;
 mod raft_server;
+pub mod request;
 pub mod stats; // TODO
 
 pub use machine::{Context, From, InputKind, Machine};
@@ -14,7 +14,10 @@ pub use stats::ServerStats;
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, time::Duration};
+    use std::net::{SocketAddr, TcpStream};
+
+    use jsonlrpc::{RequestId, RpcClient};
+    use request::{CreateClusterResult, Request, Response};
 
     use super::*;
 
@@ -27,36 +30,46 @@ mod tests {
         }
     }
 
-    const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(10));
-
     #[test]
     fn create_cluster() {
         let mut server = RaftServer::start(auto_addr(), 0).expect("start() failed");
         assert!(server.node().is_none());
 
-        server.poll(POLL_TIMEOUT).expect("poll() failed");
+        let server_addr = server.addr();
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let stream = TcpStream::connect(server_addr).expect("connect() failed");
+                let mut client = RpcClient::new(stream);
 
-        // let handle = node.handle();
+                // First call: OK
+                let request = Request::create_cluster(request_id(0), None);
+                let response: Response<CreateClusterResult> =
+                    client.call(&request).expect("call() failed");
+                let result = response.into_std_result().expect("error response");
+                assert_eq!(result.success, true);
 
-        // std::thread::scope(|s| {
-        //     s.spawn(|| {
-        //         let created = handle.create_cluster().expect("create_cluster() failed");
-        //         assert_eq!(created, true);
+                // Second call: NG
+                let request = Request::create_cluster(request_id(1), None);
+                let response: Response<CreateClusterResult> =
+                    client.call(&request).expect("call() failed");
+                let result = response.into_std_result().expect("error response");
+                assert_eq!(result.success, false);
+            });
+            s.spawn(|| {
+                while server.node().is_none() {
+                    server.poll(None).expect("poll() failed");
+                }
+            });
+        });
 
-        //         let created = handle.create_cluster().expect("create_cluster() failed");
-        //         assert_eq!(created, false);
-        //     });
-        //     s.spawn(|| {
-        //         for _ in 0..50 {
-        //             node.poll_one(POLL_TIMEOUT).expect("poll_one() failed");
-        //         }
-        //     });
-        // });
-
-        // assert_eq!(node.id(), NodeId::new(0));
+        assert!(server.node().is_some());
     }
 
     fn auto_addr() -> SocketAddr {
         "127.0.0.1:0".parse().expect("unreachable")
+    }
+
+    fn request_id(id: i64) -> RequestId {
+        RequestId::Number(id)
     }
 }
