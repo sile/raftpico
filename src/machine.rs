@@ -8,6 +8,8 @@ pub trait Machine: Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
 
     fn handle_input(&mut self, ctx: &Context, from: From, input: &Self::Input);
+
+    // TODO: on_leader() for effect handling
 }
 
 #[derive(Debug)]

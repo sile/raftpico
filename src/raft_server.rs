@@ -266,9 +266,10 @@ impl<M: Machine> RaftServer<M> {
                 conn.send(&response)?;
             }
             Request::AddServer { id, params, .. } => {
-                let result = self.handle_add_server(params);
-                let response = Response::add_server(id, result);
-                conn.send(&response)?;
+                if let Err(e) = self.handle_add_server(params) {
+                    let response = Response::add_server(id, Err(e));
+                    conn.send(&response)?;
+                }
             }
         }
 
@@ -290,6 +291,7 @@ impl<M: Machine> RaftServer<M> {
 
         let command = Command::InviteServer { server_addr };
         let _promise = self.propose_command(command);
+
         // TODO: wait for the command committed then reply
         todo!();
     }
@@ -349,7 +351,7 @@ impl<M: Machine> RaftServer<M> {
     fn apply(&mut self, index: LogIndex) -> std::io::Result<()> {
         match self.node.log().entries().get_entry(index) {
             Some(LogEntry::Term(_) | LogEntry::ClusterConfig(_)) => {
-                // Do nothing.
+                self.maybe_update_cluster_config();
             }
             Some(LogEntry::Command) => self.apply_command(index),
             None => {
@@ -392,6 +394,16 @@ impl<M: Machine> RaftServer<M> {
                 self.next_node_id = NodeId::new(node_id.get() + 1);
             }
             Command::InviteServer { server_addr } => {
+                if self
+                    .members
+                    .values()
+                    .find(|m| m.server_addr == *server_addr)
+                    .is_some()
+                {
+                    // send error response
+                    todo!();
+                }
+
                 let node_id = self.next_node_id;
                 let member = Member {
                     node_id,
@@ -400,11 +412,35 @@ impl<M: Machine> RaftServer<M> {
                 };
                 self.members.insert(node_id, member);
                 self.next_node_id = NodeId::new(node_id.get() + 1);
-
-                // TODO: change cluster config
-                todo!()
+                self.maybe_update_cluster_config();
             }
         }
+    }
+
+    fn maybe_update_cluster_config(&mut self) {
+        if !self.node.role().is_leader() {
+            return;
+        }
+        if self.node.config().is_joint_consensus() {
+            return;
+        }
+
+        let mut adding = Vec::new();
+        let mut removing = Vec::new();
+        for id in self.members.keys() {
+            if !self.node.config().voters.contains(id) {
+                adding.push(*id);
+            }
+        }
+        for id in &self.node.config().voters {
+            if !self.members.contains_key(id) {
+                removing.push(*id);
+            }
+        }
+
+        let new_config = self.node.config().to_joint_consensus(&adding, &removing);
+        let promise = self.node.propose_config(new_config);
+        assert!(!promise.is_rejected());
     }
 
     fn handle_action(&mut self, action: Action) {
