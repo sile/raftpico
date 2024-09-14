@@ -274,6 +274,7 @@ dependencies = [
  "orfail",
  "raftbare",
  "rand",
+ "rand_chacha",
  "serde",
  "serde_json",
 ]
