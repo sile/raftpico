@@ -320,6 +320,7 @@ impl<M: Machine> RaftServer<M> {
         while let Some(msg) = conn.poll_recv()? {
             match msg {
                 IncomingMessage::ExternalRequest(req) => self.handle_external_request(conn, req)?,
+                IncomingMessage::InternalRequest(_) => todo!(),
             }
         }
 
@@ -631,7 +632,7 @@ impl<M: Machine> RaftServer<M> {
                 unconnected.push(peer);
                 continue;
             }
-            if !member.inviting {
+            if member.inviting {
                 // TODO: stats
                 continue;
             }

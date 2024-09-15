@@ -95,6 +95,9 @@ mod tests {
                 Request::add_server(request_id(0), server_addr1),
             );
             assert_eq!(result.error, None);
+
+            // TODO:
+            std::thread::sleep(Duration::from_millis(1000));
         });
         while !handle.is_finished() {
             server0.poll(POLL_TIMEOUT).expect("poll() failed");

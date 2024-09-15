@@ -14,6 +14,7 @@ pub fn is_known_external_method(method: &str) -> bool {
 #[serde(untagged)]
 pub enum IncomingMessage {
     ExternalRequest(Request),
+    InternalRequest(InternalRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

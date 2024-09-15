@@ -158,6 +158,7 @@ impl Connection {
                             return self.recv_undefined_message();
                         }
                     }
+                    IncomingMessage::InternalRequest(_) => todo!(),
                 }
                 Ok(m)
             }
