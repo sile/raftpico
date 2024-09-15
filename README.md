@@ -12,4 +12,5 @@ Feature
 - Various statistics to inspect server's internal state
 - Can be achieved by the user side
   - Effects
-  - ConditionalLocalQuery (delay response until some conditions are met)
+  - ~ConditionalLocalQuery (delay response until some conditions are met)~
+- Gurantee that local queries after a command to the same server are equal to or newer index than the command's index
