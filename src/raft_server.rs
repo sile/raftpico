@@ -6,7 +6,9 @@ use std::{
 
 use jsonlrpc::RequestId;
 use mio::{net::TcpListener, Events, Interest, Poll, Token};
-use raftbare::{Action, CommitPromise, LogEntry, LogIndex, LogPosition, Node, NodeId, Role};
+use raftbare::{
+    Action, CommitPromise, LogEntry, LogIndex, LogPosition, Message, Node, NodeId, Role,
+};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 use serde::Serialize;
@@ -261,7 +263,7 @@ impl<M: Machine> RaftServer<M> {
         // To consolidate Raft actions as much as possible,
         // the following code is positioned at the end of this method.
         while let Some(action) = self.node.actions_mut().next() {
-            self.handle_action(action);
+            self.handle_action(action)?;
         }
 
         Ok(())
@@ -598,16 +600,28 @@ impl<M: Machine> RaftServer<M> {
         assert!(!promise.is_rejected());
     }
 
-    fn handle_action(&mut self, action: Action) {
+    fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
         match action {
             Action::SetElectionTimeout => self.handle_set_election_timeout(),
             Action::SaveCurrentTerm | Action::SaveVotedFor | Action::AppendLogEntries(_) => {
                 // Do nothing as this crate uses in-memory storage.
             }
-            Action::BroadcastMessage(_) => todo!(),
+            Action::BroadcastMessage(m) => self.handle_broadcast_message(m)?,
             Action::SendMessage(_, _) => todo!(),
             Action::InstallSnapshot(_) => todo!(),
         }
+        Ok(())
+    }
+
+    fn handle_broadcast_message(&mut self, msg: Message) -> std::io::Result<()> {
+        for peer in self.node.peers() {
+            // 1. peer to token
+            // 2. token to connection
+            //   3. connect with handshake if not exists
+            // 4. convert msg to rpc notification
+            // 5. send
+        }
+        todo!()
     }
 
     fn handle_set_election_timeout(&mut self) {

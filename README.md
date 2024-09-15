@@ -1,6 +1,7 @@
 raftpico
 ========
 
+Minimal, but practical Raft framewark ...
 
 Feature
 -------
