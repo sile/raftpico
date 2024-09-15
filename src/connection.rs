@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use jsonlrpc::{
-    ErrorCode, ErrorObject, JsonRpcVersion, JsonlStream, RequestObject, ResponseObject,
+    ErrorCode, ErrorObject, JsonRpcVersion, JsonlStream, RequestId, RequestObject, ResponseObject,
 };
 use mio::{net::TcpStream, Interest, Token};
 use serde::Serialize;
@@ -18,19 +18,43 @@ pub struct Connection {
     pub stream: JsonlStream<TcpStream>,
     pub connected: bool,
     pub kind: ConnectionKind,
+    pub next_request_id: i64,
+
+    // TODO: current_interest / next_interest
     pub interest: Option<Interest>,
 }
 
 impl Connection {
-    pub fn new_connected(addr: SocketAddr, token: Token, stream: TcpStream) -> Connection {
+    pub fn new_connected(addr: SocketAddr, token: Token, stream: TcpStream) -> Self {
         Self {
             addr,
             token,
             stream: JsonlStream::new(stream),
             connected: true,
             kind: ConnectionKind::Undefined,
+            next_request_id: 0,
             interest: None,
         }
+    }
+
+    pub fn connect(addr: SocketAddr, token: Token) -> std::io::Result<Self> {
+        let stream = TcpStream::connect(addr)?;
+        stream.set_nodelay(true)?;
+        Ok(Self {
+            addr,
+            token,
+            stream: JsonlStream::new(stream),
+            connected: false,
+            kind: ConnectionKind::Internal,
+            next_request_id: 0,
+            interest: None,
+        })
+    }
+
+    pub fn next_request_id(&mut self) -> RequestId {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        RequestId::Number(id)
     }
 
     pub fn stream(&self) -> &TcpStream {

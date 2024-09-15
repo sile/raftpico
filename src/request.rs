@@ -19,6 +19,10 @@ pub enum IncomingMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
 pub enum InternalRequest {
+    Handshake {
+        jsonrpc: JsonRpcVersion,
+        params: HandshakeParams,
+    },
     AppendEntriesCall {
         jsonrpc: JsonRpcVersion,
         params: AppendEntriesCallParams,
@@ -92,6 +96,13 @@ pub enum LogEntry {
         new_voters: Vec<u64>,
     },
     Command(Command),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HandshakeParams {
+    pub src_node_id: u64,
+    pub dst_node_id: u64,
+    pub inviting: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

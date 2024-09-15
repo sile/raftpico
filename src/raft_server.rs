@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jsonlrpc::RequestId;
+use jsonlrpc::{JsonRpcVersion, RequestId};
 use mio::{net::TcpListener, Events, Interest, Poll, Token};
 use raftbare::{
     Action, CommitPromise, LogEntry, LogIndex, LogPosition, Message, Node, NodeId, Role,
@@ -18,8 +18,8 @@ use crate::{
     connection::Connection,
     io::would_block,
     request::{
-        AddServerError, AddServerParams, AddServerResult, CreateClusterParams, IncomingMessage,
-        InternalRequest, Request, Response,
+        AddServerError, AddServerParams, AddServerResult, CreateClusterParams, HandshakeParams,
+        IncomingMessage, InternalRequest, Request, Response,
     },
     Machine, ServerStats,
 };
@@ -622,20 +622,53 @@ impl<M: Machine> RaftServer<M> {
 
     fn handle_broadcast_message(&mut self, msg: Message) -> std::io::Result<()> {
         let request = InternalRequest::from_raft_message(msg, &self.commands);
+        let mut unconnected = Vec::new();
         for peer in self.node.peers() {
             let Some(member) = self.members.get(&peer) else {
                 unreachable!();
             };
             if member.token.is_none() {
-                todo!();
+                unconnected.push(peer);
+                continue;
             }
-            // 1. peer to token
-            // 2. token to connection
-            //   3. connect with handshake if not exists
-            // 4. convert msg to rpc notification
-            // 5. send
+            if !member.inviting {
+                // TODO: stats
+                continue;
+            }
+
+            todo!();
         }
-        todo!()
+
+        for peer in unconnected {
+            self.internal_connect(peer)?;
+        }
+
+        Ok(())
+    }
+
+    fn internal_connect(&mut self, peer: NodeId) -> std::io::Result<()> {
+        let token = self.next_token();
+        let member = self.members.get_mut(&peer).expect("unreachable");
+        member.token = Some(token);
+
+        let mut conn = Connection::connect(member.server_addr, token)?;
+
+        self.poller.registry().register(
+            conn.stream_mut(),
+            token,
+            Interest::READABLE | Interest::WRITABLE,
+        )?;
+
+        let request = InternalRequest::Handshake {
+            jsonrpc: JsonRpcVersion::V2,
+            params: HandshakeParams {
+                src_node_id: self.node.id().get(),
+                dst_node_id: peer.get(),
+                inviting: member.inviting,
+            },
+        };
+        self.send_to(token, request)?;
+        Ok(())
     }
 
     fn handle_set_election_timeout(&mut self) {
