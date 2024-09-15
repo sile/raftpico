@@ -454,7 +454,7 @@ impl<M: Machine> RaftServer<M> {
             return Ok(());
         };
 
-        if conn.send(&response).is_err() {
+        if let Err(e) = conn.send(&response) {
             // TODO: count stats depending on the error kind
             self.poller.registry().deregister(conn.stream_mut())?;
             self.connections.remove(&token);
@@ -637,6 +637,7 @@ impl<M: Machine> RaftServer<M> {
                 continue;
             }
 
+            // try_send() or OutgoingMessage trait
             todo!();
         }
 
@@ -654,11 +655,11 @@ impl<M: Machine> RaftServer<M> {
 
         let mut conn = Connection::connect(member.server_addr, token)?;
 
-        self.poller.registry().register(
-            conn.stream_mut(),
-            token,
-            Interest::READABLE | Interest::WRITABLE,
-        )?;
+        self.poller
+            .registry()
+            .register(conn.stream_mut(), token, Interest::WRITABLE)?;
+        conn.poll_connect()?; // TODO: deregister if failed
+        self.connections.insert(token, conn);
 
         let request = InternalRequest::Handshake {
             jsonrpc: JsonRpcVersion::V2,

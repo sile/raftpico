@@ -213,6 +213,10 @@ impl Connection {
     pub fn send<T: Serialize>(&mut self, msg: &T) -> std::io::Result<()> {
         let start_writing = !self.is_writing();
         match self.stream.write_object(msg) {
+            Err(_e) if !self.connected => {
+                // TODO: self.stream.write_to_buf()
+                Ok(())
+            }
             Err(e) if e.io_error_kind() == Some(std::io::ErrorKind::WouldBlock) => {
                 if start_writing {
                     self.interest = Some(Interest::READABLE | Interest::WRITABLE);
@@ -244,7 +248,7 @@ impl Connection {
     }
 
     pub fn poll_send(&mut self) -> std::io::Result<()> {
-        if !self.is_writing() {
+        if !self.connected || !self.is_writing() {
             return Ok(());
         }
 
