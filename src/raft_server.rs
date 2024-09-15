@@ -1,20 +1,23 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BinaryHeap, HashMap},
     net::SocketAddr,
     time::{Duration, Instant},
 };
 
+use jsonlrpc::RequestId;
 use mio::{net::TcpListener, Events, Interest, Poll, Token};
-use raftbare::{Action, CommitPromise, LogEntry, LogIndex, Node, NodeId, Role};
+use raftbare::{Action, CommitPromise, LogEntry, LogIndex, LogPosition, Node, NodeId, Role};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
+use serde::Serialize;
 
 use crate::{
     command::Command,
     connection::Connection,
     io::would_block,
     request::{
-        AddServerError, AddServerParams, CreateClusterParams, IncomingMessage, Request, Response,
+        AddServerError, AddServerParams, AddServerResult, CreateClusterParams, IncomingMessage,
+        Request, Response,
     },
     Machine, ServerStats,
 };
@@ -26,6 +29,66 @@ const LISTENER_TOKEN: Token = Token(0);
 
 const DEFAULT_MIN_ELECTION_TIMEOUT: Duration = Duration::from_millis(100);
 const DEFAULT_MAX_ELECTION_TIMEOUT: Duration = Duration::from_millis(1000);
+
+// TODO: not enum
+#[derive(Debug)]
+pub enum PendingResponse {
+    AddServer {
+        token: Token,
+        request_id: RequestId,
+        commit_promise: CommitPromise,
+        on_rejected: fn() -> AddServerResult, // TODO: remove?
+    },
+}
+
+impl PendingResponse {
+    pub fn token(&self) -> Token {
+        match self {
+            PendingResponse::AddServer { token, .. } => *token,
+        }
+    }
+
+    pub fn request_id(&self) -> RequestId {
+        match self {
+            PendingResponse::AddServer { request_id, .. } => request_id.clone(),
+        }
+    }
+
+    pub fn log_position(&self) -> LogPosition {
+        match self {
+            PendingResponse::AddServer { commit_promise, .. } => commit_promise.log_position(),
+        }
+    }
+
+    pub fn commit_promise(&self) -> CommitPromise {
+        match self {
+            PendingResponse::AddServer { commit_promise, .. } => *commit_promise,
+        }
+    }
+}
+
+impl PartialOrd for PendingResponse {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PendingResponse {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // [NOTE] Reversed order for BinaryHeap
+        let p0 = other.log_position();
+        let p1 = self.log_position();
+        (p0.term.get(), p0.index.get()).cmp(&(p1.term.get(), p1.index.get()))
+    }
+}
+
+impl PartialEq for PendingResponse {
+    fn eq(&self, other: &Self) -> bool {
+        self.log_position() == other.log_position()
+    }
+}
+
+impl Eq for PendingResponse {}
 
 #[derive(Debug, Clone)]
 pub struct RaftServerOptions {
@@ -64,6 +127,8 @@ pub struct RaftServer<M> {
     last_applied_index: LogIndex,
     stats: ServerStats,
     commands: BTreeMap<LogIndex, Command>,
+    pending_responses: BinaryHeap<PendingResponse>,
+
     machine: M,
 
     // TODO: Add a struct for following fields
@@ -108,6 +173,7 @@ impl<M: Machine> RaftServer<M> {
             last_applied_index: LogIndex::ZERO,
             stats: ServerStats::default(),
             commands: BTreeMap::new(),
+            pending_responses: BinaryHeap::new(),
 
             // Replicated state
             machine,
@@ -266,7 +332,7 @@ impl<M: Machine> RaftServer<M> {
                 conn.send(&response)?;
             }
             Request::AddServer { id, params, .. } => {
-                if let Err(e) = self.handle_add_server(params) {
+                if let Err(e) = self.handle_add_server(conn.token, &id, params) {
                     let response = Response::add_server(id, Err(e));
                     conn.send(&response)?;
                 }
@@ -278,6 +344,8 @@ impl<M: Machine> RaftServer<M> {
 
     fn handle_add_server(
         &mut self,
+        token: Token,
+        request_id: &RequestId,
         AddServerParams { server_addr }: AddServerParams,
     ) -> Result<(), AddServerError> {
         if self.node.id() >= RESERVED_NODE_ID_START {
@@ -290,10 +358,19 @@ impl<M: Machine> RaftServer<M> {
         }
 
         let command = Command::InviteServer { server_addr };
-        let _promise = self.propose_command(command);
+        let commit_promise = self.propose_command(command);
 
-        // TODO: wait for the command committed then reply
-        todo!();
+        let response = PendingResponse::AddServer {
+            token,
+            request_id: request_id.clone(),
+            commit_promise,
+            on_rejected: || AddServerResult {
+                success: false,
+                error: Some(AddServerError::ProposalRejected),
+            },
+        };
+        self.pending_responses.push(response);
+        Ok(())
     }
 
     fn handle_create_cluster(&mut self, params: CreateClusterParams) -> bool {
@@ -326,15 +403,16 @@ impl<M: Machine> RaftServer<M> {
     }
 
     fn propose_command(&mut self, command: Command) -> CommitPromise {
-        // TODO: if self.pending_query.is_some() {}
+        debug_assert!(self.node.role().is_leader());
+
+        // TODO: if self.pending_query.is_some() { merge() }
 
         let promise = self.node.propose_command();
-        if !promise.is_rejected() {
-            self.commands.insert(promise.log_position().index, command);
+        debug_assert!(!promise.is_rejected());
 
-            if self.commands.len() > self.max_log_entries_hint {
-                todo!();
-            }
+        self.commands.insert(promise.log_position().index, command);
+        if self.commands.len() > self.max_log_entries_hint {
+            todo!();
         }
         promise
     }
@@ -348,12 +426,65 @@ impl<M: Machine> RaftServer<M> {
         token
     }
 
+    fn send_pending_error_response(&mut self, pending: PendingResponse) -> std::io::Result<()> {
+        match pending {
+            PendingResponse::AddServer {
+                token,
+                request_id,
+                on_rejected,
+                ..
+            } => {
+                self.send_to(token, Response::ok(request_id, on_rejected()))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn send_to<T: Serialize>(&mut self, token: Token, response: T) -> std::io::Result<()> {
+        let Some(conn) = self.connections.get_mut(&token) else {
+            // Already disconnected.
+            return Ok(());
+        };
+
+        if conn.send(&response).is_err() {
+            // TODO: count stats depending on the error kind
+            self.poller.registry().deregister(conn.stream_mut())?;
+            self.connections.remove(&token);
+            return Ok(());
+        }
+
+        if let Some(interest) = conn.interest.take() {
+            self.poller
+                .registry()
+                .reregister(conn.stream_mut(), token, interest)?;
+        }
+
+        Ok(())
+    }
+
     fn apply(&mut self, index: LogIndex) -> std::io::Result<()> {
+        let mut pending_response = None;
+        while let Some(pending) = self.pending_responses.peek() {
+            match pending.commit_promise().poll(&self.node) {
+                CommitPromise::Rejected(_) => {
+                    let pending = self.pending_responses.pop().expect("unreachable");
+                    self.send_pending_error_response(pending)?;
+                }
+                CommitPromise::Pending(_) => break,
+                CommitPromise::Accepted(_) => {
+                    pending_response = self.pending_responses.pop();
+                    break;
+                }
+            }
+        }
+
         match self.node.log().entries().get_entry(index) {
             Some(LogEntry::Term(_) | LogEntry::ClusterConfig(_)) => {
                 self.maybe_update_cluster_config();
             }
-            Some(LogEntry::Command) => self.apply_command(index),
+            Some(LogEntry::Command) => {
+                self.apply_command(index, pending_response)?;
+            }
             None => {
                 return Err(std::io::Error::new(
                     // TODO: unreachable?
@@ -368,9 +499,13 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn apply_command(&mut self, index: LogIndex) {
+    fn apply_command(
+        &mut self,
+        index: LogIndex,
+        pending: Option<PendingResponse>,
+    ) -> std::io::Result<()> {
         let Some(command) = self.commands.get(&index) else {
-            unreachable!();
+            unreachable!("bug");
         };
 
         match command {
@@ -380,6 +515,8 @@ impl<M: Machine> RaftServer<M> {
                 max_election_timeout,
                 max_log_entries_hint,
             } => {
+                debug_assert!(pending.is_none());
+
                 self.min_election_timeout = *min_election_timeout;
                 self.max_election_timeout = *max_election_timeout;
                 self.max_log_entries_hint = *max_log_entries_hint;
@@ -394,27 +531,45 @@ impl<M: Machine> RaftServer<M> {
                 self.next_node_id = NodeId::new(node_id.get() + 1);
             }
             Command::InviteServer { server_addr } => {
-                if self
+                let result = if self
                     .members
                     .values()
                     .find(|m| m.server_addr == *server_addr)
                     .is_some()
                 {
-                    // send error response
-                    todo!();
-                }
-
-                let node_id = self.next_node_id;
-                let member = Member {
-                    node_id,
-                    server_addr: *server_addr,
-                    inviting: true,
+                    AddServerResult::err(AddServerError::AlreadyInCluster)
+                } else {
+                    let node_id = self.next_node_id;
+                    let member = Member {
+                        node_id,
+                        server_addr: *server_addr,
+                        inviting: true,
+                    };
+                    self.members.insert(node_id, member);
+                    self.next_node_id = NodeId::new(node_id.get() + 1);
+                    self.maybe_update_cluster_config();
+                    AddServerResult::ok()
                 };
-                self.members.insert(node_id, member);
-                self.next_node_id = NodeId::new(node_id.get() + 1);
-                self.maybe_update_cluster_config();
+                self.try_response_to(pending, result)?;
             }
         }
+
+        Ok(())
+    }
+
+    fn try_response_to<T: Serialize>(
+        &mut self,
+        pending: Option<PendingResponse>,
+        result: T,
+    ) -> std::io::Result<()> {
+        let Some(pending) = pending else {
+            return Ok(());
+        };
+
+        let response = Response::ok(pending.request_id(), result);
+        let token = pending.token();
+        self.send_to(token, response)?;
+        Ok(())
     }
 
     fn maybe_update_cluster_config(&mut self) {

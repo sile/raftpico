@@ -117,7 +117,9 @@ impl Default for CreateClusterParams {
     }
 }
 
+// TODO: remove T?
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum Response<T> {
     Ok {
         jsonrpc: JsonRpcVersion,
@@ -132,6 +134,14 @@ pub enum Response<T> {
 }
 
 impl<T> Response<T> {
+    pub fn ok(id: RequestId, result: T) -> Self {
+        Self::Ok {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            result,
+        }
+    }
+
     pub fn into_std_result(self) -> Result<T, ErrorObject> {
         match self {
             Response::Ok { result, .. } => Ok(result),
@@ -182,11 +192,28 @@ pub struct AddServerResult {
     pub error: Option<AddServerError>,
 }
 
+impl AddServerResult {
+    pub fn ok() -> Self {
+        Self {
+            success: true,
+            error: None,
+        }
+    }
+
+    pub fn err(e: AddServerError) -> Self {
+        Self {
+            success: false,
+            error: Some(e),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AddServerError {
     // TODO
     ServerNotReady,
+    ProposalRejected,
     AlreadyInCluster,
 }
 
