@@ -19,7 +19,7 @@ use crate::{
     io::would_block,
     request::{
         AddServerError, AddServerParams, AddServerResult, CreateClusterParams, IncomingMessage,
-        Request, Response,
+        InternalRequest, Request, Response,
     },
     Machine, ServerStats,
 };
@@ -113,7 +113,12 @@ pub struct Member {
     pub node_id: NodeId,
     pub server_addr: SocketAddr,
     pub inviting: bool,
+
+    // skip serialization
+    pub token: Option<Token>,
 }
+
+pub type Commands = BTreeMap<LogIndex, Command>;
 
 #[derive(Debug)]
 pub struct RaftServer<M> {
@@ -128,7 +133,7 @@ pub struct RaftServer<M> {
     election_timeout: Option<Instant>,
     last_applied_index: LogIndex,
     stats: ServerStats,
-    commands: BTreeMap<LogIndex, Command>,
+    commands: Commands,
     pending_responses: BinaryHeap<PendingResponse>,
 
     machine: M,
@@ -528,6 +533,7 @@ impl<M: Machine> RaftServer<M> {
                     node_id,
                     server_addr: *server_addr,
                     inviting: false,
+                    token: None,
                 };
                 self.members.insert(node_id, member);
                 self.next_node_id = NodeId::new(node_id.get() + 1);
@@ -546,6 +552,7 @@ impl<M: Machine> RaftServer<M> {
                         node_id,
                         server_addr: *server_addr,
                         inviting: true,
+                        token: None,
                     };
                     self.members.insert(node_id, member);
                     self.next_node_id = NodeId::new(node_id.get() + 1);
@@ -614,7 +621,14 @@ impl<M: Machine> RaftServer<M> {
     }
 
     fn handle_broadcast_message(&mut self, msg: Message) -> std::io::Result<()> {
+        let request = InternalRequest::from_raft_message(msg, &self.commands);
         for peer in self.node.peers() {
+            let Some(member) = self.members.get(&peer) else {
+                unreachable!();
+            };
+            if member.token.is_none() {
+                todo!();
+            }
             // 1. peer to token
             // 2. token to connection
             //   3. connect with handshake if not exists

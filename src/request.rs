@@ -1,7 +1,10 @@
 use std::net::SocketAddr;
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
+use raftbare::{Message, MessageHeader};
 use serde::{Deserialize, Serialize};
+
+use crate::{command::Command, raft_server::Commands};
 
 pub fn is_known_external_method(method: &str) -> bool {
     matches!(method, "CreateCluster")
@@ -16,22 +19,80 @@ pub enum IncomingMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
 pub enum InternalRequest {
-    // AddNode {
-    //     jsonrpc: JsonRpcVersion,
-    //     id: RequestId,
-    //     params: AddNodeParams,
-    // },
+    AppendEntriesCall {
+        jsonrpc: JsonRpcVersion,
+        params: AppendEntriesCallParams,
+    },
 }
 
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct AddNodeParams {
-//     pub server_addr: SocketAddr,
-// }
+impl InternalRequest {
+    pub fn from_raft_message(msg: Message, commands: &Commands) -> Self {
+        match msg {
+            Message::RequestVoteCall {
+                header,
+                last_position,
+            } => todo!(),
+            Message::RequestVoteReply {
+                header,
+                vote_granted,
+            } => todo!(),
+            Message::AppendEntriesCall {
+                header: MessageHeader { from, term, seqno },
+                commit_index,
+                entries,
+            } => Self::AppendEntriesCall {
+                jsonrpc: JsonRpcVersion::V2,
+                params: AppendEntriesCallParams {
+                    from: from.get(),
+                    term: term.get(),
+                    seqno: seqno.get(),
+                    commit_index: commit_index.get(),
+                    prev_log_term: entries.prev_position().term.get(),
+                    prev_log_index: entries.prev_position().index.get(),
+                    entries: entries
+                        .iter_with_positions()
+                        .map(|(position, entry)| match entry {
+                            raftbare::LogEntry::Term(t) => LogEntry::Term(t.get()),
+                            raftbare::LogEntry::ClusterConfig(c) => LogEntry::Config {
+                                voters: c.voters.iter().map(|v| v.get()).collect(),
+                                new_voters: c.new_voters.iter().map(|v| v.get()).collect(),
+                            },
+                            raftbare::LogEntry::Command => {
+                                let command = commands.get(&position.index).expect("bug");
+                                LogEntry::Command(command.clone())
+                            }
+                        })
+                        .collect(),
+                },
+            },
+            Message::AppendEntriesReply {
+                header,
+                last_position,
+            } => todo!(),
+        }
+    }
+}
 
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct AddNodeResult {
-//     pub success: bool,
-// }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppendEntriesCallParams {
+    from: u64,
+    term: u64,
+    seqno: u64,
+    commit_index: u64,
+    prev_log_term: u64,
+    prev_log_index: u64,
+    entries: Vec<LogEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LogEntry {
+    Term(u64),
+    Config {
+        voters: Vec<u64>,
+        new_voters: Vec<u64>,
+    },
+    Command(Command),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
