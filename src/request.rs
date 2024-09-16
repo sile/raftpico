@@ -256,6 +256,11 @@ pub enum Request {
         id: RequestId,
         params: AddServerParams,
     },
+    RemoveServer {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: RemoveServerParams,
+    },
     Command {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
@@ -272,13 +277,19 @@ impl Request {
         }
     }
 
-    pub fn add_server(id: RequestId, contact_server_addr: SocketAddr) -> Self {
+    pub fn add_server(id: RequestId, server_addr: SocketAddr) -> Self {
         Self::AddServer {
             jsonrpc: JsonRpcVersion::V2,
             id,
-            params: AddServerParams {
-                server_addr: contact_server_addr,
-            },
+            params: AddServerParams { server_addr },
+        }
+    }
+
+    pub fn remove_server(id: RequestId, server_addr: SocketAddr) -> Self {
+        Self::RemoveServer {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            params: RemoveServerParams { server_addr },
         }
     }
 
@@ -295,6 +306,7 @@ impl Request {
         match self {
             Self::CreateCluster { id, .. } => id,
             Self::AddServer { id, .. } => id,
+            Self::RemoveServer { id, .. } => id,
             Self::Command { id, .. } => id,
         }
     }
@@ -303,6 +315,7 @@ impl Request {
         match self {
             Self::CreateCluster { params, .. } => params.validate(),
             Self::AddServer { .. } => None,
+            Self::RemoveServer { .. } => None,
             Self::Command { .. } => None,
         }
     }
@@ -444,6 +457,11 @@ pub struct AddServerParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoveServerParams {
+    pub server_addr: SocketAddr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputParams {
     pub input: serde_json::Value,
 }
@@ -465,6 +483,30 @@ impl AddServerResult {
     }
 
     pub fn err(e: AddServerError) -> Self {
+        Self {
+            success: false,
+            error: Some(e),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoveServerResult {
+    pub success: bool,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<RemoveServerError>,
+}
+
+impl RemoveServerResult {
+    pub fn ok() -> Self {
+        Self {
+            success: true,
+            error: None,
+        }
+    }
+
+    pub fn err(e: RemoveServerError) -> Self {
         Self {
             success: false,
             error: Some(e),
@@ -550,6 +592,26 @@ impl From<CommonError> for AddServerError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RemoveServerError {
+    // TODO
+    ProposalRejected,
+    ServerNotReady,
+    LeaderNotKnown,
+    NotInCluster,
+}
+
+impl From<CommonError> for RemoveServerError {
+    fn from(value: CommonError) -> Self {
+        match value {
+            CommonError::ProposalRejected => Self::ProposalRejected,
+            CommonError::ServerNotReady => Self::ServerNotReady,
+            CommonError::LeaderNotKnown => Self::LeaderNotKnown,
+        }
+    }
+}
+
 // TODO: rename
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -570,89 +632,3 @@ impl From<CommonError> for OutputError {
         }
     }
 }
-
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// #[serde(tag = "method")]
-// pub enum Request {
-//     Kick {
-//         jsonrpc: JsonRpcVersion,
-//         id: RequestId,
-//         params: KickParams,
-//     },
-//     Apply {
-//         jsonrpc: JsonRpcVersion,
-//         id: RequestId,
-//         params: ApplyParams,
-//     },
-//     // TODO: GetMembers, etc
-
-//     // Internal messages
-//     // TODO: Handshake
-//     Propose {
-//         jsonrpc: JsonRpcVersion,
-//         id: u32,
-//         params: ProposeParams,
-//     },
-//     GetSnapshot {
-//         jsonrpc: JsonRpcVersion,
-//         id: u32,
-//     }, //  Raft
-// }
-
-// // TODO: validate
-
-// impl Default for CreateClusterParams {
-//     fn default() -> Self {
-//         Self {
-//             min_election_timeout: Seconds::new(100.0),
-//             max_election_timeout: Seconds::new(1000.0),
-//         }
-//     }
-// }
-
-// #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-// pub struct Seconds(f64);
-
-// impl Seconds {
-//     pub const fn new(seconds: f64) -> Self {
-//         Self(seconds)
-//     }
-
-//     pub const fn get(self) -> f64 {
-//         self.0
-//     }
-// }
-
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct KickParams {
-//     pub target_addr: SocketAddr,
-// }
-
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct ProposeParams {
-//     pub command: Command,
-// }
-
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct AskParams {
-//     pub query: serde_json::Value,
-
-//     #[serde(default)]
-//     pub local: bool,
-// }
-
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct ApplyParams {
-//     #[serde(default)]
-//     pub kind: ApplyKind,
-//     pub args: serde_json::Value,
-// }
-
-// #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-// #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-// pub enum ApplyKind {
-//     #[default]
-//     Command,
-//     Query,
-//     LocalQuery,
-// }

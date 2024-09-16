@@ -24,7 +24,7 @@ mod tests {
     };
 
     use jsonlrpc::{RequestId, RpcClient};
-    use request::{AddServerResult, CreateClusterResult, Request, Response};
+    use request::{AddServerResult, CreateClusterResult, RemoveServerResult, Request, Response};
     use serde::{Deserialize, Serialize};
 
     use super::*;
@@ -72,7 +72,7 @@ mod tests {
     }
 
     #[test]
-    fn add_server() {
+    fn add_and_remove_server() {
         let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
         assert!(server0.node().is_none());
 
@@ -104,6 +104,23 @@ mod tests {
             server1.poll(POLL_TIMEOUT).expect("poll() failed");
         }
         assert!(server1.node().is_some());
+
+        // Remove server0 from the cluster.
+        let handle = std::thread::spawn(move || {
+            let result: RemoveServerResult = rpc(
+                server_addr0,
+                Request::remove_server(request_id(0), server_addr0),
+            );
+            assert_eq!(result.error, None);
+
+            // TODO: call machine.on_event(Event::ServerJoined)
+            std::thread::sleep(Duration::from_millis(500));
+        });
+        while !handle.is_finished() {
+            server0.poll(POLL_TIMEOUT).expect("poll() failed");
+            server1.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
+        assert!(server0.node().is_none());
     }
 
     #[test]

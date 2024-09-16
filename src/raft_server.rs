@@ -442,6 +442,10 @@ impl<M: Machine> RaftServer<M> {
                     conn.send(&response)?;
                 }
             }
+            Request::RemoveServer { id, params, .. } => {
+                //
+                todo!();
+            }
             Request::Command { id, params, .. } => {
                 if let Err(e) = self.handle_command(conn.token, &id, params) {
                     let response = Response::output(id, Err(e));
