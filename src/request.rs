@@ -36,6 +36,8 @@ impl OutgoingMessage for InternalRequest {
             InternalRequest::Propose { .. } => true,
             InternalRequest::AppendEntriesCall { .. } => false,
             InternalRequest::AppendEntriesReply { .. } => false,
+            InternalRequest::RequestVoteCall { .. } => false,
+            InternalRequest::RequestVoteReply { .. } => false,
         }
     }
 }
@@ -75,19 +77,44 @@ pub enum InternalRequest {
         jsonrpc: JsonRpcVersion,
         params: AppendEntriesReplyParams,
     },
+    RequestVoteCall {
+        jsonrpc: JsonRpcVersion,
+        params: RequestVoteCallParams,
+    },
+    RequestVoteReply {
+        jsonrpc: JsonRpcVersion,
+        params: RequestVoteReplyParams,
+    },
 }
 
 impl InternalRequest {
     pub fn from_raft_message(msg: Message, commands: &Commands) -> Self {
         match msg {
             Message::RequestVoteCall {
-                header,
+                header: MessageHeader { from, term, seqno },
                 last_position,
-            } => todo!(),
+            } => Self::RequestVoteCall {
+                jsonrpc: JsonRpcVersion::V2,
+                params: RequestVoteCallParams {
+                    from: from.get(),
+                    term: term.get(),
+                    seqno: seqno.get(),
+                    last_log_term: last_position.term.get(),
+                    last_log_index: last_position.index.get(),
+                },
+            },
             Message::RequestVoteReply {
-                header,
+                header: MessageHeader { from, term, seqno },
                 vote_granted,
-            } => todo!(),
+            } => Self::RequestVoteReply {
+                jsonrpc: JsonRpcVersion::V2,
+                params: RequestVoteReplyParams {
+                    from: from.get(),
+                    term: term.get(),
+                    seqno: seqno.get(),
+                    vote_granted,
+                },
+            },
             Message::AppendEntriesCall {
                 header: MessageHeader { from, term, seqno },
                 commit_index,
@@ -206,6 +233,55 @@ impl AppendEntriesReplyParams {
         Message::AppendEntriesReply {
             header,
             last_position,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestVoteCallParams {
+    from: u64,
+    term: u64,
+    seqno: u64,
+    last_log_term: u64,
+    last_log_index: u64,
+}
+
+impl RequestVoteCallParams {
+    pub fn to_raft_message(self) -> Message {
+        let header = MessageHeader {
+            from: NodeId::new(self.from),
+            term: Term::new(self.term),
+            seqno: MessageSeqNo::new(self.seqno),
+        };
+        let last_position = LogPosition {
+            term: Term::new(self.last_log_term),
+            index: LogIndex::new(self.last_log_index),
+        };
+        Message::RequestVoteCall {
+            header,
+            last_position,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestVoteReplyParams {
+    from: u64,
+    term: u64,
+    seqno: u64,
+    vote_granted: bool,
+}
+
+impl RequestVoteReplyParams {
+    pub fn to_raft_message(self) -> Message {
+        let header = MessageHeader {
+            from: NodeId::new(self.from),
+            term: Term::new(self.term),
+            seqno: MessageSeqNo::new(self.seqno),
+        };
+        Message::RequestVoteReply {
+            header,
+            vote_granted: self.vote_granted,
         }
     }
 }

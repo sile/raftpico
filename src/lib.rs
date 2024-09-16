@@ -231,21 +231,27 @@ mod tests {
         for server in &servers {
             assert!(server.node().is_some());
         }
+        assert!(servers[0].node().expect("unreachable").role().is_leader());
 
         // Run until the leader changes.
-        while servers[0].node().expect("unreachable").role().is_leader() {
+        while !servers
+            .iter()
+            .skip(1)
+            .any(|s| s.node().expect("unreachable").role().is_leader())
+        {
             for server in servers.iter_mut().skip(1) {
                 server.poll(POLL_TIMEOUT).expect("poll() failed");
             }
         }
-        while servers
-            .iter()
-            .all(|s| !s.node().expect("unreachable").role().is_leader())
-        {
+        for _ in 0..100 {
             for server in &mut servers {
                 server.poll(POLL_TIMEOUT).expect("poll() failed");
             }
+            if servers[0].node().expect("unreachable").role().is_follower() {
+                break;
+            }
         }
+        assert!(servers[0].node().expect("unreachable").role().is_follower());
     }
 
     fn rpc<T>(server_addr: SocketAddr, request: impl Serialize) -> T

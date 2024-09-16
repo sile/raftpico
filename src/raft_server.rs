@@ -376,6 +376,14 @@ impl<M: Machine> RaftServer<M> {
                 let msg = params.to_raft_message();
                 self.node.handle_message(msg);
             }
+            InternalRequest::RequestVoteCall { params, .. } => {
+                let msg = params.to_raft_message();
+                self.node.handle_message(msg);
+            }
+            InternalRequest::RequestVoteReply { params, .. } => {
+                let msg = params.to_raft_message();
+                self.node.handle_message(msg);
+            }
         }
         Ok(())
     }
