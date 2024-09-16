@@ -188,6 +188,66 @@ mod tests {
         }
     }
 
+    #[test]
+    fn re_election() {
+        let mut servers = Vec::new();
+        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+
+        // Create a cluster.
+        let server_addr0 = server0.addr();
+        let handle = std::thread::spawn(move || {
+            rpc::<CreateClusterResult>(server_addr0, Request::create_cluster(request_id(0), None))
+        });
+        while !handle.is_finished() {
+            server0.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
+        servers.push(server0);
+
+        // Add two servers to the cluster.
+        let server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server2 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server_addr1 = server1.addr();
+        let server_addr2 = server2.addr();
+        let handle = std::thread::spawn(move || {
+            let mut contact_addr = server_addr0;
+            for addr in [server_addr1, server_addr2] {
+                let result: AddServerResult =
+                    rpc(contact_addr, Request::add_server(request_id(0), addr));
+                assert_eq!(result.error, None);
+                contact_addr = addr;
+
+                // TODO:
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        servers.push(server1);
+        servers.push(server2);
+
+        while !handle.is_finished() {
+            for server in &mut servers {
+                server.poll(POLL_TIMEOUT).expect("poll() failed");
+            }
+        }
+        for server in &servers {
+            assert!(server.node().is_some());
+        }
+
+        // Run until the leader changes.
+        while servers[0].node().expect("unreachable").role().is_leader() {
+            for server in servers.iter_mut().skip(1) {
+                server.poll(POLL_TIMEOUT).expect("poll() failed");
+            }
+        }
+        while servers
+            .iter()
+            .all(|s| !s.node().expect("unreachable").role().is_leader())
+        {
+            for server in &mut servers {
+                server.poll(POLL_TIMEOUT).expect("poll() failed");
+            }
+        }
+    }
+
     fn rpc<T>(server_addr: SocketAddr, request: impl Serialize) -> T
     where
         T: for<'de> Deserialize<'de>,
