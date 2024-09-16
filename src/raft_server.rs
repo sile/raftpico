@@ -20,9 +20,9 @@ use crate::{
     request::{
         AddServerError, AddServerParams, AddServerResult, CommonError, CreateClusterParams,
         HandshakeParams, IncomingMessage, InputParams, InternalIncomingMessage, InternalRequest,
-        OutgoingMessage, OutputError, Request, Response,
+        OutgoingMessage, OutputError, OutputResult, Request, Response,
     },
-    Machine, ServerStats,
+    Context, InputKind, Machine, ServerStats,
 };
 
 const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
@@ -410,7 +410,13 @@ impl<M: Machine> RaftServer<M> {
         let command = Command::Command(input);
         let commit_promise = self.propose_command(command);
 
-        todo!()
+        let response = PendingResponse {
+            token,
+            request_id: request_id.clone(),
+            commit_promise,
+        };
+        self.pending_responses.push(response);
+        Ok(())
     }
 
     fn handle_add_server(
@@ -625,7 +631,27 @@ impl<M: Machine> RaftServer<M> {
                 };
                 self.try_response_to(pending, result)?;
             }
-            Command::Command(_) => todo!(),
+            Command::Command(input_json) => {
+                let Ok(input) = serde_json::from_value::<M::Input>(input_json.clone()) else {
+                    todo!("response error");
+                };
+                let mut ctx = Context {
+                    kind: InputKind::Command,
+                    node: &self.node,
+                    machine_version: LogIndex::new(index.get() - 1),
+                    output: None,
+                    ignore_output: pending.is_none(),
+                };
+                self.machine.handle_input(&mut ctx, input);
+                if pending.is_some() {
+                    let result = match ctx.output {
+                        None => OutputResult::ok(serde_json::Value::Null),
+                        Some(Ok(value)) => OutputResult::ok(value),
+                        Some(Err(_e)) => OutputResult::err(OutputError::InvalidOutput),
+                    };
+                    self.try_response_to(pending, result)?;
+                }
+            }
         }
 
         Ok(())

@@ -491,6 +491,7 @@ pub enum OutputError {
     ServerNotReady,
     ProposalRejected,
     InvalidInput,
+    InvalidOutput,
 }
 
 // #[derive(Debug, Clone, Serialize, Deserialize)]

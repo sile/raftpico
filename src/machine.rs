@@ -1,22 +1,22 @@
-use std::sync::mpsc;
-
-use mio::Token;
 use raftbare::{LogIndex, Node};
 use serde::{Deserialize, Serialize};
 
 pub trait Machine: Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
 
-    fn handle_input(&mut self, ctx: &Context, from: From, input: &Self::Input);
+    fn handle_input(&mut self, ctx: &mut Context, input: Self::Input);
 
     // TODO: on_leader() for effect handling
 }
 
 #[derive(Debug)]
 pub struct Context<'a> {
-    kind: InputKind,
-    node: &'a Node,
-    machine_version: LogIndex,
+    pub(crate) kind: InputKind,
+    pub(crate) node: &'a Node,
+    pub(crate) machine_version: LogIndex,
+
+    pub(crate) output: Option<serde_json::Result<serde_json::Value>>,
+    pub(crate) ignore_output: bool,
 }
 
 impl<'a> Context<'a> {
@@ -31,34 +31,10 @@ impl<'a> Context<'a> {
     pub fn machine_version(&self) -> LogIndex {
         self.machine_version
     }
-}
 
-type OutputSender = mpsc::Sender<(Token, serde_json::Result<serde_json::Value>)>;
-
-#[derive(Debug)]
-pub struct From(Option<(Token, OutputSender)>);
-
-impl From {
-    pub fn reply_output<T: Serialize>(mut self, output: &T) {
-        let Some((token, tx)) = self.0.take() else {
-            // There is no need to send the output to a client from this Raft server.
-            return;
-        };
-
-        let result = serde_json::to_value(output);
-        let _ = tx.send((token, result));
-    }
-
-    pub fn is_null(&self) -> bool {
-        self.0.is_none()
-    }
-}
-
-impl Drop for From {
-    fn drop(&mut self) {
-        if let Some((token, tx)) = self.0.take() {
-            let result = serde_json::to_value(&serde_json::Value::Null);
-            let _ = tx.send((token, result));
+    pub fn output<T: Serialize>(&mut self, output: &T) {
+        if !self.ignore_output && self.output.is_none() {
+            self.output = Some(serde_json::to_value(output));
         }
     }
 }

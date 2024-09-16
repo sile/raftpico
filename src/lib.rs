@@ -12,7 +12,7 @@ pub mod remote_types;
 pub mod request; // TODO: message?
 pub mod stats; // TODO
 
-pub use machine::{Context, From, InputKind, Machine};
+pub use machine::{Context, InputKind, Machine};
 pub use raft_server::{RaftServer, RaftServerOptions};
 pub use stats::ServerStats;
 
@@ -32,9 +32,9 @@ mod tests {
     impl Machine for usize {
         type Input = usize;
 
-        fn handle_input(&mut self, _ctx: &Context, from: From, input: &Self::Input) {
+        fn handle_input(&mut self, ctx: &mut Context, input: Self::Input) {
             *self += input;
-            from.reply_output(self);
+            ctx.output(self);
         }
     }
 
