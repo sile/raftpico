@@ -18,9 +18,9 @@ use crate::{
     connection::Connection,
     io::would_block,
     request::{
-        AddServerError, AddServerParams, AddServerResult, AppendEntriesCallParams,
-        CreateClusterParams, HandshakeParams, IncomingMessage, InternalIncomingMessage,
-        InternalRequest, OutgoingMessage, Request, Response,
+        AddServerError, AddServerParams, AddServerResult, CreateClusterParams, HandshakeParams,
+        IncomingMessage, InternalIncomingMessage, InternalRequest, OutgoingMessage, Request,
+        Response,
     },
     Machine, ServerStats,
 };
@@ -344,24 +344,24 @@ impl<M: Machine> RaftServer<M> {
         req: InternalRequest,
     ) -> std::io::Result<()> {
         match req {
-            InternalRequest::Handshake { params, .. } => self.handle_handshake(params)?,
+            InternalRequest::Handshake { params, .. } => self.handle_handshake(conn, params)?,
             InternalRequest::AppendEntriesCall { params, .. } => {
-                self.handle_append_entries_call(params)?
+                let msg = params.to_raft_message(&mut self.commands);
+                self.node.handle_message(msg);
+            }
+            InternalRequest::AppendEntriesReply { params, .. } => {
+                let msg = params.to_raft_message();
+                self.node.handle_message(msg);
             }
         }
         Ok(())
     }
 
-    fn handle_append_entries_call(
+    fn handle_handshake(
         &mut self,
-        params: AppendEntriesCallParams,
+        conn: &mut Connection,
+        params: HandshakeParams,
     ) -> std::io::Result<()> {
-        let msg = params.to_raft_message(&mut self.commands);
-        self.node.handle_message(msg);
-        Ok(())
-    }
-
-    fn handle_handshake(&mut self, params: HandshakeParams) -> std::io::Result<()> {
         if !params.inviting && self.node().is_none() {
             // TODO: handle restarted case
             todo!();
@@ -372,6 +372,17 @@ impl<M: Machine> RaftServer<M> {
         }
         if params.dst_node_id() != self.node.id() {
             todo!();
+        }
+
+        if !self.members.contains_key(&params.src_node_id()) {
+            // TODO: add note doc
+            let member = Member {
+                node_id: params.src_node_id(),
+                server_addr: conn.addr, // TODO: params.src_addr()
+                inviting: false,
+                token: Some(conn.token),
+            };
+            self.members.insert(params.src_node_id(), member);
         }
 
         Ok(())
@@ -669,9 +680,22 @@ impl<M: Machine> RaftServer<M> {
                 // Do nothing as this crate uses in-memory storage.
             }
             Action::BroadcastMessage(m) => self.handle_broadcast_message(m)?,
-            Action::SendMessage(_, _) => todo!(),
+            Action::SendMessage(peer, m) => self.handle_send_message(peer, m)?,
             Action::InstallSnapshot(_) => todo!(),
         }
+        Ok(())
+    }
+
+    fn handle_send_message(&mut self, peer: NodeId, msg: Message) -> std::io::Result<()> {
+        let member = self.members.get(&peer).expect("unreachable");
+        let token = if let Some(token) = member.token {
+            token
+        } else {
+            self.internal_connect(peer)?
+        };
+
+        let request = InternalRequest::from_raft_message(msg, &self.commands);
+        self.send_to(token, &request)?;
         Ok(())
     }
 

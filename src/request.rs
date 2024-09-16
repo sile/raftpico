@@ -34,6 +34,7 @@ impl OutgoingMessage for InternalRequest {
         match self {
             InternalRequest::Handshake { .. } => true,
             InternalRequest::AppendEntriesCall { .. } => false,
+            InternalRequest::AppendEntriesReply { .. } => false,
         }
     }
 }
@@ -61,6 +62,10 @@ pub enum InternalRequest {
     AppendEntriesCall {
         jsonrpc: JsonRpcVersion,
         params: AppendEntriesCallParams,
+    },
+    AppendEntriesReply {
+        jsonrpc: JsonRpcVersion,
+        params: AppendEntriesReplyParams,
     },
 }
 
@@ -105,9 +110,18 @@ impl InternalRequest {
                 },
             },
             Message::AppendEntriesReply {
-                header,
+                header: MessageHeader { from, term, seqno },
                 last_position,
-            } => todo!(),
+            } => Self::AppendEntriesReply {
+                jsonrpc: JsonRpcVersion::V2,
+                params: AppendEntriesReplyParams {
+                    from: from.get(),
+                    term: term.get(),
+                    seqno: seqno.get(),
+                    last_log_term: last_position.term.get(),
+                    last_log_index: last_position.index.get(),
+                },
+            },
         }
     }
 }
@@ -157,6 +171,33 @@ impl AppendEntriesCallParams {
             header,
             commit_index: LogIndex::new(self.commit_index),
             entries,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppendEntriesReplyParams {
+    from: u64,
+    term: u64,
+    seqno: u64,
+    last_log_term: u64,
+    last_log_index: u64,
+}
+
+impl AppendEntriesReplyParams {
+    pub fn to_raft_message(self) -> Message {
+        let header = MessageHeader {
+            from: NodeId::new(self.from),
+            term: Term::new(self.term),
+            seqno: MessageSeqNo::new(self.seqno),
+        };
+        let last_position = LogPosition {
+            term: Term::new(self.last_log_term),
+            index: LogIndex::new(self.last_log_index),
+        };
+        Message::AppendEntriesReply {
+            header,
+            last_position,
         }
     }
 }
