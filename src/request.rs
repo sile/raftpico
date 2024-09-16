@@ -64,6 +64,7 @@ pub enum InternalRequest {
     Propose {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
+        // TODO: timeout
         params: ProposeParams,
     },
     AppendEntriesCall {
@@ -363,6 +364,13 @@ impl<T> Response<T> {
             jsonrpc: JsonRpcVersion::V2,
             id,
             result,
+        }
+    }
+
+    pub fn id(&self) -> Option<&RequestId> {
+        match self {
+            Response::Ok { id, .. } => Some(id),
+            Response::Err { id, .. } => id.as_ref(),
         }
     }
 

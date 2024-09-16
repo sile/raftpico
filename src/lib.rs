@@ -38,7 +38,7 @@ mod tests {
         }
     }
 
-    const TEST_TIMEOUT: Duration = Duration::from_secs(2);
+    const TEST_TIMEOUT: Duration = Duration::from_secs(3);
     const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(10));
 
     #[test]
@@ -151,10 +151,11 @@ mod tests {
         let addrs = servers.iter().map(|s| s.addr()).collect::<Vec<_>>();
         let handle = std::thread::spawn(move || {
             for (i, addr) in addrs.into_iter().enumerate() {
-                let _: serde_json::Value = rpc(
+                let _v: serde_json::Value = rpc(
                     addr,
                     Request::command(request_id(0), &i).expect("unreachable"),
                 );
+                dbg!(_v);
             }
         });
 

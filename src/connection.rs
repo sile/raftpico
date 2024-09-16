@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{collections::HashSet, net::SocketAddr};
 
 use jsonlrpc::{
     ErrorCode, ErrorObject, JsonRpcVersion, JsonlStream, RequestId, RequestObject, ResponseObject,
@@ -20,7 +20,8 @@ pub struct Connection {
     pub stream: JsonlStream<TcpStream>,
     pub connected: bool,
     pub kind: ConnectionKind,
-    pub next_request_id: i64,
+    pub next_request_id: i64, // TODO: remove
+    pub ongoing_requests: HashSet<RequestId>,
 
     // TODO: current_interest / next_interest
     pub interest: Option<Interest>,
@@ -35,6 +36,7 @@ impl Connection {
             connected: true,
             kind: ConnectionKind::Undefined,
             next_request_id: 0,
+            ongoing_requests: HashSet::new(),
             interest: None,
         }
     }
@@ -49,6 +51,7 @@ impl Connection {
             connected: false,
             kind: ConnectionKind::Internal,
             next_request_id: 0,
+            ongoing_requests: HashSet::new(),
             interest: None,
         })
     }

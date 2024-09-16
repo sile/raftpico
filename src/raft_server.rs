@@ -20,7 +20,8 @@ use crate::{
     request::{
         AddServerError, AddServerParams, AddServerResult, CommonError, CreateClusterParams,
         HandshakeParams, IncomingMessage, InputParams, InternalIncomingMessage, InternalRequest,
-        OutgoingMessage, OutputError, OutputResult, ProposeParams, Request, Response,
+        OutgoingMessage, OutputError, OutputResult, ProposeParams, ProposeResult, Request,
+        Response,
     },
     Context, InputKind, Machine, ServerStats,
 };
@@ -96,7 +97,6 @@ pub struct Member {
 
     // skip serialization
     pub token: Option<Token>,
-    pub ongoing_proposes: HashMap<RequestId, (Token, RequestId)>,
 }
 
 pub type Commands = BTreeMap<LogIndex, Command>;
@@ -118,6 +118,8 @@ pub struct RaftServer<M> {
     commands: Commands,
     pending_responses: BinaryHeap<PendingResponse>,
     max_write_buf_size: usize,
+
+    ongoing_proposes: HashMap<RequestId, (Token, RequestId)>,
 
     machine: M,
 
@@ -160,6 +162,7 @@ impl<M: Machine> RaftServer<M> {
             events: Some(events),
             rng,
             max_write_buf_size: options.max_write_buf_size,
+            ongoing_proposes: HashMap::new(),
             node: Node::start(UNINIT_NODE_ID),
             election_timeout: None,
             last_applied_index: LogIndex::ZERO,
@@ -299,8 +302,9 @@ impl<M: Machine> RaftServer<M> {
                 .find(|m| m.token == Some(conn.token))
             {
                 member.token = None;
-                for _ in member.ongoing_proposes.drain() {
+                for _ in conn.ongoing_requests {
                     // TODO: response error
+                    todo!();
                 }
             }
         } else {
@@ -327,13 +331,35 @@ impl<M: Machine> RaftServer<M> {
                     InternalIncomingMessage::Request(req) => {
                         self.handle_internal_request(conn, req)?
                     }
-                    InternalIncomingMessage::Response(_) => todo!(),
+                    InternalIncomingMessage::Response(response) => {
+                        if let Some(id) = response.id() {
+                            conn.ongoing_requests.remove(id);
+                        }
+                        self.handle_propose_response(response);
+                    }
                 },
             }
         }
 
         conn.poll_send()?;
         Ok(())
+    }
+
+    fn handle_propose_response(&mut self, response: Response<ProposeResult>) {
+        let id = response.id().expect("TODO").clone();
+        let commit_promise = response.into_std_result().expect("TODO").to_promise();
+        let (token, request_id) = self.ongoing_proposes.remove(&id).expect("TODO");
+
+        // TODO: add note doc about this method is always called before the the time that the promise is accepted
+        let response = PendingResponse {
+            token,
+            request_id,
+            commit_promise,
+        };
+        self.pending_responses.push(response);
+        dbg!(self.node.id().get());
+        dbg!(commit_promise);
+        dbg!(self.pending_responses.len());
     }
 
     fn handle_internal_request(
@@ -364,7 +390,10 @@ impl<M: Machine> RaftServer<M> {
     ) -> std::io::Result<()> {
         let promise = self.propose_command(params.command);
         let response = Response::propose_result(request_id, promise);
-        self.send_to(conn.token, &response)?;
+
+        // TODO: factor out with self.send_to(); (but need to consider self.connections)
+        conn.send(&response).expect("TODO");
+
         Ok(())
     }
 
@@ -392,7 +421,6 @@ impl<M: Machine> RaftServer<M> {
                 server_addr: conn.addr, // TODO: params.src_addr()
                 inviting: false,
                 token: Some(conn.token),
-                ongoing_proposes: HashMap::new(),
             };
             self.members.insert(params.src_node_id(), member);
         }
@@ -456,11 +484,9 @@ impl<M: Machine> RaftServer<M> {
                 id: id.clone(),
                 params: ProposeParams { command },
             };
-            self.internal_send_to(leader, &request).expect("TODO");
-            self.members
-                .get_mut(&leader)
-                .expect("unreachable")
-                .ongoing_proposes
+            self.internal_send_to(leader, &request, Some(id.clone()))
+                .expect("TODO");
+            self.ongoing_proposes
                 .insert(id.clone(), (token, request_id.clone()));
             return Ok(());
         }
@@ -584,13 +610,14 @@ impl<M: Machine> RaftServer<M> {
         if let Err(_e) = conn.send(msg) {
             // TODO: count stats depending on the error kind
             self.poller.registry().deregister(conn.stream_mut())?;
-            self.connections.remove(&token);
+            let conn = self.connections.remove(&token).expect("unreachable");
 
             // TODO:
             if let Some(member) = self.members.values_mut().find(|m| m.token == Some(token)) {
                 member.token = None;
-                for _ in member.ongoing_proposes.drain() {
+                for _ in conn.ongoing_requests {
                     // TODO: response error
+                    todo!();
                 }
             }
 
@@ -614,11 +641,11 @@ impl<M: Machine> RaftServer<M> {
                     let pending = self.pending_responses.pop().expect("unreachable");
                     self.send_pending_error_response(pending)?;
                 }
-                CommitPromise::Pending(_) => break,
-                CommitPromise::Accepted(_) => {
+                CommitPromise::Accepted(position) if index == position.index => {
                     pending_response = self.pending_responses.pop();
                     break;
                 }
+                _ => break,
             }
         }
 
@@ -671,7 +698,6 @@ impl<M: Machine> RaftServer<M> {
                     server_addr: *server_addr,
                     inviting: false,
                     token: None,
-                    ongoing_proposes: HashMap::new(),
                 };
                 self.members.insert(node_id, member);
                 self.next_node_id = NodeId::new(node_id.get() + 1);
@@ -691,7 +717,6 @@ impl<M: Machine> RaftServer<M> {
                         server_addr: *server_addr,
                         inviting: true,
                         token: None,
-                        ongoing_proposes: HashMap::new(),
                     };
                     self.members.insert(node_id, member);
                     self.next_node_id = NodeId::new(node_id.get() + 1);
@@ -701,6 +726,10 @@ impl<M: Machine> RaftServer<M> {
                 self.try_response_to(pending, result)?;
             }
             Command::Command(input_json) => {
+                dbg!(self.node.id().get());
+                dbg!(index.get());
+                dbg!(pending.is_some());
+                dbg!(&input_json);
                 let Ok(input) = serde_json::from_value::<M::Input>(input_json.clone()) else {
                     todo!("response error");
                 };
@@ -824,6 +853,7 @@ impl<M: Machine> RaftServer<M> {
         &mut self,
         dst: NodeId,
         msg: &T,
+        request_id: Option<RequestId>,
     ) -> std::io::Result<()> {
         let member = self.members.get(&dst).expect("unreachable");
         let token = if let Some(token) = member.token {
@@ -832,6 +862,11 @@ impl<M: Machine> RaftServer<M> {
             self.internal_connect(dst)?
         };
         self.send_to(token, msg)?;
+        if let Some(id) = request_id {
+            if let Some(conn) = self.connections.get_mut(&token) {
+                conn.ongoing_requests.insert(id);
+            }
+        };
         Ok(())
     }
 
