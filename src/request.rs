@@ -1,7 +1,10 @@
 use std::net::SocketAddr;
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId, ResponseObject};
-use raftbare::{Message, MessageHeader, NodeId};
+use raftbare::{
+    ClusterConfig, LogEntries, LogIndex, LogPosition, Message, MessageHeader, MessageSeqNo, NodeId,
+    Term,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{command::Command, raft_server::Commands};
@@ -118,6 +121,44 @@ pub struct AppendEntriesCallParams {
     prev_log_term: u64,
     prev_log_index: u64,
     entries: Vec<LogEntry>,
+}
+
+impl AppendEntriesCallParams {
+    pub fn to_raft_message(self, commands: &mut Commands) -> Message {
+        let header = MessageHeader {
+            from: NodeId::new(self.from),
+            term: Term::new(self.term),
+            seqno: MessageSeqNo::new(self.seqno),
+        };
+
+        let mut index = LogIndex::new(self.prev_log_index);
+        let mut entries = LogEntries::new(LogPosition {
+            term: Term::new(self.prev_log_term),
+            index,
+        });
+        for entry in self.entries {
+            index = LogIndex::new(index.get() + 1);
+            match entry {
+                LogEntry::Term(t) => entries.push(raftbare::LogEntry::Term(Term::new(t))),
+                LogEntry::Config { voters, new_voters } => {
+                    entries.push(raftbare::LogEntry::ClusterConfig(ClusterConfig {
+                        voters: voters.into_iter().map(NodeId::new).collect(),
+                        new_voters: new_voters.into_iter().map(NodeId::new).collect(),
+                        ..Default::default()
+                    }))
+                }
+                LogEntry::Command(command) => {
+                    entries.push(raftbare::LogEntry::Command);
+                    commands.insert(index, command);
+                }
+            }
+        }
+        Message::AppendEntriesCall {
+            header,
+            commit_index: LogIndex::new(self.commit_index),
+            entries,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

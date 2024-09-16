@@ -18,9 +18,9 @@ use crate::{
     connection::Connection,
     io::would_block,
     request::{
-        AddServerError, AddServerParams, AddServerResult, CreateClusterParams, HandshakeParams,
-        IncomingMessage, InternalIncomingMessage, InternalRequest, OutgoingMessage, Request,
-        Response,
+        AddServerError, AddServerParams, AddServerResult, AppendEntriesCallParams,
+        CreateClusterParams, HandshakeParams, IncomingMessage, InternalIncomingMessage,
+        InternalRequest, OutgoingMessage, Request, Response,
     },
     Machine, ServerStats,
 };
@@ -345,8 +345,19 @@ impl<M: Machine> RaftServer<M> {
     ) -> std::io::Result<()> {
         match req {
             InternalRequest::Handshake { params, .. } => self.handle_handshake(params)?,
-            InternalRequest::AppendEntriesCall { params, .. } => todo!(),
+            InternalRequest::AppendEntriesCall { params, .. } => {
+                self.handle_append_entries_call(params)?
+            }
         }
+        Ok(())
+    }
+
+    fn handle_append_entries_call(
+        &mut self,
+        params: AppendEntriesCallParams,
+    ) -> std::io::Result<()> {
+        let msg = params.to_raft_message(&mut self.commands);
+        self.node.handle_message(msg);
         Ok(())
     }
 
@@ -480,24 +491,24 @@ impl<M: Machine> RaftServer<M> {
                 on_rejected,
                 ..
             } => {
-                self.send_to(token, Response::ok(request_id, on_rejected()))?;
+                self.send_to(token, &Response::ok(request_id, on_rejected()))?;
             }
         }
         Ok(())
     }
 
-    fn send_to<T: OutgoingMessage>(&mut self, token: Token, response: T) -> std::io::Result<()> {
+    fn send_to<T: OutgoingMessage>(&mut self, token: Token, msg: &T) -> std::io::Result<()> {
         let Some(conn) = self.connections.get_mut(&token) else {
             // Already disconnected.
             return Ok(());
         };
 
-        if conn.pending_write_size() > self.max_write_buf_size && !response.is_mandatory() {
+        if conn.pending_write_size() > self.max_write_buf_size && !msg.is_mandatory() {
             // TOD: stats
             return Ok(());
         }
 
-        if let Err(_e) = conn.send(&response) {
+        if let Err(_e) = conn.send(msg) {
             // TODO: count stats depending on the error kind
             self.poller.registry().deregister(conn.stream_mut())?;
             self.connections.remove(&token);
@@ -621,7 +632,7 @@ impl<M: Machine> RaftServer<M> {
 
         let response = Response::ok(pending.request_id(), result);
         let token = pending.token();
-        self.send_to(token, response)?;
+        self.send_to(token, &response)?;
         Ok(())
     }
 
@@ -667,31 +678,31 @@ impl<M: Machine> RaftServer<M> {
     fn handle_broadcast_message(&mut self, msg: Message) -> std::io::Result<()> {
         let request = InternalRequest::from_raft_message(msg, &self.commands);
         let mut unconnected = Vec::new();
-        for peer in self.node.peers() {
+        let peers = self.node.peers().collect::<Vec<_>>(); // TODO:remove
+        for peer in peers {
             let Some(member) = self.members.get(&peer) else {
                 unreachable!();
             };
-            if member.token.is_none() {
+            let Some(token) = member.token else {
                 unconnected.push(peer);
                 continue;
-            }
+            };
             // if member.inviting {
             //     // TODO: stats
             //     continue;
             // }
-
-            // try_send() or OutgoingMessage trait
-            todo!();
+            self.send_to(token, &request)?;
         }
 
         for peer in unconnected {
-            self.internal_connect(peer)?;
+            let token = self.internal_connect(peer)?;
+            self.send_to(token, &request)?;
         }
 
         Ok(())
     }
 
-    fn internal_connect(&mut self, peer: NodeId) -> std::io::Result<()> {
+    fn internal_connect(&mut self, peer: NodeId) -> std::io::Result<Token> {
         let token = self.next_token();
         let member = self.members.get_mut(&peer).expect("unreachable");
         member.token = Some(token);
@@ -712,8 +723,8 @@ impl<M: Machine> RaftServer<M> {
                 inviting: member.inviting,
             },
         };
-        self.send_to(token, request)?;
-        Ok(())
+        self.send_to(token, &request)?;
+        Ok(token)
     }
 
     fn handle_set_election_timeout(&mut self) {
