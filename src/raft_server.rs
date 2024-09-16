@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BinaryHeap, HashMap},
-    net::SocketAddr,
+    net::{Shutdown, SocketAddr},
     time::{Duration, Instant},
 };
 
@@ -20,8 +20,8 @@ use crate::{
     request::{
         AddServerError, AddServerParams, AddServerResult, CommonError, CreateClusterParams,
         HandshakeParams, IncomingMessage, InputParams, InternalIncomingMessage, InternalRequest,
-        OutgoingMessage, OutputError, OutputResult, ProposeParams, ProposeResult, Request,
-        Response,
+        OutgoingMessage, OutputError, OutputResult, ProposeParams, ProposeResult,
+        RemoveServerError, RemoveServerParams, RemoveServerResult, Request, Response,
     },
     Context, InputKind, Machine, ServerStats,
 };
@@ -94,6 +94,7 @@ pub struct Member {
     pub node_id: NodeId,
     pub server_addr: SocketAddr,
     pub inviting: bool,
+    pub evicting: bool,
 
     // skip serialization
     pub token: Option<Token>,
@@ -417,6 +418,7 @@ impl<M: Machine> RaftServer<M> {
                 node_id: params.src_node_id(),
                 server_addr: conn.addr, // TODO: params.src_addr()
                 inviting: false,
+                evicting: false,
                 token: Some(conn.token),
             };
             self.members.insert(params.src_node_id(), member);
@@ -443,8 +445,10 @@ impl<M: Machine> RaftServer<M> {
                 }
             }
             Request::RemoveServer { id, params, .. } => {
-                //
-                todo!();
+                if let Err(e) = self.handle_remove_server(conn.token, &id, params) {
+                    let response = Response::remove_server(id, Err(e));
+                    conn.send(&response)?;
+                }
             }
             Request::Command { id, params, .. } => {
                 if let Err(e) = self.handle_command(conn.token, &id, params) {
@@ -519,6 +523,17 @@ impl<M: Machine> RaftServer<M> {
         AddServerParams { server_addr }: AddServerParams,
     ) -> Result<(), AddServerError> {
         let command = Command::InviteServer { server_addr };
+        self.handle_command_common(token, request_id, command)?;
+        Ok(())
+    }
+
+    fn handle_remove_server(
+        &mut self,
+        token: Token,
+        request_id: &RequestId,
+        RemoveServerParams { server_addr }: RemoveServerParams,
+    ) -> Result<(), RemoveServerError> {
+        let command = Command::EvictServer { server_addr };
         self.handle_command_common(token, request_id, command)?;
         Ok(())
     }
@@ -627,6 +642,22 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
+    fn handle_evicted(&mut self, node_id: NodeId) -> std::io::Result<()> {
+        let member = self.members.remove(&node_id).expect("unreachable");
+        if self.node.id() == node_id {
+            self.node = Node::start(UNINIT_NODE_ID);
+            self.commands.clear();
+            // TODO: reset other state
+        }
+        if let Some(token) = member.token {
+            if let Some(mut conn) = self.connections.remove(&token) {
+                let _ = conn.stream_mut().shutdown(Shutdown::Both);
+                self.poller.registry().deregister(conn.stream_mut())?;
+            }
+        }
+        Ok(())
+    }
+
     fn apply(&mut self, index: LogIndex) -> std::io::Result<()> {
         let mut pending_response = None;
         while let Some(pending) = self.pending_responses.peek() {
@@ -644,7 +675,21 @@ impl<M: Machine> RaftServer<M> {
         }
 
         match self.node.log().entries().get_entry(index) {
-            Some(LogEntry::Term(_) | LogEntry::ClusterConfig(_)) => {
+            Some(LogEntry::Term(_)) => {
+                self.maybe_update_cluster_config();
+            }
+            Some(LogEntry::ClusterConfig(c)) => {
+                if c.is_joint_consensus() {
+                    let mut evicted = Vec::new();
+                    for m in self.members.values() {
+                        if m.evicting && !c.new_voters.contains(&m.node_id) {
+                            evicted.push(m.node_id);
+                        }
+                    }
+                    for id in evicted {
+                        self.handle_evicted(id)?;
+                    }
+                }
                 self.maybe_update_cluster_config();
             }
             Some(LogEntry::Command) => {
@@ -691,6 +736,7 @@ impl<M: Machine> RaftServer<M> {
                     node_id,
                     server_addr: *server_addr,
                     inviting: false,
+                    evicting: false,
                     token: None,
                 };
                 self.members.insert(node_id, member);
@@ -710,12 +756,29 @@ impl<M: Machine> RaftServer<M> {
                         node_id,
                         server_addr: *server_addr,
                         inviting: true,
+                        evicting: false,
                         token: None,
                     };
                     self.members.insert(node_id, member);
                     self.next_node_id = NodeId::new(node_id.get() + 1);
                     self.maybe_update_cluster_config();
                     AddServerResult::ok()
+                };
+                self.try_response_to(pending, result)?;
+            }
+            Command::EvictServer { server_addr } => {
+                let result = if let Some(node_id) = self
+                    .members
+                    .values()
+                    .find(|m| m.server_addr == *server_addr)
+                    .map(|m| m.node_id)
+                {
+                    let member = self.members.get_mut(&node_id).expect("unreachable");
+                    member.evicting = true;
+                    self.maybe_update_cluster_config();
+                    RemoveServerResult::ok()
+                } else {
+                    RemoveServerResult::err(RemoveServerError::NotInCluster)
                 };
                 self.try_response_to(pending, result)?;
             }
@@ -771,13 +834,13 @@ impl<M: Machine> RaftServer<M> {
         // TODO: optimize
         let mut adding = Vec::new();
         let mut removing = Vec::new();
-        for id in self.members.keys() {
-            if !self.node.config().voters.contains(id) {
+        for (id, m) in self.members.iter() {
+            if !m.evicting && !self.node.config().voters.contains(id) {
                 adding.push(*id);
             }
         }
         for id in &self.node.config().voters {
-            if !self.members.contains_key(id) {
+            if self.members.get(id).map_or(true, |m| m.evicting) {
                 removing.push(*id);
             }
         }

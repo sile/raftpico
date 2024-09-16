@@ -419,6 +419,20 @@ impl Response<AddServerResult> {
     }
 }
 
+impl Response<RemoveServerResult> {
+    pub fn remove_server(id: RequestId, result: Result<(), RemoveServerError>) -> Self {
+        let result = RemoveServerResult {
+            success: result.is_ok(),
+            error: result.err(),
+        };
+        Self::Ok {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            result,
+        }
+    }
+}
+
 impl Response<OutputResult> {
     pub fn output(id: RequestId, result: Result<serde_json::Value, OutputError>) -> Self {
         let result = result
