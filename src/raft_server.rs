@@ -327,6 +327,7 @@ impl<M: Machine> RaftServer<M> {
                     InternalIncomingMessage::Request(req) => {
                         self.handle_internal_request(conn, req)?
                     }
+                    InternalIncomingMessage::Response(_) => todo!(),
                 },
             }
         }
@@ -342,7 +343,7 @@ impl<M: Machine> RaftServer<M> {
     ) -> std::io::Result<()> {
         match req {
             InternalRequest::Handshake { params, .. } => self.handle_handshake(conn, params)?,
-            InternalRequest::Propose { params, .. } => self.handle_propose(params)?,
+            InternalRequest::Propose { id, params, .. } => self.handle_propose(conn, id, params)?,
             InternalRequest::AppendEntriesCall { params, .. } => {
                 let msg = params.to_raft_message(&mut self.commands);
                 self.node.handle_message(msg);
@@ -355,8 +356,16 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_propose(&mut self, params: ProposeParams) -> std::io::Result<()> {
-        todo!()
+    fn handle_propose(
+        &mut self,
+        conn: &mut Connection,
+        request_id: RequestId,
+        params: ProposeParams,
+    ) -> std::io::Result<()> {
+        let promise = self.propose_command(params.command);
+        let response = Response::propose_result(request_id, promise);
+        self.send_to(conn.token, &response)?;
+        Ok(())
     }
 
     fn handle_handshake(
@@ -524,16 +533,17 @@ impl<M: Machine> RaftServer<M> {
     }
 
     fn propose_command(&mut self, command: Command) -> CommitPromise {
-        debug_assert!(self.node.role().is_leader());
+        //debug_assert!(self.node.role().is_leader());
 
         // TODO: if self.pending_query.is_some() { merge() }
 
         let promise = self.node.propose_command();
-        debug_assert!(!promise.is_rejected());
-
-        self.commands.insert(promise.log_position().index, command);
-        if self.commands.len() > self.max_log_entries_hint {
-            todo!();
+        //debug_assert!(!promise.is_rejected());
+        if !promise.is_rejected() {
+            self.commands.insert(promise.log_position().index, command);
+            if self.commands.len() > self.max_log_entries_hint {
+                todo!();
+            }
         }
         promise
     }

@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId, ResponseObject};
 use raftbare::{
-    ClusterConfig, LogEntries, LogIndex, LogPosition, Message, MessageHeader, MessageSeqNo, NodeId,
-    Term,
+    ClusterConfig, CommitPromise, LogEntries, LogIndex, LogPosition, Message, MessageHeader,
+    MessageSeqNo, NodeId, Term,
 };
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +51,7 @@ pub enum IncomingMessage {
 #[serde(untagged)]
 pub enum InternalIncomingMessage {
     Request(InternalRequest),
+    Response(Response<ProposeResult>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -410,6 +411,20 @@ impl Response<OutputResult> {
     }
 }
 
+impl Response<ProposeResult> {
+    pub fn propose_result(id: RequestId, promise: CommitPromise) -> Self {
+        let position = promise.log_position();
+        Self::Ok {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            result: ProposeResult {
+                term: position.term.get(),
+                index: position.index.get(),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateClusterResult {
     pub success: bool,
@@ -445,6 +460,26 @@ impl AddServerResult {
         Self {
             success: false,
             error: Some(e),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ProposeResult {
+    pub term: u64,
+    pub index: u64,
+}
+
+impl ProposeResult {
+    pub fn to_promise(self) -> CommitPromise {
+        let position = LogPosition {
+            term: Term::new(self.term),
+            index: LogIndex::new(self.index),
+        };
+        if position == LogPosition::INVALID {
+            CommitPromise::Rejected(position)
+        } else {
+            CommitPromise::Pending(position)
         }
     }
 }
