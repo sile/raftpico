@@ -405,6 +405,7 @@ impl<M: Machine> RaftServer<M> {
                     conn.send(&response)?;
                 }
             }
+            Request::Command { id, params, .. } => todo!(),
         }
 
         Ok(())

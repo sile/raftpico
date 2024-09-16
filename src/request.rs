@@ -243,6 +243,11 @@ pub enum Request {
         id: RequestId,
         params: AddServerParams,
     },
+    Command {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: InputParams,
+    },
 }
 
 impl Request {
@@ -264,10 +269,20 @@ impl Request {
         }
     }
 
+    pub fn command<T: Serialize>(id: RequestId, params: &T) -> std::io::Result<Self> {
+        let input = serde_json::to_value(params)?;
+        Ok(Self::Command {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            params: InputParams { input },
+        })
+    }
+
     pub fn id(&self) -> &RequestId {
         match self {
             Self::CreateCluster { id, .. } => id,
             Self::AddServer { id, .. } => id,
+            Self::Command { id, .. } => id,
         }
     }
 
@@ -275,6 +290,7 @@ impl Request {
         match self {
             Self::CreateCluster { params, .. } => params.validate(),
             Self::AddServer { .. } => None,
+            Self::Command { .. } => None,
         }
     }
 }
@@ -378,6 +394,11 @@ pub struct CreateClusterResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddServerParams {
     pub server_addr: SocketAddr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputParams {
+    pub input: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
