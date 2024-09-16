@@ -526,27 +526,49 @@ impl OutputResult {
 pub enum CommonError {
     #[default]
     ProposalRejected,
+    ServerNotReady,
+    LeaderNotKnown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AddServerError {
     // TODO
-    ServerNotReady,
     ProposalRejected,
+    ServerNotReady,
+    LeaderNotKnown,
     AlreadyInCluster,
+}
+
+impl From<CommonError> for AddServerError {
+    fn from(value: CommonError) -> Self {
+        match value {
+            CommonError::ProposalRejected => Self::ProposalRejected,
+            CommonError::ServerNotReady => Self::ServerNotReady,
+            CommonError::LeaderNotKnown => Self::LeaderNotKnown,
+        }
+    }
 }
 
 // TODO: rename
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OutputError {
-    // TODO
+    ProposalRejected,
     ServerNotReady,
     LeaderNotKnown,
-    ProposalRejected,
     InvalidInput,
     InvalidOutput,
+}
+
+impl From<CommonError> for OutputError {
+    fn from(value: CommonError) -> Self {
+        match value {
+            CommonError::ProposalRejected => Self::ProposalRejected,
+            CommonError::ServerNotReady => Self::ServerNotReady,
+            CommonError::LeaderNotKnown => Self::LeaderNotKnown,
+        }
+    }
 }
 
 // #[derive(Debug, Clone, Serialize, Deserialize)]

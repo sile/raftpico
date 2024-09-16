@@ -127,10 +127,12 @@ mod tests {
         let server_addr1 = server1.addr();
         let server_addr2 = server2.addr();
         let handle = std::thread::spawn(move || {
+            let mut contact_addr = server_addr0;
             for addr in [server_addr1, server_addr2] {
                 let result: AddServerResult =
-                    rpc(server_addr0, Request::add_server(request_id(0), addr));
+                    rpc(contact_addr, Request::add_server(request_id(0), addr));
                 assert_eq!(result.error, None);
+                contact_addr = addr;
             }
             // TODO: call machine.on_event(Event::ServerJoined)
             std::thread::sleep(Duration::from_millis(500));

@@ -459,20 +459,29 @@ impl<M: Machine> RaftServer<M> {
         request_id: &RequestId,
         InputParams { input }: InputParams,
     ) -> Result<(), OutputError> {
+        let command = Command::Command(input);
+        self.handle_command_common(token, request_id, command)?;
+        Ok(())
+    }
+
+    // TODO: rename
+    fn handle_command_common(
+        &mut self,
+        token: Token,
+        request_id: &RequestId,
+        command: Command,
+    ) -> Result<(), CommonError> {
         if self.node.id() >= RESERVED_NODE_ID_START {
-            return Err(OutputError::ServerNotReady);
+            return Err(CommonError::ServerNotReady);
         }
 
-        let command = Command::Command(input);
-
-        // TODO: factor out with handle_add_server()
         if !self.node.role().is_leader() {
             if self.node.role().is_candidate() {
-                return Err(OutputError::LeaderNotKnown);
+                return Err(CommonError::LeaderNotKnown);
             }
 
             let Some(leader) = self.node.voted_for() else {
-                return Err(OutputError::LeaderNotKnown);
+                return Err(CommonError::LeaderNotKnown);
             };
 
             let id = self.next_request_id();
@@ -505,24 +514,8 @@ impl<M: Machine> RaftServer<M> {
         request_id: &RequestId,
         AddServerParams { server_addr }: AddServerParams,
     ) -> Result<(), AddServerError> {
-        if self.node.id() >= RESERVED_NODE_ID_START {
-            return Err(AddServerError::ServerNotReady);
-        }
-
-        if !self.node.role().is_leader() {
-            // TOOD: remote propos
-            todo!();
-        }
-
         let command = Command::InviteServer { server_addr };
-        let commit_promise = self.propose_command(command);
-
-        let response = PendingResponse {
-            token,
-            request_id: request_id.clone(),
-            commit_promise,
-        };
-        self.pending_responses.push(response);
+        self.handle_command_common(token, request_id, command)?;
         Ok(())
     }
 
