@@ -18,9 +18,9 @@ use crate::{
     connection::Connection,
     io::would_block,
     request::{
-        AddServerError, AddServerParams, AddServerResult, CreateClusterParams, HandshakeParams,
-        IncomingMessage, InputParams, InternalIncomingMessage, InternalRequest, OutgoingMessage,
-        OutputError, Request, Response,
+        AddServerError, AddServerParams, AddServerResult, CommonError, CreateClusterParams,
+        HandshakeParams, IncomingMessage, InputParams, InternalIncomingMessage, InternalRequest,
+        OutgoingMessage, OutputError, Request, Response,
     },
     Machine, ServerStats,
 };
@@ -33,40 +33,16 @@ const LISTENER_TOKEN: Token = Token(0);
 const DEFAULT_MIN_ELECTION_TIMEOUT: Duration = Duration::from_millis(100);
 const DEFAULT_MAX_ELECTION_TIMEOUT: Duration = Duration::from_millis(1000);
 
-// TODO: not enum
 #[derive(Debug)]
-pub enum PendingResponse {
-    AddServer {
-        token: Token,
-        request_id: RequestId,
-        commit_promise: CommitPromise,
-        on_rejected: fn() -> AddServerResult, // TODO: remove?
-    },
+pub struct PendingResponse {
+    pub token: Token,
+    pub request_id: RequestId,
+    pub commit_promise: CommitPromise,
 }
 
 impl PendingResponse {
-    pub fn token(&self) -> Token {
-        match self {
-            PendingResponse::AddServer { token, .. } => *token,
-        }
-    }
-
-    pub fn request_id(&self) -> RequestId {
-        match self {
-            PendingResponse::AddServer { request_id, .. } => request_id.clone(),
-        }
-    }
-
     pub fn log_position(&self) -> LogPosition {
-        match self {
-            PendingResponse::AddServer { commit_promise, .. } => commit_promise.log_position(),
-        }
-    }
-
-    pub fn commit_promise(&self) -> CommitPromise {
-        match self {
-            PendingResponse::AddServer { commit_promise, .. } => *commit_promise,
-        }
+        self.commit_promise.log_position()
     }
 }
 
@@ -455,14 +431,10 @@ impl<M: Machine> RaftServer<M> {
         let command = Command::InviteServer { server_addr };
         let commit_promise = self.propose_command(command);
 
-        let response = PendingResponse::AddServer {
+        let response = PendingResponse {
             token,
             request_id: request_id.clone(),
             commit_promise,
-            on_rejected: || AddServerResult {
-                success: false,
-                error: Some(AddServerError::ProposalRejected),
-            },
         };
         self.pending_responses.push(response);
         Ok(())
@@ -522,16 +494,15 @@ impl<M: Machine> RaftServer<M> {
     }
 
     fn send_pending_error_response(&mut self, pending: PendingResponse) -> std::io::Result<()> {
-        match pending {
-            PendingResponse::AddServer {
-                token,
-                request_id,
-                on_rejected,
-                ..
-            } => {
-                self.send_to(token, &Response::ok(request_id, on_rejected()))?;
-            }
+        #[derive(Default, Serialize)]
+        struct Error {
+            success: bool,
+            error: CommonError,
         }
+        self.send_to(
+            pending.token,
+            &Response::ok(pending.request_id, Error::default()),
+        )?;
         Ok(())
     }
 
@@ -565,7 +536,7 @@ impl<M: Machine> RaftServer<M> {
     fn apply(&mut self, index: LogIndex) -> std::io::Result<()> {
         let mut pending_response = None;
         while let Some(pending) = self.pending_responses.peek() {
-            match pending.commit_promise().poll(&self.node) {
+            match pending.commit_promise.clone().poll(&self.node) {
                 CommitPromise::Rejected(_) => {
                     let pending = self.pending_responses.pop().expect("unreachable");
                     self.send_pending_error_response(pending)?;
@@ -669,8 +640,8 @@ impl<M: Machine> RaftServer<M> {
             return Ok(());
         };
 
-        let response = Response::ok(pending.request_id(), result);
-        let token = pending.token();
+        let response = Response::ok(pending.request_id, result);
+        let token = pending.token;
         self.send_to(token, &response)?;
         Ok(())
     }
