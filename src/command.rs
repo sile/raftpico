@@ -13,6 +13,7 @@ pub enum Command {
     InviteServer {
         server_addr: SocketAddr,
     },
+    Command(serde_json::Value),
     // AddMember {
     //     node_id: NodeIdJson,
     //     server_addr: SocketAddr,

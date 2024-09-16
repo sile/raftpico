@@ -19,8 +19,8 @@ use crate::{
     io::would_block,
     request::{
         AddServerError, AddServerParams, AddServerResult, CreateClusterParams, HandshakeParams,
-        IncomingMessage, InternalIncomingMessage, InternalRequest, OutgoingMessage, Request,
-        Response,
+        IncomingMessage, InputParams, InternalIncomingMessage, InternalRequest, OutgoingMessage,
+        OutputError, Request, Response,
     },
     Machine, ServerStats,
 };
@@ -405,10 +405,36 @@ impl<M: Machine> RaftServer<M> {
                     conn.send(&response)?;
                 }
             }
-            Request::Command { id, params, .. } => todo!(),
+            Request::Command { id, params, .. } => {
+                if let Err(e) = self.handle_command(conn.token, &id, params) {
+                    let response = Response::output(id, Err(e));
+                    conn.send(&response)?;
+                }
+            }
         }
 
         Ok(())
+    }
+
+    fn handle_command(
+        &mut self,
+        token: Token,
+        request_id: &RequestId,
+        InputParams { input }: InputParams,
+    ) -> Result<(), OutputError> {
+        if self.node.id() >= RESERVED_NODE_ID_START {
+            return Err(OutputError::ServerNotReady);
+        }
+
+        if !self.node.role().is_leader() {
+            // TOOD: remote propos
+            todo!();
+        }
+
+        let command = Command::Command(input);
+        let commit_promise = self.propose_command(command);
+
+        todo!()
     }
 
     fn handle_add_server(
@@ -628,6 +654,7 @@ impl<M: Machine> RaftServer<M> {
                 };
                 self.try_response_to(pending, result)?;
             }
+            Command::Command(_) => todo!(),
         }
 
         Ok(())

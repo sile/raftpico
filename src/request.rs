@@ -386,6 +386,19 @@ impl Response<AddServerResult> {
     }
 }
 
+impl Response<OutputResult> {
+    pub fn output(id: RequestId, result: Result<serde_json::Value, OutputError>) -> Self {
+        let result = result
+            .map(OutputResult::ok)
+            .unwrap_or_else(OutputResult::err);
+        Self::Ok {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            result,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateClusterResult {
     pub success: bool,
@@ -425,6 +438,35 @@ impl AddServerResult {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputResult {
+    pub success: bool,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<serde_json::Value>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<OutputError>,
+}
+
+impl OutputResult {
+    pub fn ok(value: serde_json::Value) -> Self {
+        Self {
+            success: true,
+            output: Some(value),
+            error: None,
+        }
+    }
+
+    pub fn err(e: OutputError) -> Self {
+        Self {
+            success: false,
+            output: None,
+            error: Some(e),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AddServerError {
@@ -432,6 +474,16 @@ pub enum AddServerError {
     ServerNotReady,
     ProposalRejected,
     AlreadyInCluster,
+}
+
+// TODO: rename
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum OutputError {
+    // TODO
+    ServerNotReady,
+    ProposalRejected,
+    InvalidInput,
 }
 
 // #[derive(Debug, Clone, Serialize, Deserialize)]
