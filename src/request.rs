@@ -33,6 +33,7 @@ impl OutgoingMessage for InternalRequest {
     fn is_mandatory(&self) -> bool {
         match self {
             InternalRequest::Handshake { .. } => true,
+            InternalRequest::Propose { .. } => true,
             InternalRequest::AppendEntriesCall { .. } => false,
             InternalRequest::AppendEntriesReply { .. } => false,
         }
@@ -58,6 +59,11 @@ pub enum InternalRequest {
     Handshake {
         jsonrpc: JsonRpcVersion,
         params: HandshakeParams,
+    },
+    Propose {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: ProposeParams,
     },
     AppendEntriesCall {
         jsonrpc: JsonRpcVersion,
@@ -227,6 +233,11 @@ impl HandshakeParams {
     pub fn dst_node_id(&self) -> NodeId {
         NodeId::new(self.dst_node_id)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProposeParams {
+    pub command: Command,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -489,6 +500,7 @@ pub enum AddServerError {
 pub enum OutputError {
     // TODO
     ServerNotReady,
+    LeaderNotKnown,
     ProposalRejected,
     InvalidInput,
     InvalidOutput,

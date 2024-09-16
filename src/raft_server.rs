@@ -20,7 +20,7 @@ use crate::{
     request::{
         AddServerError, AddServerParams, AddServerResult, CommonError, CreateClusterParams,
         HandshakeParams, IncomingMessage, InputParams, InternalIncomingMessage, InternalRequest,
-        OutgoingMessage, OutputError, OutputResult, Request, Response,
+        OutgoingMessage, OutputError, OutputResult, ProposeParams, Request, Response,
     },
     Context, InputKind, Machine, ServerStats,
 };
@@ -96,6 +96,7 @@ pub struct Member {
 
     // skip serialization
     pub token: Option<Token>,
+    pub ongoing_proposes: HashMap<RequestId, (Token, RequestId)>,
 }
 
 pub type Commands = BTreeMap<LogIndex, Command>;
@@ -105,6 +106,7 @@ pub struct RaftServer<M> {
     listener: TcpListener,
     addr: SocketAddr,
     next_token: Token,
+    next_request_id: i64,
     connections: HashMap<Token, Connection>,
     poller: Poll,
     events: Option<Events>, // TODO: Remove Option wrapper if possible
@@ -152,6 +154,7 @@ impl<M: Machine> RaftServer<M> {
             listener,
             addr,
             next_token: Token(LISTENER_TOKEN.0 + 1), // TODO: randomize?
+            next_request_id: 0,
             connections: HashMap::new(),
             poller,
             events: Some(events),
@@ -172,6 +175,12 @@ impl<M: Machine> RaftServer<M> {
             members: BTreeMap::new(),
             next_node_id: NodeId::new(0),
         })
+    }
+
+    fn next_request_id(&mut self) -> RequestId {
+        let id = RequestId::Number(self.next_request_id);
+        self.next_request_id += 1;
+        id
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -282,6 +291,18 @@ impl<M: Machine> RaftServer<M> {
         if let Err(_e) = self.handle_connection_event(&mut conn) {
             // TODO: count stats depending on the error kind
             self.poller.registry().deregister(conn.stream_mut())?;
+
+            // TODO: factor out
+            if let Some(member) = self
+                .members
+                .values_mut()
+                .find(|m| m.token == Some(conn.token))
+            {
+                member.token = None;
+                for _ in member.ongoing_proposes.drain() {
+                    // TODO: response error
+                }
+            }
         } else {
             let token = conn.token;
             if let Some(interest) = conn.interest.take() {
@@ -321,6 +342,7 @@ impl<M: Machine> RaftServer<M> {
     ) -> std::io::Result<()> {
         match req {
             InternalRequest::Handshake { params, .. } => self.handle_handshake(conn, params)?,
+            InternalRequest::Propose { params, .. } => self.handle_propose(params)?,
             InternalRequest::AppendEntriesCall { params, .. } => {
                 let msg = params.to_raft_message(&mut self.commands);
                 self.node.handle_message(msg);
@@ -331,6 +353,10 @@ impl<M: Machine> RaftServer<M> {
             }
         }
         Ok(())
+    }
+
+    fn handle_propose(&mut self, params: ProposeParams) -> std::io::Result<()> {
+        todo!()
     }
 
     fn handle_handshake(
@@ -357,6 +383,7 @@ impl<M: Machine> RaftServer<M> {
                 server_addr: conn.addr, // TODO: params.src_addr()
                 inviting: false,
                 token: Some(conn.token),
+                ongoing_proposes: HashMap::new(),
             };
             self.members.insert(params.src_node_id(), member);
         }
@@ -402,12 +429,33 @@ impl<M: Machine> RaftServer<M> {
             return Err(OutputError::ServerNotReady);
         }
 
+        let command = Command::Command(input);
+
+        // TODO: factor out with handle_add_server()
         if !self.node.role().is_leader() {
-            // TOOD: remote propos
-            todo!();
+            if self.node.role().is_candidate() {
+                return Err(OutputError::LeaderNotKnown);
+            }
+
+            let Some(leader) = self.node.voted_for() else {
+                return Err(OutputError::LeaderNotKnown);
+            };
+
+            let id = self.next_request_id();
+            let request = InternalRequest::Propose {
+                jsonrpc: JsonRpcVersion::V2,
+                id: id.clone(),
+                params: ProposeParams { command },
+            };
+            self.internal_send_to(leader, &request).expect("TODO");
+            self.members
+                .get_mut(&leader)
+                .expect("unreachable")
+                .ongoing_proposes
+                .insert(id.clone(), (token, request_id.clone()));
+            return Ok(());
         }
 
-        let command = Command::Command(input);
         let commit_promise = self.propose_command(command);
 
         let response = PendingResponse {
@@ -527,6 +575,15 @@ impl<M: Machine> RaftServer<M> {
             // TODO: count stats depending on the error kind
             self.poller.registry().deregister(conn.stream_mut())?;
             self.connections.remove(&token);
+
+            // TODO:
+            if let Some(member) = self.members.values_mut().find(|m| m.token == Some(token)) {
+                member.token = None;
+                for _ in member.ongoing_proposes.drain() {
+                    // TODO: response error
+                }
+            }
+
             return Ok(());
         }
 
@@ -604,6 +661,7 @@ impl<M: Machine> RaftServer<M> {
                     server_addr: *server_addr,
                     inviting: false,
                     token: None,
+                    ongoing_proposes: HashMap::new(),
                 };
                 self.members.insert(node_id, member);
                 self.next_node_id = NodeId::new(node_id.get() + 1);
@@ -623,6 +681,7 @@ impl<M: Machine> RaftServer<M> {
                         server_addr: *server_addr,
                         inviting: true,
                         token: None,
+                        ongoing_proposes: HashMap::new(),
                     };
                     self.members.insert(node_id, member);
                     self.next_node_id = NodeId::new(node_id.get() + 1);
@@ -748,6 +807,21 @@ impl<M: Machine> RaftServer<M> {
             self.send_to(token, &request)?;
         }
 
+        Ok(())
+    }
+
+    fn internal_send_to<T: OutgoingMessage>(
+        &mut self,
+        dst: NodeId,
+        msg: &T,
+    ) -> std::io::Result<()> {
+        let member = self.members.get(&dst).expect("unreachable");
+        let token = if let Some(token) = member.token {
+            token
+        } else {
+            self.internal_connect(dst)?
+        };
+        self.send_to(token, msg)?;
         Ok(())
     }
 
