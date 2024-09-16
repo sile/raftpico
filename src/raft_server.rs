@@ -19,7 +19,8 @@ use crate::{
     io::would_block,
     request::{
         AddServerError, AddServerParams, AddServerResult, CreateClusterParams, HandshakeParams,
-        IncomingMessage, InternalRequest, Request, Response,
+        IncomingMessage, InternalIncomingMessage, InternalRequest, OutgoingMessage, Request,
+        Response,
     },
     Machine, ServerStats,
 };
@@ -96,7 +97,9 @@ impl Eq for PendingResponse {}
 pub struct RaftServerOptions {
     pub mio_events_capacity: usize,
     pub rng_seed: u64,
-    // TODO: max_write_buf_size
+
+    // TODO: rename
+    pub max_write_buf_size: usize,
 }
 
 impl Default for RaftServerOptions {
@@ -104,6 +107,7 @@ impl Default for RaftServerOptions {
         Self {
             mio_events_capacity: 1024,
             rng_seed: rand::random(),
+            max_write_buf_size: 1024 * 1024,
         }
     }
 }
@@ -135,6 +139,7 @@ pub struct RaftServer<M> {
     stats: ServerStats,
     commands: Commands,
     pending_responses: BinaryHeap<PendingResponse>,
+    max_write_buf_size: usize,
 
     machine: M,
 
@@ -170,11 +175,12 @@ impl<M: Machine> RaftServer<M> {
         Ok(Self {
             listener,
             addr,
-            next_token: Token(LISTENER_TOKEN.0 + 1),
+            next_token: Token(LISTENER_TOKEN.0 + 1), // TODO: randomize?
             connections: HashMap::new(),
             poller,
             events: Some(events),
             rng,
+            max_write_buf_size: options.max_write_buf_size,
             node: Node::start(UNINIT_NODE_ID),
             election_timeout: None,
             last_applied_index: LogIndex::ZERO,
@@ -320,11 +326,43 @@ impl<M: Machine> RaftServer<M> {
         while let Some(msg) = conn.poll_recv()? {
             match msg {
                 IncomingMessage::ExternalRequest(req) => self.handle_external_request(conn, req)?,
-                IncomingMessage::InternalRequest(_) => todo!(),
+                IncomingMessage::Internal(msg) => match msg {
+                    InternalIncomingMessage::Request(req) => {
+                        self.handle_internal_request(conn, req)?
+                    }
+                },
             }
         }
 
         conn.poll_send()?;
+        Ok(())
+    }
+
+    fn handle_internal_request(
+        &mut self,
+        conn: &mut Connection,
+        req: InternalRequest,
+    ) -> std::io::Result<()> {
+        match req {
+            InternalRequest::Handshake { params, .. } => self.handle_handshake(params)?,
+            InternalRequest::AppendEntriesCall { params, .. } => todo!(),
+        }
+        Ok(())
+    }
+
+    fn handle_handshake(&mut self, params: HandshakeParams) -> std::io::Result<()> {
+        if !params.inviting && self.node().is_none() {
+            // TODO: handle restarted case
+            todo!();
+        }
+        if self.node().is_none() {
+            // TOOD: note
+            self.node = Node::start(params.dst_node_id());
+        }
+        if params.dst_node_id() != self.node.id() {
+            todo!();
+        }
+
         Ok(())
     }
 
@@ -448,13 +486,18 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn send_to<T: Serialize>(&mut self, token: Token, response: T) -> std::io::Result<()> {
+    fn send_to<T: OutgoingMessage>(&mut self, token: Token, response: T) -> std::io::Result<()> {
         let Some(conn) = self.connections.get_mut(&token) else {
             // Already disconnected.
             return Ok(());
         };
 
-        if let Err(e) = conn.send(&response) {
+        if conn.pending_write_size() > self.max_write_buf_size && !response.is_mandatory() {
+            // TOD: stats
+            return Ok(());
+        }
+
+        if let Err(_e) = conn.send(&response) {
             // TODO: count stats depending on the error kind
             self.poller.registry().deregister(conn.stream_mut())?;
             self.connections.remove(&token);
@@ -632,10 +675,10 @@ impl<M: Machine> RaftServer<M> {
                 unconnected.push(peer);
                 continue;
             }
-            if member.inviting {
-                // TODO: stats
-                continue;
-            }
+            // if member.inviting {
+            //     // TODO: stats
+            //     continue;
+            // }
 
             // try_send() or OutgoingMessage trait
             todo!();

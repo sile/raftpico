@@ -4,11 +4,13 @@ use jsonlrpc::{
     ErrorCode, ErrorObject, JsonRpcVersion, JsonlStream, RequestId, RequestObject, ResponseObject,
 };
 use mio::{net::TcpStream, Interest, Token};
-use serde::Serialize;
 
 use crate::{
     io::would_block,
-    request::{is_known_external_method, IncomingMessage, Request},
+    request::{
+        is_known_external_method, IncomingMessage, InternalIncomingMessage, OutgoingMessage,
+        Request,
+    },
 };
 
 #[derive(Debug)]
@@ -80,8 +82,16 @@ impl Connection {
                 self.recv_external_message()
                     .map(IncomingMessage::ExternalRequest),
             ),
-            ConnectionKind::Internal => todo!(),
+            ConnectionKind::Internal => {
+                would_block(self.recv_internal_message().map(IncomingMessage::Internal))
+            }
         }
+    }
+
+    fn recv_internal_message(&mut self) -> std::io::Result<InternalIncomingMessage> {
+        // TODO: note about difference with the external message handling
+        let msg = self.stream.read_object()?;
+        Ok(msg)
     }
 
     fn recv_external_message(&mut self) -> std::io::Result<Request> {
@@ -158,7 +168,9 @@ impl Connection {
                             return self.recv_undefined_message();
                         }
                     }
-                    IncomingMessage::InternalRequest(_) => todo!(),
+                    IncomingMessage::Internal(_) => {
+                        self.kind = ConnectionKind::Internal;
+                    }
                 }
                 Ok(m)
             }
@@ -210,7 +222,7 @@ impl Connection {
         self.send(&response)
     }
 
-    pub fn send<T: Serialize>(&mut self, msg: &T) -> std::io::Result<()> {
+    pub fn send<T: OutgoingMessage>(&mut self, msg: &T) -> std::io::Result<()> {
         let start_writing = !self.is_writing();
         match self.stream.write_object(msg) {
             Err(_e) if !self.connected => {

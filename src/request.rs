@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
-use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
-use raftbare::{Message, MessageHeader};
+use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId, ResponseObject};
+use raftbare::{Message, MessageHeader, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::{command::Command, raft_server::Commands};
@@ -10,11 +10,42 @@ pub fn is_known_external_method(method: &str) -> bool {
     matches!(method, "CreateCluster")
 }
 
+pub trait OutgoingMessage: Serialize {
+    fn is_mandatory(&self) -> bool;
+}
+
+impl OutgoingMessage for ResponseObject {
+    fn is_mandatory(&self) -> bool {
+        true
+    }
+}
+
+impl<T: Serialize> OutgoingMessage for Response<T> {
+    fn is_mandatory(&self) -> bool {
+        true
+    }
+}
+
+impl OutgoingMessage for InternalRequest {
+    fn is_mandatory(&self) -> bool {
+        match self {
+            InternalRequest::Handshake { .. } => true,
+            InternalRequest::AppendEntriesCall { .. } => false,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum IncomingMessage {
     ExternalRequest(Request),
-    InternalRequest(InternalRequest),
+    Internal(InternalIncomingMessage),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum InternalIncomingMessage {
+    Request(InternalRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,8 +133,18 @@ pub enum LogEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HandshakeParams {
     pub src_node_id: u64,
-    pub dst_node_id: u64,
+    pub dst_node_id: u64, // TODO: delete?
     pub inviting: bool,
+}
+
+impl HandshakeParams {
+    pub fn src_node_id(&self) -> NodeId {
+        NodeId::new(self.src_node_id)
+    }
+
+    pub fn dst_node_id(&self) -> NodeId {
+        NodeId::new(self.dst_node_id)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
