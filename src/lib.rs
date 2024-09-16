@@ -155,7 +155,6 @@ mod tests {
                     addr,
                     Request::command(request_id(0), &i).expect("unreachable"),
                 );
-                dbg!(_v);
             }
         });
 

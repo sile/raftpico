@@ -357,9 +357,6 @@ impl<M: Machine> RaftServer<M> {
             commit_promise,
         };
         self.pending_responses.push(response);
-        dbg!(self.node.id().get());
-        dbg!(commit_promise);
-        dbg!(self.pending_responses.len());
     }
 
     fn handle_internal_request(
@@ -726,10 +723,6 @@ impl<M: Machine> RaftServer<M> {
                 self.try_response_to(pending, result)?;
             }
             Command::Command(input_json) => {
-                dbg!(self.node.id().get());
-                dbg!(index.get());
-                dbg!(pending.is_some());
-                dbg!(&input_json);
                 let Ok(input) = serde_json::from_value::<M::Input>(input_json.clone()) else {
                     todo!("response error");
                 };
@@ -778,6 +771,7 @@ impl<M: Machine> RaftServer<M> {
             return;
         }
 
+        // TODO: optimize
         let mut adding = Vec::new();
         let mut removing = Vec::new();
         for id in self.members.keys() {
@@ -789,6 +783,9 @@ impl<M: Machine> RaftServer<M> {
             if !self.members.contains_key(id) {
                 removing.push(*id);
             }
+        }
+        if adding.is_empty() && removing.is_empty() {
+            return;
         }
 
         let new_config = self.node.config().to_joint_consensus(&adding, &removing);
