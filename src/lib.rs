@@ -16,6 +16,39 @@ pub use machine::{Context, InputKind, Machine};
 pub use raft_server::{RaftServer, RaftServerOptions};
 pub use stats::ServerStats;
 
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug)]
+pub struct Error {
+    pub io: std::io::Error,
+    pub trace: std::backtrace::Backtrace,
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Self {
+            io: value,
+            trace: std::backtrace::Backtrace::capture(),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.io)
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.trace.status() == std::backtrace::BacktraceStatus::Captured {
+            write!(f, "{}\n\nBacktrace:\n{}\n", self.io, self.trace)
+        } else {
+            write!(f, "{}", self.io)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
