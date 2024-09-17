@@ -96,7 +96,7 @@ pub struct Member {
     pub inviting: bool,
     pub evicting: bool,
 
-    // skip serialization
+    // skip serialization => TODO: remove this field from this struct
     pub token: Option<Token>,
 }
 
@@ -119,6 +119,7 @@ pub struct RaftServer<M> {
     commands: Commands,
     pending_responses: BinaryHeap<PendingResponse>,
     max_write_buf_size: usize,
+    installing_snapshot: bool,
 
     ongoing_proposes: HashMap<RequestId, (Token, RequestId)>,
 
@@ -163,6 +164,7 @@ impl<M: Machine> RaftServer<M> {
             events: Some(events),
             rng,
             max_write_buf_size: options.max_write_buf_size,
+            installing_snapshot: false,
             ongoing_proposes: HashMap::new(),
             node: Node::start(UNINIT_NODE_ID),
             election_timeout: None,
@@ -585,10 +587,22 @@ impl<M: Machine> RaftServer<M> {
         if !promise.is_rejected() {
             self.commands.insert(promise.log_position().index, command);
             if self.commands.len() > self.max_log_entries_hint {
-                todo!();
+                self.install_snapshot();
             }
         }
         promise
+    }
+
+    fn install_snapshot(&mut self) {
+        debug_assert!(self.node.role().is_leader());
+        if self.installing_snapshot {
+            return;
+        }
+
+        self.installing_snapshot = true;
+        let command = Command::InstallSnapshot;
+        let promise = self.propose_command(command);
+        debug_assert!(!promise.is_rejected());
     }
 
     fn next_token(&mut self) -> Token {
@@ -790,6 +804,19 @@ impl<M: Machine> RaftServer<M> {
                 };
                 self.try_response_to(pending, result)?;
             }
+            Command::InstallSnapshot => {
+                let (position, config) = self
+                    .node
+                    .log()
+                    .get_position_and_config(index)
+                    .expect("unreachable");
+                let success = self
+                    .node
+                    .handle_snapshot_installed(position, config.clone());
+                assert!(success);
+                self.commands = self.commands.split_off(&(index + LogIndex::new(1)));
+                self.installing_snapshot = false;
+            }
             Command::Command(input_json) => {
                 let Ok(input) = serde_json::from_value::<M::Input>(input_json.clone()) else {
                     todo!("response error");
@@ -869,7 +896,10 @@ impl<M: Machine> RaftServer<M> {
             }
             Action::BroadcastMessage(m) => self.handle_broadcast_message(m)?,
             Action::SendMessage(peer, m) => self.handle_send_message(peer, m)?,
-            Action::InstallSnapshot(_) => todo!(),
+            Action::InstallSnapshot(peer) => {
+                dbg!(peer);
+                todo!()
+            }
         }
         Ok(())
     }

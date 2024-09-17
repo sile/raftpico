@@ -24,7 +24,10 @@ mod tests {
     };
 
     use jsonlrpc::{RequestId, RpcClient};
-    use request::{AddServerResult, CreateClusterResult, RemoveServerResult, Request, Response};
+    use request::{
+        AddServerResult, CreateClusterParams, CreateClusterResult, RemoveServerResult, Request,
+        Response,
+    };
     use serde::{Deserialize, Serialize};
 
     use super::*;
@@ -253,6 +256,80 @@ mod tests {
         }
         assert!(servers[0].node().expect("unreachable").role().is_follower());
     }
+
+    #[test]
+    fn snapshot() {
+        let mut servers = Vec::new();
+        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+
+        // Create a cluster with a small max log size.
+        let server_addr0 = server0.addr();
+        let handle = std::thread::spawn(move || {
+            let options = CreateClusterParams {
+                max_log_entries_hint: 1,
+                ..Default::default()
+            };
+            rpc::<CreateClusterResult>(
+                server_addr0,
+                Request::create_cluster(request_id(0), Some(options)),
+            )
+        });
+        while !handle.is_finished() {
+            server0.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
+        servers.push(server0);
+
+        // Add two servers to the cluster.
+        let server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server2 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server_addr1 = server1.addr();
+        let server_addr2 = server2.addr();
+        let handle = std::thread::spawn(move || {
+            let mut contact_addr = server_addr0;
+            for addr in [server_addr1, server_addr2] {
+                let result: AddServerResult =
+                    rpc(contact_addr, Request::add_server(request_id(0), addr));
+                assert_eq!(result.error, None);
+                contact_addr = addr;
+
+                // TODO:
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        servers.push(server1);
+        servers.push(server2);
+
+        while !handle.is_finished() {
+            for server in &mut servers {
+                server.poll(POLL_TIMEOUT).expect("poll() failed");
+            }
+        }
+        for server in &servers {
+            assert!(server.node().is_some());
+        }
+
+        // Propose commands.
+        let addrs = servers.iter().map(|s| s.addr()).collect::<Vec<_>>();
+        let handle = std::thread::spawn(move || {
+            for (i, addr) in addrs.into_iter().cycle().enumerate().take(10) {
+                let _v: serde_json::Value = rpc(
+                    addr,
+                    Request::command(request_id(0), &i).expect("unreachable"),
+                );
+            }
+        });
+
+        while !handle.is_finished() {
+            for server in &mut servers {
+                server.poll(POLL_TIMEOUT).expect("poll() failed");
+            }
+        }
+        for server in &servers {
+            assert_eq!(*server.machine(), 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9);
+        }
+    }
+
+    // TODO: query, local query
 
     fn rpc<T>(server_addr: SocketAddr, request: impl Serialize) -> T
     where
