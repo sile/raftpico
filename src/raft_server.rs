@@ -240,6 +240,7 @@ impl<M: Machine> RaftServer<M> {
                 // TODO: Dont remove if possible
                 self.handle_connection_event_or_deregister(connection)?;
             } else {
+                // TODO: sometimes reaches to here
                 unreachable!();
             }
         }
@@ -484,7 +485,7 @@ impl<M: Machine> RaftServer<M> {
             Request::CreateCluster { id, params, .. } => {
                 let result = self.handle_create_cluster(params);
                 let response = Response::create_cluster(id, result);
-                conn.send(&response)?;
+                conn.send(&response)?; // TODO: handle error
             }
             Request::AddServer { id, params, .. } => {
                 if let Err(e) = self.handle_add_server(conn.token, &id, params) {
@@ -505,7 +506,7 @@ impl<M: Machine> RaftServer<M> {
                 }
             }
             Request::LocalQuery { id, params, .. } => {
-                self.handle_local_query(conn.token, id, params)?;
+                self.handle_local_query(conn, id, params)?;
             }
         }
 
@@ -514,7 +515,7 @@ impl<M: Machine> RaftServer<M> {
 
     fn handle_local_query(
         &mut self,
-        token: Token,
+        conn: &mut Connection,
         request_id: RequestId,
         InputParams { input }: InputParams,
     ) -> Result<()> {
@@ -522,7 +523,7 @@ impl<M: Machine> RaftServer<M> {
             todo!("response error");
         };
         let mut ctx = Context {
-            kind: InputKind::Command,
+            kind: InputKind::LocalQuery,
             node: &self.node,
             machine_version: self.last_applied_index,
             output: None,
@@ -534,8 +535,8 @@ impl<M: Machine> RaftServer<M> {
             Some(Ok(value)) => OutputResult::ok(value),
             Some(Err(_e)) => OutputResult::err(OutputError::InvalidOutput),
         };
-        let response = Response::ok(request_id.clone(), result);
-        self.send_to(token, &response)?;
+        let response = Response::ok(request_id, result);
+        conn.send(&response)?; // TODO: handle error
 
         Ok(())
     }
