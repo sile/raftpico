@@ -374,6 +374,11 @@ pub enum Request {
         id: RequestId,
         params: InputParams,
     },
+    LocalQuery {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: InputParams,
+    },
 }
 
 impl Request {
@@ -410,12 +415,22 @@ impl Request {
         })
     }
 
+    pub fn local_query<T: Serialize>(id: RequestId, params: &T) -> std::io::Result<Self> {
+        let input = serde_json::to_value(params)?;
+        Ok(Self::LocalQuery {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            params: InputParams { input },
+        })
+    }
+
     pub fn id(&self) -> &RequestId {
         match self {
             Self::CreateCluster { id, .. } => id,
             Self::AddServer { id, .. } => id,
             Self::RemoveServer { id, .. } => id,
             Self::Command { id, .. } => id,
+            Self::LocalQuery { id, .. } => id,
         }
     }
 
@@ -425,6 +440,7 @@ impl Request {
             Self::AddServer { .. } => None,
             Self::RemoveServer { .. } => None,
             Self::Command { .. } => None,
+            Self::LocalQuery { .. } => None,
         }
     }
 }

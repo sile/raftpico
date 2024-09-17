@@ -504,7 +504,38 @@ impl<M: Machine> RaftServer<M> {
                     conn.send(&response)?;
                 }
             }
+            Request::LocalQuery { id, params, .. } => {
+                self.handle_local_query(conn.token, id, params)?;
+            }
         }
+
+        Ok(())
+    }
+
+    fn handle_local_query(
+        &mut self,
+        token: Token,
+        request_id: RequestId,
+        InputParams { input }: InputParams,
+    ) -> Result<()> {
+        let Ok(input) = serde_json::from_value::<M::Input>(input.clone()) else {
+            todo!("response error");
+        };
+        let mut ctx = Context {
+            kind: InputKind::Command,
+            node: &self.node,
+            machine_version: self.last_applied_index,
+            output: None,
+            ignore_output: false,
+        };
+        self.machine.handle_input(&mut ctx, input);
+        let result = match ctx.output {
+            None => OutputResult::ok(serde_json::Value::Null),
+            Some(Ok(value)) => OutputResult::ok(value),
+            Some(Err(_e)) => OutputResult::err(OutputError::InvalidOutput),
+        };
+        let response = Response::ok(request_id.clone(), result);
+        self.send_to(token, &response)?;
 
         Ok(())
     }
