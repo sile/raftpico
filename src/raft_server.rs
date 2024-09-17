@@ -25,7 +25,7 @@ use crate::{
         RemoveServerError, RemoveServerParams, RemoveServerResult, Request, Response,
         SnapshotParams,
     },
-    Context, InputKind, Machine, ServerStats,
+    Context, InputKind, Machine, Result, ServerStats,
 };
 
 const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
@@ -135,7 +135,7 @@ pub struct RaftServer<M> {
 }
 
 impl<M: Machine> RaftServer<M> {
-    pub fn start(listen_addr: SocketAddr, machine: M) -> std::io::Result<Self> {
+    pub fn start(listen_addr: SocketAddr, machine: M) -> Result<Self> {
         Self::with_options(listen_addr, machine, RaftServerOptions::default())
     }
 
@@ -143,7 +143,7 @@ impl<M: Machine> RaftServer<M> {
         listen_addr: SocketAddr,
         machine: M,
         options: RaftServerOptions,
-    ) -> std::io::Result<Self> {
+    ) -> Result<Self> {
         let mut listener = TcpListener::bind(listen_addr)?;
         let addr = listener.local_addr()?;
 
@@ -206,7 +206,7 @@ impl<M: Machine> RaftServer<M> {
         &self.stats
     }
 
-    pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+    pub fn poll(&mut self, timeout: Option<Duration>) -> Result<()> {
         self.stats.poll_count += 1;
 
         let Some(mut events) = self.events.take() else {
@@ -217,11 +217,7 @@ impl<M: Machine> RaftServer<M> {
         result
     }
 
-    fn poll_with_events(
-        &mut self,
-        events: &mut Events,
-        timeout: Option<Duration>,
-    ) -> std::io::Result<()> {
+    fn poll_with_events(&mut self, events: &mut Events, timeout: Option<Duration>) -> Result<()> {
         // Timeout and I/O events handling.
         let now = Instant::now();
         let election_timeout = self
@@ -277,9 +273,10 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_listener_event(&mut self) -> std::io::Result<()> {
+    fn handle_listener_event(&mut self) -> Result<()> {
         loop {
-            let Some((mut stream, addr)) = would_block(self.listener.accept())? else {
+            let Some((mut stream, addr)) = would_block(self.listener.accept().map_err(From::from))?
+            else {
                 return Ok(());
             };
             self.stats.accept_count += 1;
@@ -296,10 +293,7 @@ impl<M: Machine> RaftServer<M> {
         }
     }
 
-    fn handle_connection_event_or_deregister(
-        &mut self,
-        mut conn: Connection,
-    ) -> std::io::Result<()> {
+    fn handle_connection_event_or_deregister(&mut self, mut conn: Connection) -> Result<()> {
         if let Err(_e) = self.handle_connection_event(&mut conn) {
             // TODO: count stats depending on the error kind
             self.poller.registry().deregister(conn.stream_mut())?;
@@ -331,7 +325,7 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_connection_event(&mut self, conn: &mut Connection) -> std::io::Result<()> {
+    fn handle_connection_event(&mut self, conn: &mut Connection) -> Result<()> {
         if !conn.poll_connect()? {
             return Ok(());
         }
@@ -375,7 +369,7 @@ impl<M: Machine> RaftServer<M> {
         &mut self,
         conn: &mut Connection,
         req: InternalRequest,
-    ) -> std::io::Result<()> {
+    ) -> Result<()> {
         match req {
             InternalRequest::Handshake { params, .. } => self.handle_handshake(conn, params)?,
             InternalRequest::Propose { id, params, .. } => self.handle_propose(conn, id, params)?,
@@ -402,7 +396,7 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_snapshot(&mut self, params: SnapshotParams) -> std::io::Result<()> {
+    fn handle_snapshot(&mut self, params: SnapshotParams) -> Result<()> {
         self.min_election_timeout = params.min_election_timeout;
         self.max_election_timeout = params.max_election_timeout;
         self.max_log_entries_hint = params.max_log_entries_hint;
@@ -447,7 +441,7 @@ impl<M: Machine> RaftServer<M> {
         conn: &mut Connection,
         request_id: RequestId,
         params: ProposeParams,
-    ) -> std::io::Result<()> {
+    ) -> Result<()> {
         let promise = self.propose_command(params.command);
         let response = Response::propose_result(request_id, promise);
 
@@ -457,11 +451,7 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_handshake(
-        &mut self,
-        conn: &mut Connection,
-        params: HandshakeParams,
-    ) -> std::io::Result<()> {
+    fn handle_handshake(&mut self, conn: &mut Connection, params: HandshakeParams) -> Result<()> {
         if !params.inviting && self.node().is_none() {
             // TODO: handle restarted case
             todo!();
@@ -489,11 +479,7 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_external_request(
-        &mut self,
-        conn: &mut Connection,
-        req: Request,
-    ) -> std::io::Result<()> {
+    fn handle_external_request(&mut self, conn: &mut Connection, req: Request) -> Result<()> {
         match req {
             Request::CreateCluster { id, params, .. } => {
                 let result = self.handle_create_cluster(params);
@@ -528,7 +514,7 @@ impl<M: Machine> RaftServer<M> {
         token: Token,
         request_id: &RequestId,
         InputParams { input }: InputParams,
-    ) -> Result<(), OutputError> {
+    ) -> std::result::Result<(), OutputError> {
         let command = Command::Command(input);
         self.handle_command_common(token, request_id, command)?;
         Ok(())
@@ -540,7 +526,7 @@ impl<M: Machine> RaftServer<M> {
         token: Token,
         request_id: &RequestId,
         command: Command,
-    ) -> Result<(), CommonError> {
+    ) -> std::result::Result<(), CommonError> {
         if self.node.id() >= RESERVED_NODE_ID_START {
             return Err(CommonError::ServerNotReady);
         }
@@ -583,7 +569,7 @@ impl<M: Machine> RaftServer<M> {
         token: Token,
         request_id: &RequestId,
         AddServerParams { server_addr }: AddServerParams,
-    ) -> Result<(), AddServerError> {
+    ) -> std::result::Result<(), AddServerError> {
         let command = Command::InviteServer { server_addr };
         self.handle_command_common(token, request_id, command)?;
         Ok(())
@@ -594,7 +580,7 @@ impl<M: Machine> RaftServer<M> {
         token: Token,
         request_id: &RequestId,
         RemoveServerParams { server_addr }: RemoveServerParams,
-    ) -> Result<(), RemoveServerError> {
+    ) -> std::result::Result<(), RemoveServerError> {
         let command = Command::EvictServer { server_addr };
         self.handle_command_common(token, request_id, command)?;
         Ok(())
@@ -665,7 +651,7 @@ impl<M: Machine> RaftServer<M> {
         token
     }
 
-    fn send_pending_error_response(&mut self, pending: PendingResponse) -> std::io::Result<()> {
+    fn send_pending_error_response(&mut self, pending: PendingResponse) -> Result<()> {
         #[derive(Default, Serialize)]
         struct Error {
             success: bool,
@@ -678,7 +664,7 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn send_to<T: OutgoingMessage>(&mut self, token: Token, msg: &T) -> std::io::Result<()> {
+    fn send_to<T: OutgoingMessage>(&mut self, token: Token, msg: &T) -> Result<()> {
         let Some(conn) = self.connections.get_mut(&token) else {
             // Already disconnected.
             return Ok(());
@@ -715,7 +701,7 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_evicted(&mut self, node_id: NodeId) -> std::io::Result<()> {
+    fn handle_evicted(&mut self, node_id: NodeId) -> Result<()> {
         let member = self.members.remove(&node_id).expect("unreachable");
         if self.node.id() == node_id {
             self.node = Node::start(UNINIT_NODE_ID);
@@ -731,7 +717,7 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn apply(&mut self, index: LogIndex) -> std::io::Result<()> {
+    fn apply(&mut self, index: LogIndex) -> Result<()> {
         let mut pending_response = None;
         while let Some(pending) = self.pending_responses.peek() {
             match pending.commit_promise.clone().poll(&self.node) {
@@ -776,17 +762,14 @@ impl<M: Machine> RaftServer<M> {
                         "There is no log entry associated with commit index {}",
                         index.get()
                     ),
-                ));
+                )
+                .into());
             }
         }
         Ok(())
     }
 
-    fn apply_command(
-        &mut self,
-        index: LogIndex,
-        pending: Option<PendingResponse>,
-    ) -> std::io::Result<()> {
+    fn apply_command(&mut self, index: LogIndex, pending: Option<PendingResponse>) -> Result<()> {
         let Some(command) = self.commands.get(&index) else {
             unreachable!("bug");
         };
@@ -885,7 +868,7 @@ impl<M: Machine> RaftServer<M> {
         &mut self,
         pending: Option<PendingResponse>,
         result: T,
-    ) -> std::io::Result<()> {
+    ) -> Result<()> {
         let Some(pending) = pending else {
             return Ok(());
         };
@@ -926,7 +909,7 @@ impl<M: Machine> RaftServer<M> {
         assert!(!promise.is_rejected());
     }
 
-    fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
+    fn handle_action(&mut self, action: Action) -> Result<()> {
         match action {
             Action::SetElectionTimeout => self.handle_set_election_timeout(),
             Action::SaveCurrentTerm | Action::SaveVotedFor | Action::AppendLogEntries(_) => {
@@ -939,7 +922,7 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_install_snapshot(&mut self, dst: NodeId) -> std::io::Result<()> {
+    fn handle_install_snapshot(&mut self, dst: NodeId) -> Result<()> {
         let (last_included, config) = self
             .node
             .log()
@@ -974,12 +957,14 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_send_message(&mut self, peer: NodeId, msg: Message) -> std::io::Result<()> {
+    fn handle_send_message(&mut self, peer: NodeId, msg: Message) -> Result<()> {
         let member = self.members.get(&peer).expect("unreachable");
         let token = if let Some(token) = member.token {
             token
+        } else if let Some(token) = self.internal_connect(peer)? {
+            token
         } else {
-            self.internal_connect(peer)?
+            return Ok(());
         };
 
         let request = InternalRequest::from_raft_message(msg, &self.commands);
@@ -987,7 +972,7 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_broadcast_message(&mut self, msg: Message) -> std::io::Result<()> {
+    fn handle_broadcast_message(&mut self, msg: Message) -> Result<()> {
         let request = InternalRequest::from_raft_message(msg, &self.commands);
         let mut unconnected = Vec::new();
         let peers = self.node.peers().collect::<Vec<_>>(); // TODO:remove
@@ -1007,8 +992,9 @@ impl<M: Machine> RaftServer<M> {
         }
 
         for peer in unconnected {
-            let token = self.internal_connect(peer)?;
-            self.send_to(token, &request)?;
+            if let Some(token) = self.internal_connect(peer)? {
+                self.send_to(token, &request)?;
+            }
         }
 
         Ok(())
@@ -1019,12 +1005,14 @@ impl<M: Machine> RaftServer<M> {
         dst: NodeId,
         msg: &T,
         request_id: Option<RequestId>,
-    ) -> std::io::Result<()> {
+    ) -> Result<()> {
         let member = self.members.get(&dst).expect("unreachable");
         let token = if let Some(token) = member.token {
             token
+        } else if let Some(token) = self.internal_connect(dst)? {
+            token
         } else {
-            self.internal_connect(dst)?
+            return Ok(());
         };
         self.send_to(token, msg)?;
         if let Some(id) = request_id {
@@ -1035,7 +1023,7 @@ impl<M: Machine> RaftServer<M> {
         Ok(())
     }
 
-    fn internal_connect(&mut self, peer: NodeId) -> std::io::Result<Token> {
+    fn internal_connect(&mut self, peer: NodeId) -> Result<Option<Token>> {
         let token = self.next_token();
         let member = self.members.get_mut(&peer).expect("unreachable");
         member.token = Some(token);
@@ -1045,7 +1033,11 @@ impl<M: Machine> RaftServer<M> {
         self.poller
             .registry()
             .register(conn.stream_mut(), token, Interest::WRITABLE)?;
-        conn.poll_connect()?; // TODO: deregister if failed
+        if let Err(_e) = conn.poll_connect() {
+            // TODO: stats
+            self.poller.registry().deregister(conn.stream_mut())?;
+            return Ok(None);
+        }
         self.connections.insert(token, conn);
 
         let request = InternalRequest::Handshake {
@@ -1057,7 +1049,7 @@ impl<M: Machine> RaftServer<M> {
             },
         };
         self.send_to(token, &request)?;
-        Ok(token)
+        Ok(Some(token))
     }
 
     fn handle_set_election_timeout(&mut self) {

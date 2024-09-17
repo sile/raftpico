@@ -11,6 +11,7 @@ use crate::{
         is_known_external_method, IncomingMessage, InternalIncomingMessage, OutgoingMessage,
         Request,
     },
+    Result,
 };
 
 #[derive(Debug)]
@@ -41,7 +42,7 @@ impl Connection {
         }
     }
 
-    pub fn connect(addr: SocketAddr, token: Token) -> std::io::Result<Self> {
+    pub fn connect(addr: SocketAddr, token: Token) -> Result<Self> {
         let stream = TcpStream::connect(addr)?;
         stream.set_nodelay(true)?;
         Ok(Self {
@@ -78,7 +79,7 @@ impl Connection {
         self.stream.write_buf().len()
     }
 
-    pub fn poll_recv(&mut self) -> std::io::Result<Option<IncomingMessage>> {
+    pub fn poll_recv(&mut self) -> Result<Option<IncomingMessage>> {
         match self.kind {
             ConnectionKind::Undefined => would_block(self.recv_undefined_message()),
             ConnectionKind::External => would_block(
@@ -91,13 +92,13 @@ impl Connection {
         }
     }
 
-    fn recv_internal_message(&mut self) -> std::io::Result<InternalIncomingMessage> {
+    fn recv_internal_message(&mut self) -> Result<InternalIncomingMessage> {
         // TODO: note about difference with the external message handling
         let msg = self.stream.read_object()?;
         Ok(msg)
     }
 
-    fn recv_external_message(&mut self) -> std::io::Result<Request> {
+    fn recv_external_message(&mut self) -> Result<Request> {
         // TODO: refactor code
         // TODO: consider batch request
         match self.stream.read_object::<Request>() {
@@ -135,7 +136,7 @@ impl Connection {
         }
     }
 
-    fn recv_undefined_message(&mut self) -> std::io::Result<IncomingMessage> {
+    fn recv_undefined_message(&mut self) -> Result<IncomingMessage> {
         // TODO: refactor code
         match self.stream.read_object::<IncomingMessage>() {
             Err(e) if e.is_io() => {
@@ -180,7 +181,7 @@ impl Connection {
         }
     }
 
-    fn send_error_response(&mut self, req: &Request, error: ErrorObject) -> std::io::Result<()> {
+    fn send_error_response(&mut self, req: &Request, error: ErrorObject) -> Result<()> {
         let response = ResponseObject::Err {
             jsonrpc: JsonRpcVersion::V2,
             error,
@@ -189,7 +190,7 @@ impl Connection {
         self.send(&response)
     }
 
-    fn send_error_response_from_request(&mut self, req: RequestObject) -> std::io::Result<()> {
+    fn send_error_response_from_request(&mut self, req: RequestObject) -> Result<()> {
         let (code, msg) = if is_known_external_method(&req.method) {
             (ErrorCode::METHOD_NOT_FOUND, "Method not found")
         } else {
@@ -208,11 +209,7 @@ impl Connection {
         self.send(&response)
     }
 
-    fn send_error_response_from_err(
-        &mut self,
-        msg: &str,
-        e: &serde_json::Error,
-    ) -> std::io::Result<()> {
+    fn send_error_response_from_err(&mut self, msg: &str, e: &serde_json::Error) -> Result<()> {
         let response = ResponseObject::Err {
             jsonrpc: JsonRpcVersion::V2,
             error: ErrorObject {
@@ -225,7 +222,7 @@ impl Connection {
         self.send(&response)
     }
 
-    pub fn send<T: OutgoingMessage>(&mut self, msg: &T) -> std::io::Result<()> {
+    pub fn send<T: OutgoingMessage>(&mut self, msg: &T) -> Result<()> {
         let start_writing = !self.is_writing();
         match self.stream.write_object(msg) {
             Err(_e) if !self.connected => {
@@ -245,7 +242,7 @@ impl Connection {
 
     // TODO: try_send()
 
-    pub fn poll_connect(&mut self) -> std::io::Result<bool> {
+    pub fn poll_connect(&mut self) -> Result<bool> {
         if self.connected {
             return Ok(true);
         }
@@ -254,7 +251,7 @@ impl Connection {
         self.stream().take_error()?;
         match self.stream().peer_addr() {
             Err(e) if e.kind() == std::io::ErrorKind::NotConnected => Ok(false),
-            Err(e) => Err(e),
+            Err(e) => Err(e.into()),
             Ok(_) => {
                 self.connected = true;
                 Ok(true)
@@ -262,7 +259,7 @@ impl Connection {
         }
     }
 
-    pub fn poll_send(&mut self) -> std::io::Result<()> {
+    pub fn poll_send(&mut self) -> Result<()> {
         if !self.connected || !self.is_writing() {
             return Ok(());
         }
