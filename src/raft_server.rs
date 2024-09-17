@@ -259,7 +259,9 @@ impl<M: Machine> RaftServer<M> {
             // Quickly notify followers about the latest commit index.
             self.node.heartbeat();
         }
-        self.last_applied_index = self.node.commit_index();
+        if self.last_applied_index < self.node.commit_index() {
+            self.last_applied_index = self.node.commit_index();
+        }
 
         // Node actions handling.
         //
