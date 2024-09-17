@@ -1,8 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr};
 
 use clap::Parser;
-use orfail::OrFail;
-use raftpico::{Context, Machine, RaftServer};
+use raftpico::{Context, Machine, RaftServer, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
@@ -10,11 +9,11 @@ struct Args {
     listen_addr: SocketAddr,
 }
 
-fn main() -> orfail::Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
-    let mut node = RaftServer::start(args.listen_addr, KvsMachine::default()).or_fail()?;
+    let mut node = RaftServer::start(args.listen_addr, KvsMachine::default())?;
     loop {
-        node.poll(None).or_fail()?;
+        node.poll(None)?;
     }
 }
 

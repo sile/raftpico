@@ -186,12 +186,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "orfail"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aba2212a0fddd290c8209fb9b0393382435ede29c24a71f245d7fa92f0f3442e"
-
-[[package]]
 name = "ppv-lite86"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -229,7 +223,6 @@ dependencies = [
  "clap",
  "jsonlrpc",
  "mio",
- "orfail",
  "raftbare",
  "rand",
  "rand_chacha",

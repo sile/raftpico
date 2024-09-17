@@ -18,7 +18,6 @@ pub use stats::ServerStats;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
 pub struct Error {
     pub io: std::io::Error,
     pub trace: std::backtrace::Backtrace,
@@ -45,6 +44,12 @@ impl From<serde_json::Error> for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.io)
+    }
+}
+
+impl std::fmt::Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
     }
 }
 
