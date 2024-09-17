@@ -15,3 +15,7 @@ serde_json = "1.0.127"
 [dev-dependencies]
 clap = { version = "4.5.16", features = ["derive"] }
 orfail = "1.1.0"
+
+# TODO
+[patch.'crates-io']
+raftbare = { path = "../raftbare/" }
