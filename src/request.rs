@@ -293,6 +293,12 @@ impl RequestVoteReplyParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotParams {
+    // position and config
+    pub last_included_term: u64,
+    pub last_included_index: u64,
+    pub voters: Vec<u64>,
+    pub new_voters: Vec<u64>,
+
     // system.
     pub min_election_timeout: Duration,
     pub max_election_timeout: Duration,

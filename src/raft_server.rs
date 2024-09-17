@@ -7,7 +7,8 @@ use std::{
 use jsonlrpc::{JsonRpcVersion, RequestId};
 use mio::{net::TcpListener, Events, Interest, Poll, Token};
 use raftbare::{
-    Action, CommitPromise, LogEntry, LogIndex, LogPosition, Message, Node, NodeId, Role,
+    Action, ClusterConfig, CommitPromise, LogEntry, LogIndex, LogPosition, Message, Node, NodeId,
+    Role,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
@@ -20,8 +21,9 @@ use crate::{
     request::{
         AddServerError, AddServerParams, AddServerResult, CommonError, CreateClusterParams,
         HandshakeParams, IncomingMessage, InputParams, InternalIncomingMessage, InternalRequest,
-        OutgoingMessage, OutputError, OutputResult, ProposeParams, ProposeResult,
+        MemberJson, OutgoingMessage, OutputError, OutputResult, ProposeParams, ProposeResult,
         RemoveServerError, RemoveServerParams, RemoveServerResult, Request, Response,
+        SnapshotParams,
     },
     Context, InputKind, Machine, ServerStats,
 };
@@ -93,12 +95,11 @@ impl Default for RaftServerOptions {
 pub struct Member {
     pub node_id: NodeId,
     pub server_addr: SocketAddr,
-    pub inviting: bool,
+    pub inviting: bool, // TODO: delete?
     pub evicting: bool,
 
     // skip serialization => TODO: remove this field from this struct
     pub token: Option<Token>,
-    pub snapshot_required: Option<NodeId>,
 }
 
 pub type Commands = BTreeMap<LogIndex, Command>;
@@ -390,8 +391,50 @@ impl<M: Machine> RaftServer<M> {
                 let msg = params.to_raft_message();
                 self.node.handle_message(msg);
             }
-            InternalRequest::Snapshot { params, .. } => todo!(),
+            InternalRequest::Snapshot { params, .. } => {
+                self.handle_snapshot(params)?;
+            }
         }
+        Ok(())
+    }
+
+    fn handle_snapshot(&mut self, params: SnapshotParams) -> std::io::Result<()> {
+        self.min_election_timeout = params.min_election_timeout;
+        self.max_election_timeout = params.max_election_timeout;
+        self.max_log_entries_hint = params.max_log_entries_hint;
+        self.next_node_id = params.next_node_id.into();
+        self.machine = serde_json::from_value(params.machine)?;
+
+        let mut members = BTreeMap::new();
+        for m in params.members {
+            let node_id = NodeId::new(m.node_id);
+            members.insert(
+                node_id,
+                Member {
+                    node_id: m.node_id.into(),
+                    server_addr: m.server_addr,
+                    inviting: m.inviting,
+                    evicting: m.evicting,
+                    token: self.members.get(&node_id).and_then(|m| m.token),
+                },
+            );
+        }
+        self.members = members;
+
+        let last_included = LogPosition {
+            term: params.last_included_term.into(),
+            index: params.last_included_index.into(),
+        };
+        let config = ClusterConfig {
+            voters: params.voters.into_iter().map(NodeId::new).collect(),
+            new_voters: params.new_voters.into_iter().map(NodeId::new).collect(),
+            ..Default::default()
+        };
+        self.last_applied_index = last_included.index;
+
+        let ok = self.node.handle_snapshot_installed(last_included, config);
+        assert!(ok); // TODO: error handling
+
         Ok(())
     }
 
@@ -435,7 +478,6 @@ impl<M: Machine> RaftServer<M> {
                 inviting: false,
                 evicting: false,
                 token: Some(conn.token),
-                snapshot_required: None,
             };
             self.members.insert(params.src_node_id(), member);
         }
@@ -766,7 +808,6 @@ impl<M: Machine> RaftServer<M> {
                     inviting: false,
                     evicting: false,
                     token: None,
-                    snapshot_required: None,
                 };
                 self.members.insert(node_id, member);
                 self.next_node_id = NodeId::new(node_id.get() + 1);
@@ -787,7 +828,6 @@ impl<M: Machine> RaftServer<M> {
                         inviting: true,
                         evicting: false,
                         token: None,
-                        snapshot_required: None,
                     };
                     self.members.insert(node_id, member);
                     self.next_node_id = NodeId::new(node_id.get() + 1);
@@ -904,59 +944,44 @@ impl<M: Machine> RaftServer<M> {
             }
             Action::BroadcastMessage(m) => self.handle_broadcast_message(m)?,
             Action::SendMessage(peer, m) => self.handle_send_message(peer, m)?,
-            Action::InstallSnapshot(peer) => self.send_snapshot(peer)?,
+            Action::InstallSnapshot(peer) => self.handle_install_snapshot(peer)?,
         }
         Ok(())
     }
 
-    fn send_snapshot(&mut self, dst: NodeId) -> std::io::Result<()> {
-        // TODO: rate control
-        // TODO: suppress new snapshot install on the local node
-        if self
+    fn handle_install_snapshot(&mut self, dst: NodeId) -> std::io::Result<()> {
+        let (last_included, config) = self
+            .node
+            .log()
+            .get_position_and_config(self.node.commit_index())
+            .expect("unreachable");
+        let members = self
             .members
-            .get(&dst)
-            .map_or(true, |m| m.snapshot_required.is_some())
-        {
-            // Already sending.
-            return Ok(());
-        }
-
-        let mut sender = self.node.id();
-        if self.node.role().is_leader() {
-            for peer in self.node.peers() {
-                if peer == dst {
-                    continue;
-                }
-                if self
-                    .members
-                    .get(&peer)
-                    .map_or(true, |m| m.snapshot_required.is_some())
-                {
-                    if self.members.get(&peer).and_then(|m| m.snapshot_required) == Some(dst) {
-                        // Reset sender for peer
-                        todo!();
-                    }
-                    continue;
-                }
-
-                // TOOD: if self.node.log().snapshot_index() > peer.match_index { continue }
-                // TODO: randomize
-                sender = peer;
-                break;
-            }
-        }
-
-        if sender != self.node.id() {
-            todo!();
-        }
-
-        self.members
-            .get_mut(&dst)
-            .expect("unreachable")
-            .snapshot_required = Some(sender);
-
-        // TODO: internal send
-        todo!()
+            .values()
+            .map(|m| MemberJson {
+                node_id: m.node_id.get(),
+                server_addr: m.server_addr,
+                inviting: m.inviting,
+                evicting: m.evicting,
+            })
+            .collect();
+        let request = InternalRequest::Snapshot {
+            jsonrpc: JsonRpcVersion::V2,
+            params: SnapshotParams {
+                last_included_term: last_included.term.get(),
+                last_included_index: last_included.index.get(),
+                voters: config.voters.iter().map(|n| n.get()).collect(),
+                new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
+                min_election_timeout: self.min_election_timeout,
+                max_election_timeout: self.max_election_timeout,
+                max_log_entries_hint: self.max_log_entries_hint,
+                next_node_id: self.next_node_id.get(),
+                members,
+                machine: serde_json::to_value(&self.machine)?,
+            },
+        };
+        self.internal_send_to(dst, &request, None)?;
+        Ok(())
     }
 
     fn handle_send_message(&mut self, peer: NodeId, msg: Message) -> std::io::Result<()> {

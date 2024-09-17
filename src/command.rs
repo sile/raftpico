@@ -16,7 +16,7 @@ pub enum Command {
     EvictServer {
         server_addr: SocketAddr,
     },
-    InstallSnapshot,
+    InstallSnapshot, // TODO: remove(?)
     Command(serde_json::Value),
     // AddMember {
     //     node_id: NodeIdJson,
