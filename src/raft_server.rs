@@ -98,6 +98,7 @@ pub struct Member {
 
     // skip serialization => TODO: remove this field from this struct
     pub token: Option<Token>,
+    pub snapshot_required: Option<NodeId>,
 }
 
 pub type Commands = BTreeMap<LogIndex, Command>;
@@ -305,6 +306,9 @@ impl<M: Machine> RaftServer<M> {
                 .find(|m| m.token == Some(conn.token))
             {
                 member.token = None;
+
+                // TODO: member.snapshot_required handling (reset sender from this node)
+
                 for _ in conn.ongoing_requests {
                     // TODO: response error
                     todo!();
@@ -386,6 +390,7 @@ impl<M: Machine> RaftServer<M> {
                 let msg = params.to_raft_message();
                 self.node.handle_message(msg);
             }
+            InternalRequest::Snapshot { params, .. } => todo!(),
         }
         Ok(())
     }
@@ -430,6 +435,7 @@ impl<M: Machine> RaftServer<M> {
                 inviting: false,
                 evicting: false,
                 token: Some(conn.token),
+                snapshot_required: None,
             };
             self.members.insert(params.src_node_id(), member);
         }
@@ -760,6 +766,7 @@ impl<M: Machine> RaftServer<M> {
                     inviting: false,
                     evicting: false,
                     token: None,
+                    snapshot_required: None,
                 };
                 self.members.insert(node_id, member);
                 self.next_node_id = NodeId::new(node_id.get() + 1);
@@ -780,6 +787,7 @@ impl<M: Machine> RaftServer<M> {
                         inviting: true,
                         evicting: false,
                         token: None,
+                        snapshot_required: None,
                     };
                     self.members.insert(node_id, member);
                     self.next_node_id = NodeId::new(node_id.get() + 1);
@@ -896,12 +904,59 @@ impl<M: Machine> RaftServer<M> {
             }
             Action::BroadcastMessage(m) => self.handle_broadcast_message(m)?,
             Action::SendMessage(peer, m) => self.handle_send_message(peer, m)?,
-            Action::InstallSnapshot(peer) => {
-                dbg!(peer);
-                todo!()
-            }
+            Action::InstallSnapshot(peer) => self.send_snapshot(peer)?,
         }
         Ok(())
+    }
+
+    fn send_snapshot(&mut self, dst: NodeId) -> std::io::Result<()> {
+        // TODO: rate control
+        // TODO: suppress new snapshot install on the local node
+        if self
+            .members
+            .get(&dst)
+            .map_or(true, |m| m.snapshot_required.is_some())
+        {
+            // Already sending.
+            return Ok(());
+        }
+
+        let mut sender = self.node.id();
+        if self.node.role().is_leader() {
+            for peer in self.node.peers() {
+                if peer == dst {
+                    continue;
+                }
+                if self
+                    .members
+                    .get(&peer)
+                    .map_or(true, |m| m.snapshot_required.is_some())
+                {
+                    if self.members.get(&peer).and_then(|m| m.snapshot_required) == Some(dst) {
+                        // Reset sender for peer
+                        todo!();
+                    }
+                    continue;
+                }
+
+                // TOOD: if self.node.log().snapshot_index() > peer.match_index { continue }
+                // TODO: randomize
+                sender = peer;
+                break;
+            }
+        }
+
+        if sender != self.node.id() {
+            todo!();
+        }
+
+        self.members
+            .get_mut(&dst)
+            .expect("unreachable")
+            .snapshot_required = Some(sender);
+
+        // TODO: internal send
+        todo!()
     }
 
     fn handle_send_message(&mut self, peer: NodeId, msg: Message) -> std::io::Result<()> {

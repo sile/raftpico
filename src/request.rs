@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId, ResponseObject};
 use raftbare::{
@@ -38,6 +38,7 @@ impl OutgoingMessage for InternalRequest {
             InternalRequest::AppendEntriesReply { .. } => false,
             InternalRequest::RequestVoteCall { .. } => false,
             InternalRequest::RequestVoteReply { .. } => false,
+            InternalRequest::Snapshot { .. } => true,
         }
     }
 }
@@ -84,6 +85,10 @@ pub enum InternalRequest {
     RequestVoteReply {
         jsonrpc: JsonRpcVersion,
         params: RequestVoteReplyParams,
+    },
+    Snapshot {
+        jsonrpc: JsonRpcVersion,
+        params: SnapshotParams,
     },
 }
 
@@ -284,6 +289,27 @@ impl RequestVoteReplyParams {
             vote_granted: self.vote_granted,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotParams {
+    // system.
+    pub min_election_timeout: Duration,
+    pub max_election_timeout: Duration,
+    pub max_log_entries_hint: usize,
+    pub next_node_id: u64,
+    pub members: Vec<MemberJson>,
+
+    // user.
+    pub machine: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemberJson {
+    pub node_id: u64,
+    pub server_addr: SocketAddr,
+    pub inviting: bool,
+    pub evicting: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
