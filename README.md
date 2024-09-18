@@ -18,6 +18,5 @@ Feature
 TODO
 ---
 
-- Effect example
 - File storage
 - Remove unnecessary JSON serialization / deserialization when sending / receiving messages
