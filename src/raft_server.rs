@@ -41,6 +41,7 @@ pub struct PendingResponse {
     pub token: Token,
     pub request_id: RequestId,
     pub commit_promise: CommitPromise,
+    pub query: Option<serde_json::Value>,
 }
 
 impl PendingResponse {
@@ -60,7 +61,11 @@ impl Ord for PendingResponse {
         // [NOTE] Reversed order for BinaryHeap
         let p0 = other.log_position();
         let p1 = self.log_position();
-        (p0.term.get(), p0.index.get()).cmp(&(p1.term.get(), p1.index.get()))
+        (p0.term.get(), p0.index.get(), other.query.is_some()).cmp(&(
+            p1.term.get(),
+            p1.index.get(),
+            self.query.is_some(),
+        ))
     }
 }
 
@@ -122,7 +127,7 @@ pub struct RaftServer<M> {
     pending_responses: BinaryHeap<PendingResponse>,
     max_write_buf_size: usize,
 
-    ongoing_proposes: HashMap<RequestId, (Token, RequestId)>,
+    ongoing_proposes: HashMap<RequestId, (Token, RequestId, Option<serde_json::Value>)>,
 
     machine: M,
 
@@ -355,13 +360,14 @@ impl<M: Machine> RaftServer<M> {
     fn handle_propose_response(&mut self, response: Response<ProposeResult>) {
         let id = response.id().expect("TODO").clone();
         let commit_promise = response.into_std_result().expect("TODO").to_promise();
-        let (token, request_id) = self.ongoing_proposes.remove(&id).expect("TODO");
+        let (token, request_id, query) = self.ongoing_proposes.remove(&id).expect("TODO");
 
         // TODO: add note doc about this method is always called before the the time that the promise is accepted
         let response = PendingResponse {
             token,
             request_id,
             commit_promise,
+            query,
         };
         self.pending_responses.push(response);
     }
@@ -506,7 +512,10 @@ impl<M: Machine> RaftServer<M> {
                 }
             }
             Request::Query { id, params, .. } => {
-                todo!()
+                if let Err(e) = self.handle_query(conn.token, &id, params) {
+                    let response = Response::output(id, Err(e));
+                    conn.send(&response)?;
+                }
             }
             Request::LocalQuery { id, params, .. } => {
                 self.handle_local_query(conn, id, params)?;
@@ -551,7 +560,18 @@ impl<M: Machine> RaftServer<M> {
         InputParams { input }: InputParams,
     ) -> std::result::Result<(), OutputError> {
         let command = Command::Command(input);
-        self.handle_command_common(token, request_id, command)?;
+        self.handle_command_common(token, request_id, command, None)?;
+        Ok(())
+    }
+
+    fn handle_query(
+        &mut self,
+        token: Token,
+        request_id: &RequestId,
+        InputParams { input }: InputParams,
+    ) -> std::result::Result<(), OutputError> {
+        let command = Command::Query;
+        self.handle_command_common(token, request_id, command, Some(input))?;
         Ok(())
     }
 
@@ -561,6 +581,7 @@ impl<M: Machine> RaftServer<M> {
         token: Token,
         request_id: &RequestId,
         command: Command,
+        query: Option<serde_json::Value>,
     ) -> std::result::Result<(), CommonError> {
         if self.node.id() >= RESERVED_NODE_ID_START {
             return Err(CommonError::ServerNotReady);
@@ -584,7 +605,7 @@ impl<M: Machine> RaftServer<M> {
             self.internal_send_to(leader, &request, Some(id.clone()))
                 .expect("TODO");
             self.ongoing_proposes
-                .insert(id.clone(), (token, request_id.clone()));
+                .insert(id.clone(), (token, request_id.clone(), query));
             return Ok(());
         }
 
@@ -594,6 +615,7 @@ impl<M: Machine> RaftServer<M> {
             token,
             request_id: request_id.clone(),
             commit_promise,
+            query,
         };
         self.pending_responses.push(response);
         Ok(())
@@ -606,7 +628,7 @@ impl<M: Machine> RaftServer<M> {
         AddServerParams { server_addr }: AddServerParams,
     ) -> std::result::Result<(), AddServerError> {
         let command = Command::InviteServer { server_addr };
-        self.handle_command_common(token, request_id, command)?;
+        self.handle_command_common(token, request_id, command, None)?;
         Ok(())
     }
 
@@ -617,7 +639,7 @@ impl<M: Machine> RaftServer<M> {
         RemoveServerParams { server_addr }: RemoveServerParams,
     ) -> std::result::Result<(), RemoveServerError> {
         let command = Command::EvictServer { server_addr };
-        self.handle_command_common(token, request_id, command)?;
+        self.handle_command_common(token, request_id, command, None)?;
         Ok(())
     }
 
@@ -760,6 +782,30 @@ impl<M: Machine> RaftServer<M> {
                     let pending = self.pending_responses.pop().expect("unreachable");
                     self.send_pending_error_response(pending)?;
                 }
+                CommitPromise::Accepted(position)
+                    if index == position.index && pending.query.is_some() =>
+                {
+                    // TODO: refactor
+                    let mut pending = self.pending_responses.pop().expect("unreachable");
+                    let input = pending.query.take().expect("unreachable");
+                    let mut ctx = Context {
+                        kind: InputKind::Query,
+                        node: &self.node,
+                        machine_version: LogIndex::new(index.get() - 1),
+                        output: None,
+                        ignore_output: false,
+                    };
+                    let Ok(input) = serde_json::from_value::<M::Input>(input) else {
+                        todo!("response error");
+                    };
+                    self.machine.handle_input(&mut ctx, input);
+                    let result = match ctx.output {
+                        None => OutputResult::ok(serde_json::Value::Null),
+                        Some(Ok(value)) => OutputResult::ok(value),
+                        Some(Err(_e)) => OutputResult::err(OutputError::InvalidOutput),
+                    };
+                    self.try_response_to(Some(pending), result)?;
+                }
                 CommitPromise::Accepted(position) if index == position.index => {
                     pending_response = self.pending_responses.pop();
                     break;
@@ -894,6 +940,7 @@ impl<M: Machine> RaftServer<M> {
                     self.try_response_to(pending, result)?;
                 }
             }
+            Command::Query => {}
         }
 
         Ok(())

@@ -420,6 +420,15 @@ impl Request {
         })
     }
 
+    pub fn query<T: Serialize>(id: RequestId, params: &T) -> std::io::Result<Self> {
+        let input = serde_json::to_value(params)?;
+        Ok(Self::Query {
+            jsonrpc: JsonRpcVersion::V2,
+            id,
+            params: InputParams { input },
+        })
+    }
+
     pub fn local_query<T: Serialize>(id: RequestId, params: &T) -> std::io::Result<Self> {
         let input = serde_json::to_value(params)?;
         Ok(Self::LocalQuery {
