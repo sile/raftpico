@@ -673,6 +673,15 @@ impl<M: Machine> RaftServer<M> {
     }
 
     fn propose_command(&mut self, command: Command) -> CommitPromise {
+        if matches!(command, Command::Query) && self.node.role().is_leader() {
+            if let Some(entries) = &self.node.actions().append_log_entries {
+                if !entries.is_empty() {
+                    // There are concurrent proposals.
+                    return CommitPromise::Pending(entries.last_position());
+                }
+            }
+        }
+
         //debug_assert!(self.node.role().is_leader());
 
         // TODO: if self.pending_query.is_some() { merge() }
