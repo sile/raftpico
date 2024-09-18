@@ -374,6 +374,11 @@ pub enum Request {
         id: RequestId,
         params: InputParams,
     },
+    Query {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: InputParams,
+    },
     LocalQuery {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
@@ -430,6 +435,7 @@ impl Request {
             Self::AddServer { id, .. } => id,
             Self::RemoveServer { id, .. } => id,
             Self::Command { id, .. } => id,
+            Self::Query { id, .. } => id,
             Self::LocalQuery { id, .. } => id,
         }
     }
@@ -440,6 +446,7 @@ impl Request {
             Self::AddServer { .. } => None,
             Self::RemoveServer { .. } => None,
             Self::Command { .. } => None,
+            Self::Query { .. } => None,
             Self::LocalQuery { .. } => None,
         }
     }

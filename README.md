@@ -14,3 +14,10 @@ Feature
   - Effects
   - ~ConditionalLocalQuery (delay response until some conditions are met)~
 - Gurantee that local queries after a command to the same server are equal to or newer index than the command's index
+
+TODO
+---
+
+- Effect example
+- File storage
+- Remove unnecessary JSON serialization / deserialization when sending / receiving messages

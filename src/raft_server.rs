@@ -505,6 +505,9 @@ impl<M: Machine> RaftServer<M> {
                     conn.send(&response)?;
                 }
             }
+            Request::Query { id, params, .. } => {
+                todo!()
+            }
             Request::LocalQuery { id, params, .. } => {
                 self.handle_local_query(conn, id, params)?;
             }
