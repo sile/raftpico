@@ -292,7 +292,7 @@ impl RequestVoteReplyParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotParams {
+pub struct SnapshotParams<M = serde_json::Value> {
     // position and config
     pub last_included_term: u64,
     pub last_included_index: u64,
@@ -307,7 +307,7 @@ pub struct SnapshotParams {
     pub members: Vec<MemberJson>,
 
     // user.
-    pub machine: serde_json::Value,
+    pub machine: M,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

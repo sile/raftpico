@@ -10,7 +10,8 @@ mod machine;
 mod raft_server;
 pub mod remote_types;
 pub mod request; // TODO: message?
-pub mod stats; // TODO
+pub mod stats;
+pub mod storage; // TODO
 
 pub use machine::{Context, InputKind, Machine};
 pub use raft_server::{RaftServer, RaftServerOptions};
