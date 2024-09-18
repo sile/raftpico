@@ -11,9 +11,9 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let mut node = RaftServer::start(args.listen_addr, KvsMachine::default())?;
+    let mut server = RaftServer::start(args.listen_addr, KvsMachine::default())?;
     loop {
-        node.poll(None)?;
+        server.poll(None)?;
     }
 }
 
