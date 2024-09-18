@@ -72,8 +72,8 @@ mod tests {
 
     use jsonlrpc::{RequestId, RpcClient};
     use request::{
-        AddServerResult, CreateClusterParams, CreateClusterResult, RemoveServerResult, Request,
-        Response,
+        AddServerResult, CreateClusterParams, CreateClusterResult, OutputResult,
+        RemoveServerResult, Request, Response,
     };
     use serde::{Deserialize, Serialize};
 
@@ -426,11 +426,11 @@ mod tests {
         let addrs = servers.iter().map(|s| s.addr()).collect::<Vec<_>>();
         let handle = std::thread::spawn(move || {
             for (i, addr) in addrs.into_iter().enumerate() {
-                let v: serde_json::Value = rpc(
+                let v: OutputResult = rpc(
                     addr,
                     Request::local_query(request_id(0), &usize::MAX).expect("unreachable"),
                 );
-                assert_eq!(v, i);
+                assert_eq!(v.output, Some(serde_json::Value::Number(i.into())));
             }
         });
 
@@ -439,6 +439,7 @@ mod tests {
                 server.poll(POLL_TIMEOUT).expect("poll() failed");
             }
         }
+        handle.join().expect("join() failed");
     }
 
     // TODO: query
