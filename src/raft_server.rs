@@ -206,6 +206,10 @@ impl<M: Machine> RaftServer<M> {
         &self.machine
     }
 
+    pub fn machine_mut(&mut self) -> &mut M {
+        &mut self.machine
+    }
+
     // TODO: Return Stats
     pub fn stats(&self) -> &ServerStats {
         &self.stats
@@ -670,6 +674,18 @@ impl<M: Machine> RaftServer<M> {
         assert!(promise.is_accepted());
 
         true
+    }
+
+    // TODO: rename
+    // TODO: return Result?
+    pub fn propose_user_command(&mut self, command: &M::Input) -> CommitPromise {
+        let Ok(command) = serde_json::to_value(command) else {
+            return CommitPromise::Rejected(LogPosition::INVALID);
+        };
+        if self.node().is_none() {
+            return CommitPromise::Rejected(LogPosition::INVALID);
+        }
+        self.propose_command(Command::Command(command))
     }
 
     fn propose_command(&mut self, command: Command) -> CommitPromise {
