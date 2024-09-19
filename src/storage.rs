@@ -27,18 +27,11 @@ impl FileStorage {
         })
     }
 
-    pub fn load_snapshot<M: Machine>(&mut self) -> Result<Option<SnapshotParams<M>>> {
-        let file_size = self.file.inner().metadata()?.len();
-        if file_size == 0 {
-            return Ok(None);
-        }
-        Ok(Some(self.file.read_object()?))
-    }
-
     pub fn install_snapshot<M: Machine>(&mut self, snapshot: SnapshotParams<M>) -> Result<()> {
         // TODO: temorary file and move
         self.file.inner().set_len(0)?;
-        self.file.write_object(&snapshot)?;
+        self.file
+            .write_object(&Record::<LogEntries, _>::Snapshot(snapshot))?;
         Ok(())
     }
 
@@ -47,22 +40,60 @@ impl FileStorage {
         raft_log_entries: &raftbare::LogEntries,
         commands: &Commands,
     ) -> Result<()> {
-        let entries = LogEntries::from_raftbare(raft_log_entries, commands)?;
+        let entries = Record::<_, SnapshotParams>::LogEntries(LogEntries::from_raftbare(
+            raft_log_entries,
+            commands,
+        )?);
         self.file.write_object(&entries)?;
         Ok(())
     }
 
-    pub fn load_entries(
+    pub fn save_node_id(&mut self, node_id: NodeId) -> Result<()> {
+        self.file
+            .write_object(&Record::<LogEntries, SnapshotParams>::NodeId(node_id.get()))?;
+        Ok(())
+    }
+
+    pub fn save_current_term(&mut self, term: Term) -> Result<()> {
+        self.file
+            .write_object(&Record::<LogEntries, SnapshotParams>::Term(term.get()))?;
+        Ok(())
+    }
+
+    pub fn save_voted_for(&mut self, voted_for: Option<NodeId>) -> Result<()> {
+        self.file
+            .write_object(&Record::<LogEntries, SnapshotParams>::VotedFor(
+                voted_for.map(|n| n.get()),
+            ))?;
+        Ok(())
+    }
+
+    pub fn load_record<M: Machine>(
         &mut self,
         commands: &mut Commands,
-    ) -> Result<Option<raftbare::LogEntries>> {
+    ) -> Result<Option<Record<raftbare::LogEntries, M>>> {
         if self.file.inner().metadata()?.len() == self.file.inner().stream_position()? {
             return Ok(None);
         }
 
-        let entries: LogEntries = self.file.read_object()?;
-        Ok(Some(entries.to_raftbare(commands)))
+        let record: Record<LogEntries, _> = self.file.read_object()?;
+        match record {
+            Record::NodeId(v) => Ok(Some(Record::NodeId(v))),
+            Record::Term(v) => Ok(Some(Record::Term(v))),
+            Record::VotedFor(v) => Ok(Some(Record::VotedFor(v))),
+            Record::LogEntries(v) => Ok(Some(Record::LogEntries(v.to_raftbare(commands)))),
+            Record::Snapshot(v) => Ok(Some(Record::Snapshot(v))),
+        }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Record<T, M> {
+    NodeId(u64),
+    Term(u64),
+    VotedFor(Option<u64>),
+    LogEntries(T),
+    Snapshot(SnapshotParams<M>),
 }
 
 // TODO:

@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BinaryHeap, HashMap},
     net::{Shutdown, SocketAddr},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -8,7 +9,7 @@ use jsonlrpc::{JsonRpcVersion, RequestId};
 use mio::{net::TcpListener, Events, Interest, Poll, Token};
 use raftbare::{
     Action, ClusterConfig, CommitPromise, LogEntry, LogIndex, LogPosition, Message, Node, NodeId,
-    Role,
+    Role, Term,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
@@ -25,6 +26,7 @@ use crate::{
         RemoveServerError, RemoveServerParams, RemoveServerResult, Request, Response,
         SnapshotParams,
     },
+    storage::{FileStorage, Record},
     Context, InputKind, Machine, Result, ServerStats,
 };
 
@@ -81,6 +83,7 @@ impl Eq for PendingResponse {}
 pub struct RaftServerOptions {
     pub mio_events_capacity: usize,
     pub rng_seed: u64,
+    pub file_path: Option<PathBuf>,
 
     // TODO: rename
     pub max_write_buf_size: usize,
@@ -91,6 +94,7 @@ impl Default for RaftServerOptions {
         Self {
             mio_events_capacity: 1024,
             rng_seed: rand::random(),
+            file_path: None,
             max_write_buf_size: 1024 * 1024,
         }
     }
@@ -128,6 +132,7 @@ pub struct RaftServer<M> {
     max_write_buf_size: usize,
 
     ongoing_proposes: HashMap<RequestId, (Token, RequestId, Option<serde_json::Value>)>,
+    storage: Option<FileStorage>,
 
     machine: M,
 
@@ -160,7 +165,9 @@ impl<M: Machine> RaftServer<M> {
 
         let rng = ChaChaRng::seed_from_u64(options.rng_seed);
 
-        Ok(Self {
+        let storage = options.file_path.map(FileStorage::new).transpose()?;
+
+        let mut this = Self {
             listener,
             addr,
             next_token: Token(LISTENER_TOKEN.0 + 1), // TODO: randomize?
@@ -178,6 +185,8 @@ impl<M: Machine> RaftServer<M> {
             commands: BTreeMap::new(),
             pending_responses: BinaryHeap::new(),
 
+            storage,
+
             // Replicated state
             machine,
             min_election_timeout: DEFAULT_MIN_ELECTION_TIMEOUT,
@@ -185,7 +194,87 @@ impl<M: Machine> RaftServer<M> {
             max_log_entries_hint: 0,
             members: BTreeMap::new(),
             next_node_id: NodeId::new(0),
-        })
+        };
+        this.load_storage()?;
+
+        Ok(this)
+    }
+
+    fn load_storage(&mut self) -> Result<()> {
+        let Some(storage) = &mut self.storage else {
+            return Ok(());
+        };
+
+        let mut node_id = UNINIT_NODE_ID;
+        let mut current_term = Term::new(0);
+        let mut voted_for = None;
+        let mut entries = raftbare::LogEntries::new(LogPosition::ZERO);
+        let mut config = ClusterConfig::new();
+        while let Some(record) = storage.load_record::<M>(&mut self.commands)? {
+            // TODO: refactro
+            match record {
+                Record::NodeId(id) => {
+                    node_id = NodeId::new(id);
+                }
+                Record::Term(t) => {
+                    current_term = Term::new(t);
+                }
+                Record::VotedFor(v) => {
+                    voted_for = v.map(NodeId::new);
+                }
+                Record::LogEntries(es) => {
+                    let len = es.prev_position().index - entries.prev_position().index;
+                    entries.truncate(len.get() as usize);
+                    for e in es.iter() {
+                        entries.push(e);
+                    }
+                }
+                Record::Snapshot(params) => {
+                    // TODO: factor out
+                    self.min_election_timeout = params.min_election_timeout;
+                    self.max_election_timeout = params.max_election_timeout;
+                    self.max_log_entries_hint = params.max_log_entries_hint;
+                    self.next_node_id = params.next_node_id.into();
+                    self.machine = params.machine;
+
+                    let mut members = BTreeMap::new();
+                    for m in params.members {
+                        let node_id = NodeId::new(m.node_id);
+                        members.insert(
+                            node_id,
+                            Member {
+                                node_id: m.node_id.into(),
+                                server_addr: m.server_addr,
+                                inviting: m.inviting,
+                                evicting: m.evicting,
+                                token: self.members.get(&node_id).and_then(|m| m.token),
+                            },
+                        );
+                    }
+                    self.members = members;
+
+                    let last_included = LogPosition {
+                        term: params.last_included_term.into(),
+                        index: params.last_included_index.into(),
+                    };
+                    config = ClusterConfig {
+                        voters: params.voters.into_iter().map(NodeId::new).collect(),
+                        new_voters: params.new_voters.into_iter().map(NodeId::new).collect(),
+                        ..Default::default()
+                    };
+                    entries = raftbare::LogEntries::new(last_included);
+                    self.last_applied_index = last_included.index;
+                }
+            }
+        }
+        if node_id == UNINIT_NODE_ID {
+            return Ok(());
+        }
+
+        let log = raftbare::Log::new(config, entries);
+        self.node = Node::restart(node_id, current_term, voted_for, log);
+
+        Ok(())
     }
 
     fn next_request_id(&mut self) -> RequestId {
