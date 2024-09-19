@@ -8,14 +8,14 @@ pub mod connection;
 pub mod event;
 pub mod io;
 mod machine;
-mod raft_server;
 pub mod remote_types;
 pub mod request; // TODO: message?
+mod server;
 pub mod stats;
 pub mod storage; // TODO
 
 pub use machine::{Context, InputKind, Machine};
-pub use raft_server::{RaftServer, RaftServerOptions};
+pub use server::{Server, ServerOptions};
 pub use stats::ServerStats;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn create_cluster() {
-        let mut server = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server = Server::start(auto_addr(), 0).expect("start() failed");
         assert!(server.node().is_none());
 
         let server_addr = server.addr();
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn add_and_remove_server() {
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = Server::start(auto_addr(), 0).expect("start() failed");
         assert!(server0.node().is_none());
 
         // Create a cluster.
@@ -141,7 +141,7 @@ mod tests {
         assert!(server0.node().is_some());
 
         // Add a server to the cluster.
-        let mut server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server1 = Server::start(auto_addr(), 0).expect("start() failed");
         let server_addr1 = server1.addr();
         let handle = std::thread::spawn(move || {
             let result: AddServerResult = rpc(
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn command() {
         let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = Server::start(auto_addr(), 0).expect("start() failed");
 
         // Create a cluster.
         let server_addr0 = server0.addr();
@@ -193,8 +193,8 @@ mod tests {
         servers.push(server0);
 
         // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server1 = Server::start(auto_addr(), 0).expect("start() failed");
+        let server2 = Server::start(auto_addr(), 0).expect("start() failed");
         let server_addr1 = server1.addr();
         let server_addr2 = server2.addr();
         let handle = std::thread::spawn(move || {
@@ -245,7 +245,7 @@ mod tests {
     #[test]
     fn re_election() {
         let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = Server::start(auto_addr(), 0).expect("start() failed");
 
         // Create a cluster.
         let server_addr0 = server0.addr();
@@ -258,8 +258,8 @@ mod tests {
         servers.push(server0);
 
         // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server1 = Server::start(auto_addr(), 0).expect("start() failed");
+        let server2 = Server::start(auto_addr(), 0).expect("start() failed");
         let server_addr1 = server1.addr();
         let server_addr2 = server2.addr();
         let handle = std::thread::spawn(move || {
@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn snapshot() {
         let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = Server::start(auto_addr(), 0).expect("start() failed");
 
         // Create a cluster with a small max log size.
         let server_addr0 = server0.addr();
@@ -331,8 +331,8 @@ mod tests {
         servers.push(server0);
 
         // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server1 = Server::start(auto_addr(), 0).expect("start() failed");
+        let server2 = Server::start(auto_addr(), 0).expect("start() failed");
         let server_addr1 = server1.addr();
         let server_addr2 = server2.addr();
         let handle = std::thread::spawn(move || {
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn query() {
         let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = Server::start(auto_addr(), 0).expect("start() failed");
 
         // Create a cluster.
         let server_addr0 = server0.addr();
@@ -396,8 +396,8 @@ mod tests {
         servers.push(server0);
 
         // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server1 = Server::start(auto_addr(), 0).expect("start() failed");
+        let server2 = Server::start(auto_addr(), 0).expect("start() failed");
         let server_addr1 = server1.addr();
         let server_addr2 = server2.addr();
         let handle = std::thread::spawn(move || {
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn local_query() {
         let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = Server::start(auto_addr(), 0).expect("start() failed");
 
         // Create a cluster.
         let server_addr0 = server0.addr();
@@ -466,8 +466,8 @@ mod tests {
         servers.push(server0);
 
         // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 1).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 2).expect("start() failed");
+        let server1 = Server::start(auto_addr(), 1).expect("start() failed");
+        let server2 = Server::start(auto_addr(), 2).expect("start() failed");
         let server_addr1 = server1.addr();
         let server_addr2 = server2.addr();
         let handle = std::thread::spawn(move || {

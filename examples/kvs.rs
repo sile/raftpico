@@ -1,7 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use raftpico::{Context, Machine, RaftServer, RaftServerOptions, Result};
+use raftpico::{Context, Machine, Result, Server, ServerOptions};
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
@@ -14,11 +14,11 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let options = RaftServerOptions {
+    let options = ServerOptions {
         file_path: args.storage_file,
         ..Default::default()
     };
-    let mut server = RaftServer::with_options(args.listen_addr, KvsMachine::default(), options)?;
+    let mut server = Server::with_options(args.listen_addr, KvsMachine::default(), options)?;
     loop {
         server.poll(None)?;
     }

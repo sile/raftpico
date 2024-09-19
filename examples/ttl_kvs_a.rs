@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::Parser;
-use raftpico::{Context, Machine, RaftServer, Result};
+use raftpico::{Context, Machine, Result, Server};
 use serde::{Deserialize, Serialize};
 
 const TICK_RESOLUTION: Duration = Duration::from_millis(10);
@@ -18,7 +18,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let mut server = RaftServer::start(args.listen_addr, KvsMachine::default())?;
+    let mut server = Server::start(args.listen_addr, KvsMachine::default())?;
     let mut last_tick = Duration::default();
     loop {
         server.poll(Some(TICK_RESOLUTION))?;

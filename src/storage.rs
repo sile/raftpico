@@ -5,8 +5,8 @@ use raftbare::{ClusterConfig, LogIndex, LogPosition, NodeId, Term};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    raft_server::Commands,
     request::{LogEntry, SnapshotParams},
+    server::Commands,
     Machine, Result,
 };
 

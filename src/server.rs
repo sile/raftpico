@@ -80,7 +80,7 @@ impl PartialEq for PendingResponse {
 impl Eq for PendingResponse {}
 
 #[derive(Debug, Clone)]
-pub struct RaftServerOptions {
+pub struct ServerOptions {
     pub mio_events_capacity: usize,
     pub rng_seed: u64,
     pub file_path: Option<PathBuf>,
@@ -89,7 +89,7 @@ pub struct RaftServerOptions {
     pub max_write_buf_size: usize,
 }
 
-impl Default for RaftServerOptions {
+impl Default for ServerOptions {
     fn default() -> Self {
         Self {
             mio_events_capacity: 1024,
@@ -114,7 +114,7 @@ pub struct Member {
 pub type Commands = BTreeMap<LogIndex, Command>;
 
 #[derive(Debug)]
-pub struct RaftServer<M> {
+pub struct Server<M> {
     listener: TcpListener,
     addr: SocketAddr,
     next_token: Token,
@@ -144,15 +144,15 @@ pub struct RaftServer<M> {
     next_node_id: NodeId,
 }
 
-impl<M: Machine> RaftServer<M> {
+impl<M: Machine> Server<M> {
     pub fn start(listen_addr: SocketAddr, machine: M) -> Result<Self> {
-        Self::with_options(listen_addr, machine, RaftServerOptions::default())
+        Self::with_options(listen_addr, machine, ServerOptions::default())
     }
 
     pub fn with_options(
         listen_addr: SocketAddr,
         machine: M,
-        options: RaftServerOptions,
+        options: ServerOptions,
     ) -> Result<Self> {
         let mut listener = TcpListener::bind(listen_addr)?;
         let addr = listener.local_addr()?;

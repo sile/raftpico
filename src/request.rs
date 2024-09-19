@@ -7,7 +7,7 @@ use raftbare::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{command::Command, raft_server::Commands};
+use crate::{command::Command, server::Commands};
 
 pub fn is_known_external_method(method: &str) -> bool {
     matches!(method, "CreateCluster")
