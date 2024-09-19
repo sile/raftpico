@@ -27,7 +27,7 @@ impl FileStorage {
         })
     }
 
-    pub fn install_snapshot<M: Machine>(&mut self, snapshot: SnapshotParams<M>) -> Result<()> {
+    pub fn install_snapshot<M: Serialize>(&mut self, snapshot: SnapshotParams<M>) -> Result<()> {
         // TODO: temorary file and move
         self.file.inner().set_len(0)?;
         self.file

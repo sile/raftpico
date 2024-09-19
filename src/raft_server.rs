@@ -497,6 +497,8 @@ impl<M: Machine> RaftServer<M> {
     }
 
     fn handle_snapshot(&mut self, params: SnapshotParams) -> Result<()> {
+        let snapshot = params.clone(); // TODO: remove clone
+
         self.min_election_timeout = params.min_election_timeout;
         self.max_election_timeout = params.max_election_timeout;
         self.max_log_entries_hint = params.max_log_entries_hint;
@@ -533,6 +535,15 @@ impl<M: Machine> RaftServer<M> {
         let ok = self.node.handle_snapshot_installed(last_included, config);
         assert!(ok); // TODO: error handling
 
+        // TODO: factor out
+        if let Some(storage) = &mut self.storage {
+            storage.install_snapshot(snapshot)?;
+            storage.save_node_id(self.node.id())?;
+            storage.save_current_term(self.node.current_term())?;
+            storage.save_voted_for(self.node.voted_for())?;
+            storage.append_entries(self.node.log().entries(), &self.commands)?;
+        }
+
         Ok(())
     }
 
@@ -559,6 +570,9 @@ impl<M: Machine> RaftServer<M> {
         if self.node().is_none() {
             // TOOD: note
             self.node = Node::start(params.dst_node_id());
+            if let Some(storage) = &mut self.storage {
+                storage.save_node_id(self.node.id())?;
+            }
         }
         if params.dst_node_id() != self.node.id() {
             todo!();
@@ -747,6 +761,11 @@ impl<M: Machine> RaftServer<M> {
 
         let node_id = NodeId::new(0);
         self.node = Node::start(node_id);
+        if let Some(storage) = &mut self.storage {
+            storage
+                .save_node_id(self.node.id())
+                .expect("TODO: error handling");
+        }
 
         let mut promise = self.node.create_cluster(&[node_id]);
         promise.poll(&mut self.node);
@@ -811,6 +830,48 @@ impl<M: Machine> RaftServer<M> {
             .handle_snapshot_installed(position, config.clone());
         assert!(success);
         self.commands = self.commands.split_off(&(index + LogIndex::new(1)));
+
+        // TODO: factor out
+        if let Some(storage) = &mut self.storage {
+            let members = self
+                .members
+                .values()
+                .map(|m| MemberJson {
+                    node_id: m.node_id.get(),
+                    server_addr: m.server_addr,
+                    inviting: m.inviting,
+                    evicting: m.evicting,
+                })
+                .collect();
+            let (last_included, config) = self
+                .node
+                .log()
+                .get_position_and_config(index)
+                .expect("unreachable");
+            let snapshot = SnapshotParams {
+                last_included_term: last_included.term.get(),
+                last_included_index: last_included.index.get(),
+                voters: config.voters.iter().map(|n| n.get()).collect(),
+                new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
+                min_election_timeout: self.min_election_timeout,
+                max_election_timeout: self.max_election_timeout,
+                max_log_entries_hint: self.max_log_entries_hint,
+                next_node_id: self.next_node_id.get(),
+                members,
+
+                // TODO: impl Clone for Machine ?
+                machine: serde_json::to_value(&self.machine).expect("TODO"),
+            };
+            storage.install_snapshot(snapshot).expect("TODO");
+            storage.save_node_id(self.node.id()).expect("TODO");
+            storage
+                .save_current_term(self.node.current_term())
+                .expect("TODO");
+            storage.save_voted_for(self.node.voted_for()).expect("TODO");
+            storage
+                .append_entries(self.node.log().entries(), &self.commands)
+                .expect("TODO");
+        }
     }
 
     fn next_token(&mut self) -> Token {
@@ -1108,8 +1169,20 @@ impl<M: Machine> RaftServer<M> {
     fn handle_action(&mut self, action: Action) -> Result<()> {
         match action {
             Action::SetElectionTimeout => self.handle_set_election_timeout(),
-            Action::SaveCurrentTerm | Action::SaveVotedFor | Action::AppendLogEntries(_) => {
-                // Do nothing as this crate uses in-memory storage.
+            Action::SaveCurrentTerm => {
+                if let Some(storage) = &mut self.storage {
+                    storage.save_current_term(self.node.current_term())?;
+                }
+            }
+            Action::SaveVotedFor => {
+                if let Some(storage) = &mut self.storage {
+                    storage.save_voted_for(self.node.voted_for())?;
+                }
+            }
+            Action::AppendLogEntries(e) => {
+                if let Some(storage) = &mut self.storage {
+                    storage.append_entries(&e, &self.commands)?;
+                }
             }
             Action::BroadcastMessage(m) => self.handle_broadcast_message(m)?,
             Action::SendMessage(peer, m) => self.handle_send_message(peer, m)?,
