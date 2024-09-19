@@ -5,6 +5,7 @@
 
 pub mod command;
 pub mod connection;
+pub mod event;
 pub mod io;
 mod machine;
 mod raft_server;

@@ -1,12 +1,15 @@
 use raftbare::{LogIndex, Node};
 use serde::{Deserialize, Serialize};
 
+use crate::event::Event;
+
 pub trait Machine: Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
 
     fn handle_input(&mut self, ctx: &mut Context, input: Self::Input);
 
-    // TODO: on_leader() for effect handling
+    #[allow(unused_variables)]
+    fn on_event(&mut self, node: &Node, event: &Event) {}
 }
 
 #[derive(Debug)]
