@@ -1,17 +1,24 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use raftpico::{Context, Machine, RaftServer, Result};
+use raftpico::{Context, Machine, RaftServer, RaftServerOptions, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
 struct Args {
     listen_addr: SocketAddr,
+
+    #[clap(long)]
+    storage_file: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let mut server = RaftServer::start(args.listen_addr, KvsMachine::default())?;
+    let options = RaftServerOptions {
+        file_path: args.storage_file,
+        ..Default::default()
+    };
+    let mut server = RaftServer::with_options(args.listen_addr, KvsMachine::default(), options)?;
     loop {
         server.poll(None)?;
     }

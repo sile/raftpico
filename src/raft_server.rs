@@ -1247,6 +1247,7 @@ impl<M: Machine> RaftServer<M> {
         let peers = self.node.peers().collect::<Vec<_>>(); // TODO:remove
         for peer in peers {
             let Some(member) = self.members.get(&peer) else {
+                // TODO: handle this case
                 unreachable!();
             };
             let Some(token) = member.token else {
