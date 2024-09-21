@@ -1258,6 +1258,8 @@ impl<M: Machine> Server<M> {
             //     // TODO: stats
             //     continue;
             // }
+
+            // TODO: use serde_json::value::RawValue to reduce redandant encodings
             self.send_to(token, &request)?;
         }
 
