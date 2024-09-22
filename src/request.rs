@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{command::Command, server::Commands};
 
 pub fn is_known_external_method(method: &str) -> bool {
+    // TODO: update
     matches!(method, "CreateCluster")
 }
 
@@ -369,6 +370,10 @@ pub enum Request {
         id: RequestId,
         params: RemoveServerParams,
     },
+    GetStats {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+    },
     Command {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
@@ -443,6 +448,7 @@ impl Request {
             Self::CreateCluster { id, .. } => id,
             Self::AddServer { id, .. } => id,
             Self::RemoveServer { id, .. } => id,
+            Self::GetStats { id, .. } => id,
             Self::Command { id, .. } => id,
             Self::Query { id, .. } => id,
             Self::LocalQuery { id, .. } => id,
@@ -454,6 +460,7 @@ impl Request {
             Self::CreateCluster { params, .. } => params.validate(),
             Self::AddServer { .. } => None,
             Self::RemoveServer { .. } => None,
+            Self::GetStats { .. } => None,
             Self::Command { .. } => None,
             Self::Query { .. } => None,
             Self::LocalQuery { .. } => None,

@@ -612,6 +612,10 @@ impl<M: Machine> Server<M> {
                     conn.send(&response)?;
                 }
             }
+            Request::GetStats { id, .. } => {
+                let response = Response::ok(id, &self.stats);
+                conn.send(&response)?;
+            }
             Request::Command { id, params, .. } => {
                 if let Err(e) = self.handle_command(conn.token, &id, params) {
                     let response = Response::output(id, Err(e));
