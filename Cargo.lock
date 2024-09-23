@@ -227,7 +227,6 @@ dependencies = [
  "mio",
  "raftbare",
  "rand",
- "rand_chacha",
  "serde",
  "serde_json",
 ]

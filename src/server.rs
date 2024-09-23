@@ -11,8 +11,7 @@ use raftbare::{
     Action, ClusterConfig, CommitPromise, LogEntry, LogIndex, LogPosition, Message, Node, NodeId,
     Role, Term,
 };
-use rand::{Rng, SeedableRng};
-use rand_chacha::ChaChaRng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::Serialize;
 
 use crate::{
@@ -122,7 +121,7 @@ pub struct Server<M> {
     connections: HashMap<Token, Connection>,
     poller: Poll,
     events: Option<Events>, // TODO: Remove Option wrapper if possible
-    rng: ChaChaRng,
+    rng: StdRng,
     node: Node,
     election_timeout: Option<Instant>,
     last_applied_index: LogIndex,
@@ -163,7 +162,7 @@ impl<M: Machine> Server<M> {
             .registry()
             .register(&mut listener, LISTENER_TOKEN, Interest::READABLE)?;
 
-        let rng = ChaChaRng::seed_from_u64(options.rng_seed);
+        let rng = StdRng::seed_from_u64(options.rng_seed);
 
         let storage = options.file_path.map(FileStorage::new).transpose()?;
 
