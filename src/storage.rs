@@ -7,16 +7,17 @@ use serde::{Deserialize, Serialize};
 use crate::{
     request::{LogEntry, SnapshotParams},
     server::Commands,
-    Machine, Result,
+    Machine, Result, ServerOptions,
 };
 
 #[derive(Debug)]
 pub struct FileStorage {
     file: JsonlStream<File>,
+    force_fsync: bool,
 }
 
 impl FileStorage {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P, options: &ServerOptions) -> Result<Self> {
         let file = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
@@ -24,6 +25,7 @@ impl FileStorage {
             .open(&path)?;
         Ok(Self {
             file: JsonlStream::new(file),
+            force_fsync: options.force_fsync,
         })
     }
 
@@ -32,6 +34,14 @@ impl FileStorage {
         self.file.inner().set_len(0)?;
         self.file
             .write_object(&Record::<LogEntries, _>::Snapshot(snapshot))?;
+        self.maybe_fsync()?;
+        Ok(())
+    }
+
+    fn maybe_fsync(&self) -> Result<()> {
+        if self.force_fsync {
+            self.file.inner().sync_data()?;
+        }
         Ok(())
     }
 
@@ -45,18 +55,21 @@ impl FileStorage {
             commands,
         )?);
         self.file.write_object(&entries)?;
+        self.maybe_fsync()?;
         Ok(())
     }
 
     pub fn save_node_id(&mut self, node_id: NodeId) -> Result<()> {
         self.file
             .write_object(&Record::<LogEntries, SnapshotParams>::NodeId(node_id.get()))?;
+        self.maybe_fsync()?;
         Ok(())
     }
 
     pub fn save_current_term(&mut self, term: Term) -> Result<()> {
         self.file
             .write_object(&Record::<LogEntries, SnapshotParams>::Term(term.get()))?;
+        self.maybe_fsync()?;
         Ok(())
     }
 
@@ -65,6 +78,7 @@ impl FileStorage {
             .write_object(&Record::<LogEntries, SnapshotParams>::VotedFor(
                 voted_for.map(|n| n.get()),
             ))?;
+        self.maybe_fsync()?;
         Ok(())
     }
 

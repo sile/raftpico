@@ -83,6 +83,7 @@ pub struct ServerOptions {
     pub mio_events_capacity: usize,
     pub rng_seed: u64,
     pub file_path: Option<PathBuf>,
+    pub force_fsync: bool,
 
     // TODO: rename
     pub max_write_buf_size: usize,
@@ -94,6 +95,7 @@ impl Default for ServerOptions {
             mio_events_capacity: 1024,
             rng_seed: rand::random(),
             file_path: None,
+            force_fsync: false,
             max_write_buf_size: 1024 * 1024,
         }
     }
@@ -164,7 +166,11 @@ impl<M: Machine> Server<M> {
 
         let rng = StdRng::seed_from_u64(options.rng_seed);
 
-        let storage = options.file_path.map(FileStorage::new).transpose()?;
+        let storage = options
+            .file_path
+            .as_ref()
+            .map(|p| FileStorage::new(p, &options))
+            .transpose()?;
 
         let mut this = Self {
             listener,
