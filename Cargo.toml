@@ -2,6 +2,12 @@
 name = "raftpico"
 version = "0.0.1"
 edition = "2021"
+authors = ["Takeru Ohta <phjgt308@gmail.com>"]
+license = "MIT"
+description = "A simple Raft framework built on top of the raftbare crate."
+homepage = "https://github.com/sile/raftpico"
+repository = "https://github.com/sile/raftpico"
+readme = "README.md"
 
 [dependencies]
 jsonlrpc = "0.1.0"
