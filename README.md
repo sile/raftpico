@@ -1,22 +1,6 @@
 raftpico
 ========
 
-Minimal, but practical Raft framewark ...
+A simple Raft framework for Rust built on top of the [raftbare](https://github.com/sile/raftbare) crate.
 
-Feature
--------
-
-- Dynamic membership
-- Snapshot
-- Pipelining
-- Various statistics to inspect server's internal state
-- Can be achieved by the user side
-  - Effects
-  - ~ConditionalLocalQuery (delay response until some conditions are met)~
-- Gurantee that local queries after a command to the same server are equal to or newer index than the command's index
-
-TODO
----
-
-- File storage
-- Remove unnecessary JSON serialization / deserialization when sending / receiving messages
+**WIP**
