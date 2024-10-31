@@ -11,6 +11,7 @@ readme = "README.md"
 
 [dependencies]
 jsonlrpc = "0.1.0"
+log = "0.4.22"
 mio = { version = "1.0.2", default-features=false, features = ["net", "os-poll"] }
 raftbare = "0.1.1"
 rand = "0.8.5"
