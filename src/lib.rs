@@ -5,7 +5,6 @@
 
 pub mod command;
 pub mod connection;
-pub mod event;
 pub mod io;
 mod machine;
 pub mod remote_types;
