@@ -1,5 +1,10 @@
 // TODO: rename module
-use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    io::ErrorKind,
+    net::SocketAddr,
+    time::Duration,
+};
 
 use jsonlrpc::JsonlStream;
 use mio::{
@@ -9,7 +14,10 @@ use mio::{
 };
 use serde::Serialize;
 
-use crate::{request::OutgoingMessage, Result, ServerOptions};
+use crate::{
+    request::{IncomingMessage, OutgoingMessage},
+    Result, ServerOptions,
+};
 
 const LISTENER_TOKEN: Token = Token(0);
 
@@ -42,6 +50,7 @@ impl MessageBroker {
                 next_token: Token(LISTENER_TOKEN.0 + 1),
                 listener,
                 connections: HashMap::new(),
+                incoming_queue: VecDeque::new(),
             },
         })
     }
@@ -58,7 +67,9 @@ impl MessageBroker {
         self.inner.send(&mut self.poller, peer, msg)
     }
 
-    // pub fn try_recv();
+    pub fn try_recv(&mut self) -> Option<(Token, IncomingMessage)> {
+        self.inner.incoming_queue.pop_front()
+    }
 }
 
 #[derive(Debug)]
@@ -67,6 +78,7 @@ struct MessageBrokerInner {
     next_token: Token,
     listener: TcpListener,
     connections: HashMap<Token, Connection>,
+    incoming_queue: VecDeque<(Token, IncomingMessage)>,
 }
 
 impl MessageBrokerInner {
@@ -109,7 +121,7 @@ impl MessageBrokerInner {
         if token == LISTENER_TOKEN {
             self.handle_listener_event(poller)?;
         } else if let Some(connection) = self.connections.get_mut(&token) {
-            if !connection.handle_event(poller)? {
+            if !connection.handle_event(poller, &mut self.incoming_queue)? {
                 self.handle_disconnected(poller, token)?;
             }
         } else {
@@ -139,7 +151,7 @@ impl MessageBrokerInner {
                 addr,
                 stream: JsonlStream::new(stream),
             };
-            if connection.handle_event(poller)? {
+            if connection.handle_event(poller, &mut self.incoming_queue)? {
                 self.connections.insert(token, connection);
             }
         }
@@ -197,8 +209,15 @@ impl Connection {
         }
     }
 
-    fn handle_event(&mut self, poller: &mut Poll) -> Result<bool> {
+    fn handle_event(
+        &mut self,
+        poller: &mut Poll,
+        incoming_queue: &mut VecDeque<(Token, IncomingMessage)>,
+    ) -> Result<bool> {
         if !self.poll_send(poller)? {
+            return Ok(false);
+        }
+        if !self.poll_recv(poller, incoming_queue)? {
             return Ok(false);
         }
         Ok(true)
@@ -229,6 +248,15 @@ impl Connection {
                 )?;
             }
         }
+        Ok(true)
+    }
+
+    fn poll_recv(
+        &mut self,
+        poller: &mut Poll,
+        incoming_queue: &mut VecDeque<(Token, IncomingMessage)>,
+    ) -> Result<bool> {
+        // TODO
         Ok(true)
     }
 
