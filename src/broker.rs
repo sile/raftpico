@@ -50,6 +50,10 @@ impl MessageBroker {
         }
         Ok(())
     }
+
+    // pub fn broadcast();
+    // pub fn send_to();
+    // pub fn try_recv();
 }
 
 #[derive(Debug)]
@@ -74,12 +78,9 @@ impl MessageBrokerInner {
     }
 
     fn handle_listener_event(&mut self, poller: &mut Poll) -> Result<()> {
-        loop {
-            let Some((mut stream, addr)) = would_block(self.listener.accept().map_err(From::from))?
-            else {
-                return Ok(());
-            };
-
+        while let Some((mut stream, addr)) =
+            would_block(self.listener.accept().map_err(From::from))?
+        {
             let _ = stream.set_nodelay(true);
             let token = self.next_token();
 
@@ -98,6 +99,7 @@ impl MessageBrokerInner {
                 self.connections.insert(token, connection);
             }
         }
+        Ok(())
     }
 
     fn next_token(&mut self) -> Token {
