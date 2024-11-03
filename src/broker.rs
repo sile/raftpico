@@ -1,3 +1,4 @@
+// TODO: rename module
 use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, time::Duration};
 
 use jsonlrpc::JsonlStream;
@@ -6,8 +7,9 @@ use mio::{
     net::{TcpListener, TcpStream},
     Events, Interest, Poll, Token,
 };
+use serde::Serialize;
 
-use crate::{Result, ServerOptions};
+use crate::{request::OutgoingMessage, Result, ServerOptions};
 
 const LISTENER_TOKEN: Token = Token(0);
 
@@ -36,6 +38,7 @@ impl MessageBroker {
             poller,
             events,
             inner: MessageBrokerInner {
+                max_write_buf_size: options.max_write_buf_size,
                 next_token: Token(LISTENER_TOKEN.0 + 1),
                 listener,
                 connections: HashMap::new(),
@@ -51,25 +54,63 @@ impl MessageBroker {
         Ok(())
     }
 
-    // pub fn broadcast();
-    // pub fn send_to();
+    pub fn send<T: OutgoingMessage>(&mut self, peer: Token, msg: &T) -> Result<()> {
+        self.inner.send(&mut self.poller, peer, msg)
+    }
+
     // pub fn try_recv();
 }
 
 #[derive(Debug)]
 struct MessageBrokerInner {
+    max_write_buf_size: usize,
     next_token: Token,
     listener: TcpListener,
     connections: HashMap<Token, Connection>,
 }
 
 impl MessageBrokerInner {
+    fn send<T: OutgoingMessage>(&mut self, poller: &mut Poll, peer: Token, msg: &T) -> Result<()> {
+        let Some(conn) = self.connections.get_mut(&peer) else {
+            // TODO: stats
+            log::debug!(
+                "Message was discarded: peer_token={}, reason=disconnected",
+                peer.0
+            );
+            return Ok(());
+        };
+
+        if !msg.is_mandatory() && conn.stream.write_buf().len() > self.max_write_buf_size {
+            // TOD: stats
+            log::debug!(
+                "Message was discarded: peer={}, token={}, reason=over_capacity, write_buf_size={}",
+                conn.addr,
+                peer.0,
+                conn.stream.write_buf().len()
+            );
+            return Ok(());
+        }
+
+        if !conn.send(poller, msg)? {
+            self.handle_disconnected(poller, peer)?;
+        }
+        Ok(())
+    }
+
+    fn handle_disconnected(&mut self, poller: &mut Poll, token: Token) -> Result<()> {
+        // TODO: stats
+        let mut conn = self.connections.remove(&token).expect("unreachable");
+        poller.registry().deregister(conn.stream.inner_mut())?;
+        Ok(())
+    }
+
     fn handle_event(&mut self, poller: &mut Poll, event: &Event) -> Result<()> {
-        if event.token() == LISTENER_TOKEN {
+        let token = event.token();
+        if token == LISTENER_TOKEN {
             self.handle_listener_event(poller)?;
-        } else if let Some(connection) = self.connections.get_mut(&event.token()) {
+        } else if let Some(connection) = self.connections.get_mut(&token) {
             if !connection.handle_event(poller)? {
-                self.connections.remove(&event.token());
+                self.handle_disconnected(poller, token)?;
             }
         } else {
             unreachable!("Unknown mio token event: {event:?}");
@@ -119,12 +160,43 @@ impl MessageBrokerInner {
 
 #[derive(Debug)]
 struct Connection {
-    pub token: Token,
-    pub addr: SocketAddr,
-    pub stream: JsonlStream<TcpStream>,
+    token: Token,
+    addr: SocketAddr,
+    stream: JsonlStream<TcpStream>,
 }
 
 impl Connection {
+    fn send<T: Serialize>(&mut self, poller: &mut Poll, msg: &T) -> Result<bool> {
+        // TODO: stats
+        let start_writing = !self.is_writing();
+        match self.stream.write_object(msg) {
+            // TODO
+            // Err(_e) if !self.connected => {
+            //     // TODO: self.stream.write_to_buf()
+            //     Ok(())
+            // }
+            Err(e) if e.io_error_kind() == Some(std::io::ErrorKind::WouldBlock) => {
+                if start_writing {
+                    poller.registry().reregister(
+                        self.stream.inner_mut(),
+                        self.token,
+                        Interest::READABLE | Interest::WRITABLE,
+                    )?;
+                }
+                Ok(true)
+            }
+            Err(e) => {
+                log::debug!(
+                    "TCP write error: peer={}, token={}, reason={e}",
+                    self.addr,
+                    self.token.0
+                );
+                Ok(false)
+            }
+            Ok(_) => Ok(true),
+        }
+    }
+
     fn handle_event(&mut self, poller: &mut Poll) -> Result<bool> {
         if !self.poll_send(poller)? {
             return Ok(false);
@@ -136,12 +208,16 @@ impl Connection {
         if !self.is_writing() {
             return Ok(true);
         }
+
+        // TODO: stats
         match self.stream.flush() {
             Err(e) if e.io_error_kind() == Some(ErrorKind::WouldBlock) => {}
             Err(e) => {
-                // TODO: stats
-                log::debug!("TCP connection error: token={:?}, reason={e}", self.token.0);
-                poller.registry().deregister(self.stream.inner_mut())?;
+                log::debug!(
+                    "TCP write error: peer={}, token={}, reason={e}",
+                    self.addr,
+                    self.token.0
+                );
                 return Ok(false);
             }
             Ok(()) => {
