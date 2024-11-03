@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, time::Duration};
 
 use jsonlrpc::JsonlStream;
 use mio::{
@@ -84,7 +84,10 @@ impl MessageBrokerInner {
             let _ = stream.set_nodelay(true);
             let token = self.next_token();
 
-            log::debug!("New TCP connection was accepted: addr={addr:?}, token={token:?}");
+            log::debug!(
+                "New TCP connection was accepted: token={}, addr={addr:?}",
+                token.0
+            );
             // TODO: self.stats.accept_count += 1;
 
             poller
@@ -123,14 +126,45 @@ struct Connection {
 
 impl Connection {
     fn handle_event(&mut self, poller: &mut Poll) -> Result<bool> {
+        if !self.poll_send(poller)? {
+            return Ok(false);
+        }
         Ok(true)
+    }
+
+    fn poll_send(&mut self, poller: &mut Poll) -> Result<bool> {
+        if !self.is_writing() {
+            return Ok(true);
+        }
+        match self.stream.flush() {
+            Err(e) if e.io_error_kind() == Some(ErrorKind::WouldBlock) => {}
+            Err(e) => {
+                // TODO: stats
+                log::debug!("TCP connection error: token={:?}, reason={e}", self.token.0);
+                poller.registry().deregister(self.stream.inner_mut())?;
+                return Ok(false);
+            }
+            Ok(()) => {
+                // Remove Interest::WRITABLE
+                poller.registry().reregister(
+                    self.stream.inner_mut(),
+                    self.token,
+                    Interest::READABLE,
+                )?;
+            }
+        }
+        Ok(true)
+    }
+
+    fn is_writing(&self) -> bool {
+        !self.stream.write_buf().is_empty()
     }
 }
 
 fn would_block<T>(result: Result<T>) -> Result<Option<T>> {
     match result {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.io.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+        Err(e) if e.io.kind() == ErrorKind::WouldBlock => Ok(None),
         Err(e) => Err(e),
     }
 }
