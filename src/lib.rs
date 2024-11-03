@@ -1,3 +1,4 @@
+pub mod broker;
 pub mod command;
 pub mod connection;
 pub mod io;
