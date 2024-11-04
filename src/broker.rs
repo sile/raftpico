@@ -1,12 +1,15 @@
 // TODO: rename module
+// TODO: separate into another crate (such as jsonlrpc_mio)
 use std::{
     collections::{HashMap, VecDeque},
     io::ErrorKind,
-    net::SocketAddr,
+    net::{Shutdown, SocketAddr},
     time::Duration,
 };
 
-use jsonlrpc::JsonlStream;
+use jsonlrpc::{
+    ErrorCode, ErrorObject, JsonRpcVersion, JsonlStream, RequestId, RequestObject, ResponseObject,
+};
 use mio::{
     event::Event,
     net::{TcpListener, TcpStream},
@@ -15,7 +18,7 @@ use mio::{
 use serde::Serialize;
 
 use crate::{
-    request::{IncomingMessage, OutgoingMessage},
+    request::{IncomingMessage, InternalIncomingMessage, OutgoingMessage, Request},
     Result, ServerOptions,
 };
 
@@ -149,6 +152,7 @@ impl MessageBrokerInner {
             let mut connection = Connection {
                 token,
                 addr,
+                kind: ConnectionKind::Undefined,
                 stream: JsonlStream::new(stream),
             };
             if connection.handle_event(poller, &mut self.incoming_queue)? {
@@ -174,6 +178,7 @@ impl MessageBrokerInner {
 struct Connection {
     token: Token,
     addr: SocketAddr,
+    kind: ConnectionKind,
     stream: JsonlStream<TcpStream>,
 }
 
@@ -207,6 +212,20 @@ impl Connection {
             }
             Ok(_) => Ok(true),
         }
+    }
+
+    fn send_error_response(
+        &mut self,
+        poller: &mut Poll,
+        request_id: Option<RequestId>,
+        error: ErrorObject,
+    ) -> Result<bool> {
+        let response = ResponseObject::Err {
+            jsonrpc: JsonRpcVersion::V2,
+            error,
+            id: request_id,
+        };
+        self.send(poller, &response)
     }
 
     fn handle_event(
@@ -250,19 +269,124 @@ impl Connection {
         }
         Ok(true)
     }
-
     fn poll_recv(
         &mut self,
         poller: &mut Poll,
         incoming_queue: &mut VecDeque<(Token, IncomingMessage)>,
     ) -> Result<bool> {
-        // TODO
-        Ok(true)
+        loop {
+            match self.try_recv() {
+                Err(e) => {
+                    return self.handle_recv_error(poller, e);
+                }
+                Ok(msg) => {
+                    if let IncomingMessage::ExternalRequest(req) = &msg {
+                        if let Some(e) = req.validate() {
+                            self.send_error_response(poller, Some(req.id().clone()), e)?;
+                            continue;
+                        }
+                    }
+                    incoming_queue.push_back((self.token, msg));
+                }
+            }
+        }
+    }
+
+    fn try_recv(&mut self) -> serde_json::Result<IncomingMessage> {
+        // TODO: Update jsonlrpc version
+        let msg = match self.kind {
+            ConnectionKind::Undefined => self.stream.read_object::<IncomingMessage>()?,
+            ConnectionKind::External => self
+                .stream
+                .read_object::<Request>()
+                .map(IncomingMessage::ExternalRequest)?,
+            ConnectionKind::Internal => self
+                .stream
+                .read_object::<InternalIncomingMessage>()
+                .map(IncomingMessage::Internal)?,
+        };
+        if matches!(self.kind, ConnectionKind::Undefined) {
+            self.kind = match msg {
+                IncomingMessage::ExternalRequest(_) => ConnectionKind::External,
+                IncomingMessage::Internal(_) => ConnectionKind::Internal,
+            };
+        }
+        Ok(msg)
+    }
+
+    fn handle_recv_error(&mut self, poller: &mut Poll, error: serde_json::Error) -> Result<bool> {
+        if error.io_error_kind() == Some(ErrorKind::WouldBlock) {
+            return Ok(true);
+        }
+
+        if error.is_io() {
+            // TODO: stats
+            log::debug!(
+                "TCP read error: peer={}, token={}, reason={error}",
+                self.addr,
+                self.token.0
+            );
+            return Err(error.into());
+        }
+
+        // TODO: stats
+        log::warn!(
+            "Failed to read valid JSON-RPC request: peer={}, token={}, reason={error}",
+            self.addr,
+            self.token.0
+        );
+
+        let Ok(value) = self.stream.read_object::<serde_json::Value>() else {
+            let _ = self.send_error_response(
+                poller,
+                None,
+                ErrorObject {
+                    code: ErrorCode::PARSE_ERROR,
+                    message: "Invalid JSON value".to_owned(),
+                    data: None,
+                },
+            );
+            let _ = self.stream.inner().shutdown(Shutdown::Both);
+            return Ok(false);
+        };
+
+        let Ok(req) = serde_json::from_value::<RequestObject>(value) else {
+            let _ = self.send_error_response(
+                poller,
+                None,
+                ErrorObject {
+                    code: ErrorCode::INVALID_REQUEST,
+                    message: "Invalid JSON-RPC request".to_owned(),
+                    data: None,
+                },
+            );
+            let _ = self.stream.inner().shutdown(Shutdown::Both);
+            return Ok(false);
+        };
+
+        let _ = self.send_error_response(
+            poller,
+            req.id,
+            ErrorObject {
+                code: ErrorCode::INVALID_REQUEST,
+                message: "Invalid raftpico JSON-RPC request".to_owned(),
+                data: Some(serde_json::Value::String(error.to_string())),
+            },
+        );
+        let _ = self.stream.inner().shutdown(Shutdown::Both);
+        Ok(false)
     }
 
     fn is_writing(&self) -> bool {
         !self.stream.write_buf().is_empty()
     }
+}
+
+#[derive(Debug)]
+enum ConnectionKind {
+    Undefined,
+    External,
+    Internal,
 }
 
 fn would_block<T>(result: Result<T>) -> Result<Option<T>> {
