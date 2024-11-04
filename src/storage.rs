@@ -30,7 +30,7 @@ impl FileStorage {
     }
 
     pub fn install_snapshot<M: Serialize>(&mut self, snapshot: SnapshotParams<M>) -> Result<()> {
-        // TODO: temorary file and move
+        // TODO: temorary file and move (and writing the temporary file on a worker thread)
         self.file.inner().set_len(0)?;
         self.file
             .write_object(&Record::<LogEntries, _>::Snapshot(snapshot))?;
