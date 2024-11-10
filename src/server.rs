@@ -1189,6 +1189,7 @@ impl<M: Machine> Server<M> {
                 }
             }
             Action::AppendLogEntries(e) => {
+                // TODO: broadcast message before appending
                 if let Some(storage) = &mut self.storage {
                     storage.append_entries(&e, &self.commands)?;
                 }
