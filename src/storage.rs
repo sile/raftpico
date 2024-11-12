@@ -33,7 +33,7 @@ impl FileStorage {
         // TODO: temorary file and move (and writing the temporary file on a worker thread)
         self.file.inner().set_len(0)?;
         self.file
-            .write_object(&Record::<LogEntries, _>::Snapshot(snapshot))?;
+            .write_value(&Record::<LogEntries, _>::Snapshot(snapshot))?;
         self.maybe_fsync()?;
         Ok(())
     }
@@ -54,28 +54,28 @@ impl FileStorage {
             raft_log_entries,
             commands,
         )?);
-        self.file.write_object(&entries)?;
+        self.file.write_value(&entries)?;
         self.maybe_fsync()?;
         Ok(())
     }
 
     pub fn save_node_id(&mut self, node_id: NodeId) -> Result<()> {
         self.file
-            .write_object(&Record::<LogEntries, SnapshotParams>::NodeId(node_id.get()))?;
+            .write_value(&Record::<LogEntries, SnapshotParams>::NodeId(node_id.get()))?;
         self.maybe_fsync()?;
         Ok(())
     }
 
     pub fn save_current_term(&mut self, term: Term) -> Result<()> {
         self.file
-            .write_object(&Record::<LogEntries, SnapshotParams>::Term(term.get()))?;
+            .write_value(&Record::<LogEntries, SnapshotParams>::Term(term.get()))?;
         self.maybe_fsync()?;
         Ok(())
     }
 
     pub fn save_voted_for(&mut self, voted_for: Option<NodeId>) -> Result<()> {
         self.file
-            .write_object(&Record::<LogEntries, SnapshotParams>::VotedFor(
+            .write_value(&Record::<LogEntries, SnapshotParams>::VotedFor(
                 voted_for.map(|n| n.get()),
             ))?;
         self.maybe_fsync()?;
@@ -90,7 +90,7 @@ impl FileStorage {
             return Ok(None);
         }
 
-        let record: Record<LogEntries, _> = self.file.read_object()?;
+        let record: Record<LogEntries, _> = self.file.read_value()?;
         match record {
             Record::NodeId(v) => Ok(Some(Record::NodeId(v))),
             Record::Term(v) => Ok(Some(Record::Term(v))),

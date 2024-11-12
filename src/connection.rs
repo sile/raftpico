@@ -94,19 +94,19 @@ impl Connection {
 
     fn recv_internal_message(&mut self) -> Result<InternalIncomingMessage> {
         // TODO: note about difference with the external message handling
-        let msg = self.stream.read_object()?;
+        let msg = self.stream.read_value()?;
         Ok(msg)
     }
 
     fn recv_external_message(&mut self) -> Result<Request> {
         // TODO: refactor code
         // TODO: consider batch request
-        match self.stream.read_object::<Request>() {
+        match self.stream.read_value::<Request>() {
             Err(e) if e.is_io() => {
                 return Err(e.into());
             }
             Err(_) => {
-                let value = match self.stream.read_object::<serde_json::Value>() {
+                let value = match self.stream.read_value::<serde_json::Value>() {
                     Err(e) => {
                         self.send_error_response_from_err("Invalid JSON value", &e)?;
                         return self.recv_external_message();
@@ -138,12 +138,12 @@ impl Connection {
 
     fn recv_undefined_message(&mut self) -> Result<IncomingMessage> {
         // TODO: refactor code
-        match self.stream.read_object::<IncomingMessage>() {
+        match self.stream.read_value::<IncomingMessage>() {
             Err(e) if e.is_io() => {
                 return Err(e.into());
             }
             Err(_) => {
-                let value = match self.stream.read_object::<serde_json::Value>() {
+                let value = match self.stream.read_value::<serde_json::Value>() {
                     Err(e) => {
                         self.send_error_response_from_err("Invalid JSON value", &e)?;
                         return self.recv_undefined_message();
@@ -224,7 +224,7 @@ impl Connection {
 
     pub fn send<T: OutgoingMessage>(&mut self, msg: &T) -> Result<()> {
         let start_writing = !self.is_writing();
-        match self.stream.write_object(msg) {
+        match self.stream.write_value(msg) {
             Err(_e) if !self.connected => {
                 // TODO: self.stream.write_to_buf()
                 Ok(())

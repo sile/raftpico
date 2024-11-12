@@ -186,7 +186,7 @@ impl Connection {
     fn send<T: Serialize>(&mut self, poller: &mut Poll, msg: &T) -> Result<bool> {
         // TODO: stats
         let start_writing = !self.is_writing();
-        match self.stream.write_object(msg) {
+        match self.stream.write_value(msg) {
             // TODO
             // Err(_e) if !self.connected => {
             //     // TODO: self.stream.write_to_buf()
@@ -295,14 +295,14 @@ impl Connection {
     fn try_recv(&mut self) -> serde_json::Result<IncomingMessage> {
         // TODO: Update jsonlrpc version
         let msg = match self.kind {
-            ConnectionKind::Undefined => self.stream.read_object::<IncomingMessage>()?,
+            ConnectionKind::Undefined => self.stream.read_value::<IncomingMessage>()?,
             ConnectionKind::External => self
                 .stream
-                .read_object::<Request>()
+                .read_value::<Request>()
                 .map(IncomingMessage::ExternalRequest)?,
             ConnectionKind::Internal => self
                 .stream
-                .read_object::<InternalIncomingMessage>()
+                .read_value::<InternalIncomingMessage>()
                 .map(IncomingMessage::Internal)?,
         };
         if matches!(self.kind, ConnectionKind::Undefined) {
@@ -336,7 +336,7 @@ impl Connection {
             self.token.0
         );
 
-        let Ok(value) = self.stream.read_object::<serde_json::Value>() else {
+        let Ok(value) = self.stream.read_value::<serde_json::Value>() else {
             let _ = self.send_error_response(
                 poller,
                 None,
