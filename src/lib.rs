@@ -1,4 +1,3 @@
-pub mod broker; // TODO: net?
 pub mod command;
 pub mod connection;
 pub mod io;
