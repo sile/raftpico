@@ -4,6 +4,7 @@ pub mod io;
 mod machine;
 pub mod request; // TODO: message?
 mod server;
+pub mod server2;
 pub mod stats;
 pub mod storage; // TODO
 
