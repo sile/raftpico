@@ -82,12 +82,7 @@ impl<M> RaftServer<M> {
         params: CreateClusterParams,
     ) -> std::io::Result<()> {
         if self.node().is_some() {
-            self.reply_error(
-                from,
-                id,
-                ERROR_CODE_CLUSTER_ALREADY_CREATED,
-                "Cluster already created",
-            )?;
+            self.reply_error(from, id, ErrorKind::ClusterAlreadyCreated, None)?;
             return Ok(());
         }
         //let response = Response::create_cluster(id, result);
@@ -98,13 +93,13 @@ impl<M> RaftServer<M> {
         &mut self,
         from: From,
         id: RequestId,
-        code: ErrorCode,
-        message: &str,
+        kind: ErrorKind,
+        data: Option<serde_json::Value>,
     ) -> std::io::Result<()> {
         let error = ErrorObject {
-            code,
-            message: message.to_owned(),
-            data: None,
+            code: kind.code(),
+            message: kind.message().to_owned(),
+            data,
         };
         let response = ResponseObject::Err {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
@@ -116,5 +111,20 @@ impl<M> RaftServer<M> {
     }
 }
 
-// TODO:enum
-pub const ERROR_CODE_CLUSTER_ALREADY_CREATED: ErrorCode = ErrorCode::new(1);
+// TODO: move
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ErrorKind {
+    ClusterAlreadyCreated = 1,
+}
+
+impl ErrorKind {
+    pub const fn code(self) -> ErrorCode {
+        ErrorCode::new(self as i32)
+    }
+
+    pub const fn message(&self) -> &'static str {
+        match self {
+            ErrorKind::ClusterAlreadyCreated => "CLUSTER_ALREADY_CREATED",
+        }
+    }
+}
