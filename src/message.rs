@@ -1,7 +1,7 @@
 use jsonlrpc::{JsonRpcVersion, RequestId};
 use serde::{Deserialize, Serialize};
 
-use crate::request::CreateClusterParams;
+use crate::server2::ClusterSettings;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "method")]
@@ -10,6 +10,6 @@ pub enum Request {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         #[serde(default)]
-        params: CreateClusterParams,
+        params: ClusterSettings,
     },
 }
