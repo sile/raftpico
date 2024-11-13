@@ -1,9 +1,11 @@
 use std::{net::SocketAddr, time::Duration};
 
+use jsonlrpc::RequestId;
 use jsonlrpc_mio::{From, RpcServer};
 use mio::{Events, Poll, Token};
+use raftbare::Node;
 
-use crate::message::Request;
+use crate::{message::Request, request::CreateClusterParams};
 
 const SERVER_TOKEN_MIN: Token = Token(usize::MAX / 2);
 const SERVER_TOKEN_MAX: Token = Token(usize::MAX);
@@ -15,6 +17,7 @@ pub struct RaftServer<M> {
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
+    node: Option<Node>,
     machine: M,
 }
 
@@ -28,12 +31,17 @@ impl<M> RaftServer<M> {
             poller,
             events,
             rpc_server,
+            node: None,
             machine,
         })
     }
 
     pub fn listen_addr(&self) -> SocketAddr {
         self.rpc_server.listen_addr()
+    }
+
+    pub fn node(&self) -> Option<&Node> {
+        self.node.as_ref()
     }
 
     pub fn machine(&self) -> &M {
@@ -58,6 +66,20 @@ impl<M> RaftServer<M> {
     }
 
     fn handle_request(&mut self, from: From, request: Request) -> std::io::Result<()> {
-        todo!();
+        match request {
+            Request::CreateCluster { id, params, .. } => {
+                self.handle_create_cluster(from, id, params)
+            }
+        }
+    }
+
+    fn handle_create_cluster(
+        &mut self,
+        from: From,
+        id: RequestId,
+        params: CreateClusterParams,
+    ) -> std::io::Result<()> {
+        //let response = Response::create_cluster(id, result);
+        todo!()
     }
 }
