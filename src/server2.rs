@@ -1,9 +1,9 @@
 use std::{net::SocketAddr, time::Duration};
 
-use jsonlrpc::RequestId;
+use jsonlrpc::{ErrorCode, ErrorObject, RequestId, ResponseObject};
 use jsonlrpc_mio::{From, RpcServer};
 use mio::{Events, Poll, Token};
-use raftbare::Node;
+use raftbare::{Node, NodeId};
 
 use crate::{message::Request, request::CreateClusterParams};
 
@@ -12,12 +12,14 @@ const SERVER_TOKEN_MAX: Token = Token(usize::MAX);
 
 const EVENTS_CAPACITY: usize = 1024;
 
+const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
+
 #[derive(Debug)]
 pub struct RaftServer<M> {
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
-    node: Option<Node>,
+    node: Node,
     machine: M,
 }
 
@@ -31,7 +33,7 @@ impl<M> RaftServer<M> {
             poller,
             events,
             rpc_server,
-            node: None,
+            node: Node::start(UNINIT_NODE_ID),
             machine,
         })
     }
@@ -41,7 +43,7 @@ impl<M> RaftServer<M> {
     }
 
     pub fn node(&self) -> Option<&Node> {
-        self.node.as_ref()
+        (self.node.id() != UNINIT_NODE_ID).then(|| &self.node)
     }
 
     pub fn machine(&self) -> &M {
@@ -79,7 +81,40 @@ impl<M> RaftServer<M> {
         id: RequestId,
         params: CreateClusterParams,
     ) -> std::io::Result<()> {
+        if self.node().is_some() {
+            self.reply_error(
+                from,
+                id,
+                ERROR_CODE_CLUSTER_ALREADY_CREATED,
+                "Cluster already created",
+            )?;
+            return Ok(());
+        }
         //let response = Response::create_cluster(id, result);
         todo!()
     }
+
+    fn reply_error(
+        &mut self,
+        from: From,
+        id: RequestId,
+        code: ErrorCode,
+        message: &str,
+    ) -> std::io::Result<()> {
+        let error = ErrorObject {
+            code,
+            message: message.to_owned(),
+            data: None,
+        };
+        let response = ResponseObject::Err {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            error,
+            id: Some(id),
+        };
+        self.rpc_server.reply(&mut self.poller, from, &response)?;
+        Ok(())
+    }
 }
+
+// TODO:enum
+pub const ERROR_CODE_CLUSTER_ALREADY_CREATED: ErrorCode = ErrorCode::new(1);
