@@ -2,6 +2,7 @@ pub mod command;
 pub mod connection;
 pub mod io;
 mod machine;
+pub mod message;
 pub mod request; // TODO: message?
 mod server;
 pub mod server2;

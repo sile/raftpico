@@ -1,7 +1,9 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
-use jsonlrpc_mio::RpcServer;
+use jsonlrpc_mio::{From, RpcServer};
 use mio::{Events, Poll, Token};
+
+use crate::message::Request;
 
 const SERVER_TOKEN_MIN: Token = Token(usize::MAX / 2);
 const SERVER_TOKEN_MAX: Token = Token(usize::MAX);
@@ -12,7 +14,7 @@ const EVENTS_CAPACITY: usize = 1024;
 pub struct RaftServer<M> {
     poller: Poll,
     events: Events,
-    rpc_server: RpcServer,
+    rpc_server: RpcServer<Request>,
     machine: M,
 }
 
@@ -40,5 +42,22 @@ impl<M> RaftServer<M> {
 
     pub fn machine_mut(&mut self) -> &mut M {
         &mut self.machine
+    }
+
+    pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        self.poller.poll(&mut self.events, timeout)?;
+        for event in self.events.iter() {
+            self.rpc_server.handle_event(&mut self.poller, event)?;
+        }
+
+        while let Some((from, request)) = self.rpc_server.try_recv() {
+            self.handle_request(from, request)?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_request(&mut self, from: From, request: Request) -> std::io::Result<()> {
+        todo!();
     }
 }
