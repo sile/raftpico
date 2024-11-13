@@ -73,12 +73,12 @@ impl<M> RaftServer<M> {
     fn handle_request(&mut self, from: From, request: Request) -> std::io::Result<()> {
         match request {
             Request::CreateCluster { id, params, .. } => {
-                self.handle_create_cluster(from, id, params)
+                self.handle_create_cluster_request(from, id, params)
             }
         }
     }
 
-    fn handle_create_cluster(
+    fn handle_create_cluster_request(
         &mut self,
         from: From,
         id: RequestId,

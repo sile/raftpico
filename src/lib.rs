@@ -69,8 +69,7 @@ mod tests {
 
     use jsonlrpc::{RequestId, RpcClient};
     use request::{
-        AddServerResult, CreateClusterParams, CreateClusterResult, OutputResult,
-        RemoveServerResult, Request, Response,
+        AddServerResult, CreateClusterResult, OutputResult, RemoveServerResult, Request, Response,
     };
     use serde::{Deserialize, Serialize};
     use server2::RaftServer;
