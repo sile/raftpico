@@ -1,12 +1,18 @@
 use std::{net::SocketAddr, time::Duration};
 
-use jsonlrpc::{ErrorCode, ErrorObject, RequestId, ResponseObject};
+use jsonlrpc::{ErrorCode, ErrorObject, ResponseObject};
 use jsonlrpc_mio::{From, RpcServer};
 use mio::{Events, Poll, Token};
-use raftbare::{Node, NodeId};
+use raftbare::{CommitPromise, Node, NodeId};
 use serde::{Deserialize, Serialize};
 
-use crate::{message::Request, request::CreateClusterParams, storage::FileStorage};
+use crate::{
+    command::{Command2, Proposer},
+    machine::Machine2,
+    message::Request,
+    request::CreateClusterParams,
+    storage::FileStorage,
+};
 
 const SERVER_TOKEN_MIN: Token = Token(usize::MAX / 2);
 const SERVER_TOKEN_MAX: Token = Token(usize::MAX);
@@ -96,7 +102,7 @@ pub struct RaftServer<M> {
     state: ReplicatedState<M>,
 }
 
-impl<M> RaftServer<M> {
+impl<M: Machine2> RaftServer<M> {
     pub fn start(listen_addr: SocketAddr, machine: M) -> std::io::Result<Self> {
         let mut poller = Poll::new()?;
         let events = Events::with_capacity(EVENTS_CAPACITY);
@@ -147,48 +153,49 @@ impl<M> RaftServer<M> {
     fn handle_request(&mut self, from: From, request: Request) -> std::io::Result<()> {
         match request {
             Request::CreateCluster { id, params, .. } => {
-                self.handle_create_cluster_request(from, id, params)
+                self.handle_create_cluster_request(Proposer::new(from, id), params)
             }
         }
     }
 
     fn handle_create_cluster_request(
         &mut self,
-        from: From,
-        id: RequestId,
-        params: ClusterSettings,
+        proposer: Proposer,
+        settings: ClusterSettings,
     ) -> std::io::Result<()> {
         if self.node().is_some() {
-            self.reply_error(from, id, ErrorKind::ClusterAlreadyCreated, None)?;
+            self.reply_error(proposer, ErrorKind::ClusterAlreadyCreated, None)?;
             return Ok(());
         }
-
-        self.state.settings = params;
 
         self.node = Node::start(SEED_NODE_ID);
         if let Some(storage) = &mut self.storage {
             storage.save_node_id(self.node.id())?;
         }
 
-        self.node.create_cluster(&[self.node.id()]); // Always succeeds
+        let mut promise = self.node.create_cluster(&[self.node.id()]);
+        promise.poll(&mut self.node);
+        assert!(promise.is_accepted(), "always succeeds");
 
-        // let command = Command::InitCluster {
-        //     server_addr: self.addr,
-        //     min_election_timeout: self.min_election_timeout,
-        //     max_election_timeout: self.max_election_timeout,
-        //     max_log_entries_hint: self.max_log_entries_hint,
-        // };
-        // let mut promise = self.propose_command(command);
-        // promise.poll(&mut self.node);
-        // assert!(promise.is_accepted());
+        let command = Command2::<M>::CreateCluster {
+            proposer: Some(proposer),
+            seed_server_addr: self.listen_addr(),
+            settings,
+        };
+        let mut promise = self.propose_command(command);
+        promise.poll(&mut self.node);
+        assert!(promise.is_accepted(), "always succeeds");
 
+        Ok(())
+    }
+
+    fn propose_command(&mut self, command: Command2<M>) -> CommitPromise {
         todo!()
     }
 
     fn reply_error(
         &mut self,
-        from: From,
-        id: RequestId,
+        proposer: Proposer,
         kind: ErrorKind,
         data: Option<serde_json::Value>,
     ) -> std::io::Result<()> {
@@ -200,9 +207,10 @@ impl<M> RaftServer<M> {
         let response = ResponseObject::Err {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             error,
-            id: Some(id),
+            id: Some(proposer.request_id),
         };
-        self.rpc_server.reply(&mut self.poller, from, &response)?;
+        self.rpc_server
+            .reply(&mut self.poller, proposer.from, &response)?;
         Ok(())
     }
 }

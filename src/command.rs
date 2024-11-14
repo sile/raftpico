@@ -1,5 +1,6 @@
 use std::{net::SocketAddr, time::Duration};
 
+use jsonlrpc::RequestId;
 use serde::{Deserialize, Serialize};
 
 use crate::{machine::Machine2, server2::ClusterSettings};
@@ -23,15 +24,37 @@ pub enum Command {
     Query,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Command2<M: Machine2> {
-    // System commands
     CreateCluster {
+        #[serde(skip)]
+        proposer: Option<Proposer>,
         seed_server_addr: SocketAddr,
         settings: ClusterSettings,
     },
+    ApplyCommand {
+        #[serde(skip)]
+        proposer: Option<Proposer>,
+        input: M::Input,
+    },
+    ApplyQuery {
+        #[serde(skip)]
+        proposer: Option<Proposer>,
 
-    // User commands
-    Command(M::Input),
-    Query,
+        #[serde(skip)]
+        input: M::Input,
+    },
+}
+
+// TODO: rename
+#[derive(Debug)]
+pub struct Proposer {
+    pub from: jsonlrpc_mio::From,
+    pub request_id: RequestId,
+}
+
+impl Proposer {
+    pub fn new(from: jsonlrpc_mio::From, request_id: RequestId) -> Self {
+        Self { from, request_id }
+    }
 }
