@@ -1,13 +1,13 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, time::Duration};
 
 use jsonlrpc::{ErrorCode, ErrorObject, ResponseObject};
 use jsonlrpc_mio::{From, RpcServer};
 use mio::{Events, Poll, Token};
-use raftbare::{CommitPromise, Node, NodeId};
+use raftbare::{CommitPromise, LogIndex, LogPosition, Node, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    command::{Command2, Proposer},
+    command::{Caller, Command2},
     machine::Machine2,
     message::Request,
     request::CreateClusterParams,
@@ -99,6 +99,7 @@ pub struct RaftServer<M> {
     rpc_server: RpcServer<Request>,
     node: Node,
     storage: Option<FileStorage>,
+    //    ongoing_proposals: HashMap<LogPosition, Caller>,
     state: ReplicatedState<M>,
 }
 
@@ -153,18 +154,18 @@ impl<M: Machine2> RaftServer<M> {
     fn handle_request(&mut self, from: From, request: Request) -> std::io::Result<()> {
         match request {
             Request::CreateCluster { id, params, .. } => {
-                self.handle_create_cluster_request(Proposer::new(from, id), params)
+                self.handle_create_cluster_request(Caller::new(from, id), params)
             }
         }
     }
 
     fn handle_create_cluster_request(
         &mut self,
-        proposer: Proposer,
+        caller: Caller,
         settings: ClusterSettings,
     ) -> std::io::Result<()> {
         if self.node().is_some() {
-            self.reply_error(proposer, ErrorKind::ClusterAlreadyCreated, None)?;
+            self.reply_error(caller, ErrorKind::ClusterAlreadyCreated, None)?;
             return Ok(());
         }
 
@@ -173,29 +174,42 @@ impl<M: Machine2> RaftServer<M> {
             storage.save_node_id(self.node.id())?;
         }
 
-        let mut promise = self.node.create_cluster(&[self.node.id()]);
-        promise.poll(&mut self.node);
-        assert!(promise.is_accepted(), "always succeeds");
+        self.node.create_cluster(&[self.node.id()]); // Always succeeds
 
         let command = Command2::<M>::CreateCluster {
-            proposer: Some(proposer),
             seed_server_addr: self.listen_addr(),
             settings,
         };
-        let mut promise = self.propose_command(command);
-        promise.poll(&mut self.node);
-        assert!(promise.is_accepted(), "always succeeds");
+        let promise = self.propose_command(command); // Always succeeds
 
         Ok(())
     }
 
+    pub fn is_leader(&self) -> bool {
+        self.node.role().is_leader()
+    }
+
     fn propose_command(&mut self, command: Command2<M>) -> CommitPromise {
-        todo!()
+        if matches!(command, Command2::ApplyQuery) && self.is_leader() {
+            if let Some(entries) = &self.node.actions().append_log_entries {
+                if !entries.is_empty() {
+                    // TODO: note comment (there are concurrent proposals)
+                    return CommitPromise::Pending(entries.last_position());
+                }
+            }
+        }
+
+        let promise = self.node.propose_command();
+        if !promise.is_rejected() {
+            // TODO
+            // self.commands.insert(promise.log_position().index, command);
+        }
+        promise
     }
 
     fn reply_error(
         &mut self,
-        proposer: Proposer,
+        caller: Caller,
         kind: ErrorKind,
         data: Option<serde_json::Value>,
     ) -> std::io::Result<()> {
@@ -207,10 +221,10 @@ impl<M: Machine2> RaftServer<M> {
         let response = ResponseObject::Err {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             error,
-            id: Some(proposer.request_id),
+            id: Some(caller.request_id),
         };
         self.rpc_server
-            .reply(&mut self.poller, proposer.from, &response)?;
+            .reply(&mut self.poller, caller.from, &response)?;
         Ok(())
     }
 }

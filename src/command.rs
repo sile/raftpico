@@ -27,33 +27,23 @@ pub enum Command {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Command2<M: Machine2> {
     CreateCluster {
-        #[serde(skip)]
-        proposer: Option<Proposer>,
         seed_server_addr: SocketAddr,
         settings: ClusterSettings,
     },
     ApplyCommand {
-        #[serde(skip)]
-        proposer: Option<Proposer>,
         input: M::Input,
     },
-    ApplyQuery {
-        #[serde(skip)]
-        proposer: Option<Proposer>,
-
-        #[serde(skip)]
-        input: M::Input,
-    },
+    ApplyQuery,
 }
 
-// TODO: rename
+// TODO: move
 #[derive(Debug)]
-pub struct Proposer {
+pub struct Caller {
     pub from: jsonlrpc_mio::From,
     pub request_id: RequestId,
 }
 
-impl Proposer {
+impl Caller {
     pub fn new(from: jsonlrpc_mio::From, request_id: RequestId) -> Self {
         Self { from, request_id }
     }
