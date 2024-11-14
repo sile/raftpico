@@ -326,6 +326,7 @@ pub enum LogEntry {
         voters: Vec<u64>,
         new_voters: Vec<u64>,
     },
+    // TODO: flatten
     Command(Command),
 }
 
