@@ -6,114 +6,15 @@ use mio::{Events, Poll, Token};
 use raftbare::{Node, NodeId};
 use serde::{Deserialize, Serialize};
 
-use crate::{message::Request, request::CreateClusterParams};
+use crate::{message::Request, request::CreateClusterParams, storage::FileStorage};
 
 const SERVER_TOKEN_MIN: Token = Token(usize::MAX / 2);
 const SERVER_TOKEN_MAX: Token = Token(usize::MAX);
 
 const EVENTS_CAPACITY: usize = 1024;
 
+const SEED_NODE_ID: NodeId = NodeId::new(0);
 const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
-
-#[derive(Debug)]
-pub struct RaftServer<M> {
-    poller: Poll,
-    events: Events,
-    rpc_server: RpcServer<Request>,
-    cluster_settings: ClusterSettings,
-    node: Node,
-    machine: M,
-}
-
-impl<M> RaftServer<M> {
-    pub fn start(listen_addr: SocketAddr, machine: M) -> std::io::Result<Self> {
-        let mut poller = Poll::new()?;
-        let events = Events::with_capacity(EVENTS_CAPACITY);
-        let rpc_server =
-            RpcServer::start(&mut poller, listen_addr, SERVER_TOKEN_MIN, SERVER_TOKEN_MAX)?;
-        Ok(Self {
-            poller,
-            events,
-            rpc_server,
-            cluster_settings: ClusterSettings::default(),
-            node: Node::start(UNINIT_NODE_ID),
-            machine,
-        })
-    }
-
-    pub fn listen_addr(&self) -> SocketAddr {
-        self.rpc_server.listen_addr()
-    }
-
-    pub fn node(&self) -> Option<&Node> {
-        (self.node.id() != UNINIT_NODE_ID).then(|| &self.node)
-    }
-
-    pub fn machine(&self) -> &M {
-        &self.machine
-    }
-
-    pub fn machine_mut(&mut self) -> &mut M {
-        &mut self.machine
-    }
-
-    pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
-        self.poller.poll(&mut self.events, timeout)?;
-        for event in self.events.iter() {
-            self.rpc_server.handle_event(&mut self.poller, event)?;
-        }
-
-        while let Some((from, request)) = self.rpc_server.try_recv() {
-            self.handle_request(from, request)?;
-        }
-
-        Ok(())
-    }
-
-    fn handle_request(&mut self, from: From, request: Request) -> std::io::Result<()> {
-        match request {
-            Request::CreateCluster { id, params, .. } => {
-                self.handle_create_cluster_request(from, id, params)
-            }
-        }
-    }
-
-    fn handle_create_cluster_request(
-        &mut self,
-        from: From,
-        id: RequestId,
-        params: ClusterSettings,
-    ) -> std::io::Result<()> {
-        if self.node().is_some() {
-            self.reply_error(from, id, ErrorKind::ClusterAlreadyCreated, None)?;
-            return Ok(());
-        }
-
-        self.cluster_settings = params;
-        todo!()
-    }
-
-    fn reply_error(
-        &mut self,
-        from: From,
-        id: RequestId,
-        kind: ErrorKind,
-        data: Option<serde_json::Value>,
-    ) -> std::io::Result<()> {
-        let error = ErrorObject {
-            code: kind.code(),
-            message: kind.message().to_owned(),
-            data,
-        };
-        let response = ResponseObject::Err {
-            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            error,
-            id: Some(id),
-        };
-        self.rpc_server.reply(&mut self.poller, from, &response)?;
-        Ok(())
-    }
-}
 
 // TODO: move
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,5 +77,132 @@ impl ErrorKind {
         match self {
             ErrorKind::ClusterAlreadyCreated => "Cluster already created",
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct ReplicatedState<M> {
+    settings: ClusterSettings,
+    machine: M,
+}
+
+#[derive(Debug)]
+pub struct RaftServer<M> {
+    poller: Poll,
+    events: Events,
+    rpc_server: RpcServer<Request>,
+    node: Node,
+    storage: Option<FileStorage>,
+    state: ReplicatedState<M>,
+}
+
+impl<M> RaftServer<M> {
+    pub fn start(listen_addr: SocketAddr, machine: M) -> std::io::Result<Self> {
+        let mut poller = Poll::new()?;
+        let events = Events::with_capacity(EVENTS_CAPACITY);
+        let rpc_server =
+            RpcServer::start(&mut poller, listen_addr, SERVER_TOKEN_MIN, SERVER_TOKEN_MAX)?;
+        Ok(Self {
+            poller,
+            events,
+            rpc_server,
+            node: Node::start(UNINIT_NODE_ID),
+            storage: None, // TODO
+            state: ReplicatedState {
+                settings: ClusterSettings::default(),
+                machine,
+            },
+        })
+    }
+
+    pub fn listen_addr(&self) -> SocketAddr {
+        self.rpc_server.listen_addr()
+    }
+
+    pub fn node(&self) -> Option<&Node> {
+        (self.node.id() != UNINIT_NODE_ID).then(|| &self.node)
+    }
+
+    pub fn machine(&self) -> &M {
+        &self.state.machine
+    }
+
+    pub fn machine_mut(&mut self) -> &mut M {
+        &mut self.state.machine
+    }
+
+    pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        self.poller.poll(&mut self.events, timeout)?;
+        for event in self.events.iter() {
+            self.rpc_server.handle_event(&mut self.poller, event)?;
+        }
+
+        while let Some((from, request)) = self.rpc_server.try_recv() {
+            self.handle_request(from, request)?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_request(&mut self, from: From, request: Request) -> std::io::Result<()> {
+        match request {
+            Request::CreateCluster { id, params, .. } => {
+                self.handle_create_cluster_request(from, id, params)
+            }
+        }
+    }
+
+    fn handle_create_cluster_request(
+        &mut self,
+        from: From,
+        id: RequestId,
+        params: ClusterSettings,
+    ) -> std::io::Result<()> {
+        if self.node().is_some() {
+            self.reply_error(from, id, ErrorKind::ClusterAlreadyCreated, None)?;
+            return Ok(());
+        }
+
+        self.state.settings = params;
+
+        self.node = Node::start(SEED_NODE_ID);
+        if let Some(storage) = &mut self.storage {
+            storage.save_node_id(self.node.id())?;
+        }
+
+        self.node.create_cluster(&[self.node.id()]); // Always succeeds
+
+        // let command = Command::InitCluster {
+        //     server_addr: self.addr,
+        //     min_election_timeout: self.min_election_timeout,
+        //     max_election_timeout: self.max_election_timeout,
+        //     max_log_entries_hint: self.max_log_entries_hint,
+        // };
+        // let mut promise = self.propose_command(command);
+        // promise.poll(&mut self.node);
+        // assert!(promise.is_accepted());
+
+        todo!()
+    }
+
+    fn reply_error(
+        &mut self,
+        from: From,
+        id: RequestId,
+        kind: ErrorKind,
+        data: Option<serde_json::Value>,
+    ) -> std::io::Result<()> {
+        let error = ErrorObject {
+            code: kind.code(),
+            message: kind.message().to_owned(),
+            data,
+        };
+        let response = ResponseObject::Err {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            error,
+            id: Some(id),
+        };
+        self.rpc_server.reply(&mut self.poller, from, &response)?;
+        Ok(())
     }
 }

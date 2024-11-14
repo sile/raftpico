@@ -15,6 +15,7 @@ pub use stats::ServerStats;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+// TODO: remove
 pub struct Error {
     pub io: std::io::Error,
     pub trace: std::backtrace::Backtrace,
@@ -26,6 +27,12 @@ impl From<std::io::Error> for Error {
             io: value,
             trace: std::backtrace::Backtrace::capture(),
         }
+    }
+}
+
+impl From<Error> for std::io::Error {
+    fn from(value: Error) -> Self {
+        value.io
     }
 }
 
