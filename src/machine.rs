@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub trait Machine2: Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
+    // TODO: fn apply()
 }
 
 pub trait Machine: Serialize + for<'de> Deserialize<'de> {

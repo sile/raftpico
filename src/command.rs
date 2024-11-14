@@ -25,10 +25,13 @@ pub enum Command {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command2<M: Machine2> {
+    // System commands
     CreateCluster {
         seed_server_addr: SocketAddr,
         settings: ClusterSettings,
     },
+
+    // User commands
     Command(M::Input),
     Query,
 }
