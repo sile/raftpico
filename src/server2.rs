@@ -7,7 +7,7 @@ use std::{
 use jsonlrpc::{ErrorCode, ErrorObject, ResponseObject};
 use jsonlrpc_mio::{From, RpcServer};
 use mio::{Events, Poll, Token};
-use raftbare::{Action, CommitPromise, LogEntries, Node, NodeId, Role};
+use raftbare::{Action, CommitPromise, LogEntries, LogIndex, Node, NodeId, Role};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
@@ -135,6 +135,7 @@ pub struct RaftServer<M> {
     rng: StdRng,
     storage: Option<FileStorage>,
     election_abs_timeout: Instant,
+    last_applied_index: LogIndex,
     ongoing_proposals: BinaryHeap<OngoingProposal>,
     state: ReplicatedState<M>,
 }
@@ -154,6 +155,7 @@ impl<M: Machine2> RaftServer<M> {
             storage: None, // TODO
             ongoing_proposals: BinaryHeap::new(),
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
+            last_applied_index: LogIndex::ZERO,
             state: ReplicatedState {
                 settings: ClusterSettings::default(),
                 machine,
@@ -198,7 +200,8 @@ impl<M: Machine2> RaftServer<M> {
             self.handle_request(from, request)?;
         }
 
-        // TODO: commit handling
+        // Commit handling.
+        self.handle_commit()?;
 
         // Raft action handling.
         while let Some(action) = self.node.actions_mut().next() {
@@ -206,6 +209,34 @@ impl<M: Machine2> RaftServer<M> {
         }
 
         Ok(())
+    }
+
+    fn handle_commit(&mut self) -> std::io::Result<()> {
+        for index in
+            (self.last_applied_index.get() + 1..=self.node.commit_index().get()).map(LogIndex::new)
+        {
+            self.apply_committed_command(index)?;
+        }
+
+        if self.last_applied_index < self.node.commit_index() {
+            if self.is_leader() {
+                // TODO: doc  (Quickly notify followers about the latest commit index)
+                self.node.heartbeat();
+            }
+
+            self.last_applied_index = self.node.commit_index();
+
+            // TODO: snapshot handling
+            // if self.commands.len() > self.max_log_entries_hint {
+            //     self.install_snapshot();
+            // }
+        }
+
+        Ok(())
+    }
+
+    fn apply_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
+        todo!()
     }
 
     fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
