@@ -15,10 +15,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{Caller, Command2},
-    machine::Machine2,
+    machine::{Context2, Machine2},
     message::Request,
     request::CreateClusterParams,
     storage::FileStorage,
+    InputKind,
 };
 
 const SERVER_TOKEN_MIN: Token = Token(usize::MAX / 2);
@@ -269,6 +270,29 @@ impl<M: Machine2> RaftServer<M> {
 
     fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
         let command = self.local_commands.get(&index).expect("bug");
+        let kind = if matches!(command, Command2::ApplyQuery) {
+            InputKind::Query
+        } else {
+            InputKind::Command
+        };
+
+        // TODO: remove clone
+        let caller = if self
+            .ongoing_proposals
+            .peek()
+            .map_or(false, |p| p.promise.clone().poll(&self.node).is_accepted())
+        {
+            self.ongoing_proposals.pop().map(|p| p.caller)
+        } else {
+            None
+        };
+        let mut ctx = Context2 {
+            kind,
+            node: &self.node,
+            commit_index: index,
+            output: None,
+            caller,
+        };
         match command {
             Command2::CreateCluster {
                 seed_server_addr,

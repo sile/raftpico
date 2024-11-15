@@ -1,15 +1,37 @@
 use raftbare::{LogIndex, Node};
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
+
+use crate::command::Caller;
 
 pub trait Machine2: Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
-    // TODO: fn apply()
+
+    fn apply(&mut self, ctx: &mut Context2, input: Self::Input);
 }
 
 pub trait Machine: Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
 
     fn handle_input(&mut self, ctx: &mut Context, input: Self::Input);
+}
+
+#[derive(Debug)]
+pub struct Context2<'a> {
+    pub kind: InputKind, // TODO: private
+    pub node: &'a Node,
+    pub commit_index: LogIndex,
+
+    pub(crate) output: Option<serde_json::Result<Box<RawValue>>>,
+    pub(crate) caller: Option<Caller>,
+}
+
+impl<'a> Context2<'a> {
+    pub fn output<T: Serialize>(&mut self, output: &T) {
+        if self.caller.is_some() {
+            self.output = Some(serde_json::value::to_raw_value(output));
+        }
+    }
 }
 
 #[derive(Debug)]

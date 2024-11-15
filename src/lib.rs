@@ -75,7 +75,7 @@ mod tests {
     };
 
     use jsonlrpc::{RequestId, RpcClient};
-    use machine::Machine2;
+    use machine::{Context2, Machine2};
     use request::{
         AddServerResult, CreateClusterResult, OutputResult, RemoveServerResult, Request, Response,
     };
@@ -97,6 +97,13 @@ mod tests {
 
     impl Machine2 for usize {
         type Input = usize;
+
+        fn apply(&mut self, ctx: &mut Context2, input: Self::Input) {
+            if ctx.kind.is_command() {
+                *self += input;
+            }
+            ctx.output(self);
+        }
     }
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(3);
