@@ -1,5 +1,5 @@
 use std::{
-    collections::BinaryHeap,
+    collections::{BTreeMap, BinaryHeap},
     net::SocketAddr,
     time::{Duration, Instant},
 };
@@ -128,6 +128,8 @@ pub struct ReplicatedState<M> {
     machine: M,
 }
 
+pub type Commands = BTreeMap<LogIndex, Command2>;
+
 #[derive(Debug)]
 pub struct RaftServer<M> {
     poller: Poll,
@@ -138,6 +140,7 @@ pub struct RaftServer<M> {
     storage: Option<FileStorage>,
     election_abs_timeout: Instant,
     last_applied_index: LogIndex,
+    local_commands: Commands,
     ongoing_proposals: BinaryHeap<OngoingProposal>,
     state: ReplicatedState<M>,
 }
@@ -155,6 +158,7 @@ impl<M: Machine2> RaftServer<M> {
             node: Node::start(UNINIT_NODE_ID),
             rng: StdRng::from_entropy(),
             storage: None, // TODO
+            local_commands: Commands::new(),
             ongoing_proposals: BinaryHeap::new(),
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index: LogIndex::ZERO,
@@ -264,7 +268,15 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
-        todo!()
+        let command = self.local_commands.get(&index).expect("bug");
+        match command {
+            Command2::CreateCluster {
+                seed_server_addr,
+                settings,
+            } => todo!(),
+            Command2::ApplyCommand { input } => todo!(),
+            Command2::ApplyQuery => todo!(),
+        }
     }
 
     fn handle_committed_term(&mut self, _term: Term) {
@@ -393,8 +405,8 @@ impl<M: Machine2> RaftServer<M> {
 
         let promise = self.node.propose_command();
         if !promise.is_rejected() {
-            // TODO
-            // self.commands.insert(promise.log_position().index, command);
+            self.local_commands
+                .insert(promise.log_position().index, command);
         }
         promise
     }
