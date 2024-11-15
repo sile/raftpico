@@ -1,9 +1,14 @@
-use std::{collections::HashMap, net::SocketAddr, time::Duration};
+use std::{
+    collections::BinaryHeap,
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 
 use jsonlrpc::{ErrorCode, ErrorObject, ResponseObject};
 use jsonlrpc_mio::{From, RpcServer};
 use mio::{Events, Poll, Token};
-use raftbare::{CommitPromise, LogIndex, LogPosition, Node, NodeId};
+use raftbare::{Action, CommitPromise, LogEntries, Node, NodeId, Role};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -87,6 +92,35 @@ impl ErrorKind {
 }
 
 #[derive(Debug)]
+pub struct OngoingProposal {
+    promise: CommitPromise,
+    caller: Caller,
+}
+
+impl PartialEq for OngoingProposal {
+    fn eq(&self, other: &Self) -> bool {
+        self.promise.log_position() == other.promise.log_position()
+    }
+}
+
+impl Eq for OngoingProposal {}
+
+impl PartialOrd for OngoingProposal {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(other.cmp(self))
+    }
+}
+
+impl Ord for OngoingProposal {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let p0 = self.promise.log_position();
+        let p1 = other.promise.log_position();
+        (p1.term, p1.index).cmp(&(p0.term, p0.index))
+    }
+}
+
+// TODO: SystemMachine?
+#[derive(Debug)]
 pub struct ReplicatedState<M> {
     settings: ClusterSettings,
     machine: M,
@@ -98,8 +132,10 @@ pub struct RaftServer<M> {
     events: Events,
     rpc_server: RpcServer<Request>,
     node: Node,
+    rng: StdRng,
     storage: Option<FileStorage>,
-    //    ongoing_proposals: HashMap<LogPosition, Caller>,
+    election_timeout: Option<Instant>,
+    ongoing_proposals: BinaryHeap<OngoingProposal>,
     state: ReplicatedState<M>,
 }
 
@@ -114,7 +150,10 @@ impl<M: Machine2> RaftServer<M> {
             events,
             rpc_server,
             node: Node::start(UNINIT_NODE_ID),
+            rng: StdRng::from_entropy(),
             storage: None, // TODO
+            ongoing_proposals: BinaryHeap::new(),
+            election_timeout: None,
             state: ReplicatedState {
                 settings: ClusterSettings::default(),
                 machine,
@@ -139,16 +178,76 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        // I/O event handling.
         self.poller.poll(&mut self.events, timeout)?;
         for event in self.events.iter() {
             self.rpc_server.handle_event(&mut self.poller, event)?;
         }
 
+        // RPC request handling.
         while let Some((from, request)) = self.rpc_server.try_recv() {
             self.handle_request(from, request)?;
         }
 
+        // TODO: commit handling
+
+        // Raft action handling.
+        while let Some(action) = self.node.actions_mut().next() {
+            self.handle_action(action)?;
+        }
+
         Ok(())
+    }
+
+    fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
+        match action {
+            Action::SetElectionTimeout => self.handle_set_election_timeout_action(),
+            Action::SaveCurrentTerm => self.handle_save_current_term_action()?,
+            Action::SaveVotedFor => self.handle_save_voted_for_action()?,
+            Action::AppendLogEntries(entries) => self.handle_append_log_entries_action(entries)?,
+            Action::BroadcastMessage(_) => todo!(),
+            Action::SendMessage(_, _) => todo!(),
+            Action::InstallSnapshot(_) => todo!(),
+        }
+        Ok(())
+    }
+
+    fn handle_append_log_entries_action(&mut self, entries: LogEntries) -> std::io::Result<()> {
+        // TODO: stats
+        if let Some(storage) = &mut self.storage {
+            // storage.append_entries(&entries, &self.commands)?;
+            todo!()
+        }
+        Ok(())
+    }
+
+    fn handle_save_current_term_action(&mut self) -> std::io::Result<()> {
+        // TODO: stats
+        if let Some(storage) = &mut self.storage {
+            storage.save_current_term(self.node.current_term())?;
+        }
+        Ok(())
+    }
+
+    fn handle_save_voted_for_action(&mut self) -> std::io::Result<()> {
+        // TODO: stats
+        if let Some(storage) = &mut self.storage {
+            storage.save_voted_for(self.node.voted_for())?;
+        }
+        Ok(())
+    }
+
+    fn handle_set_election_timeout_action(&mut self) {
+        // TODO: self.stats.election_timeout_set_count += 1;
+
+        let min = self.state.settings.min_election_timeout;
+        let max = self.state.settings.max_election_timeout;
+        let timeout = match self.node.role() {
+            Role::Follower => max,
+            Role::Candidate => self.rng.gen_range(min..=max),
+            Role::Leader => min,
+        };
+        self.election_timeout = Some(Instant::now() + timeout);
     }
 
     fn handle_request(&mut self, from: From, request: Request) -> std::io::Result<()> {
@@ -181,6 +280,8 @@ impl<M: Machine2> RaftServer<M> {
             settings,
         };
         let promise = self.propose_command(command); // Always succeeds
+        self.ongoing_proposals
+            .push(OngoingProposal { promise, caller });
 
         Ok(())
     }

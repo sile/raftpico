@@ -75,6 +75,7 @@ mod tests {
     };
 
     use jsonlrpc::{RequestId, RpcClient};
+    use machine::Machine2;
     use request::{
         AddServerResult, CreateClusterResult, OutputResult, RemoveServerResult, Request, Response,
     };
@@ -92,6 +93,10 @@ mod tests {
             }
             ctx.output(self);
         }
+    }
+
+    impl Machine2 for usize {
+        type Input = usize;
     }
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(3);
@@ -124,6 +129,7 @@ mod tests {
         while !handle.is_finished() {
             server.poll(POLL_TIMEOUT).expect("poll() failed");
         }
+        assert!(handle.join().is_ok());
         assert!(server.node().is_some());
     }
 
