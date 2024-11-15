@@ -2,8 +2,9 @@ use std::{net::SocketAddr, time::Duration};
 
 use jsonlrpc::RequestId;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 
-use crate::{machine::Machine2, server2::ClusterSettings};
+use crate::server2::ClusterSettings;
 
 // TODO: delete
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,13 +26,13 @@ pub enum Command {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum Command2<M: Machine2> {
+pub enum Command2 {
     CreateCluster {
         seed_server_addr: SocketAddr,
         settings: ClusterSettings,
     },
     ApplyCommand {
-        input: M::Input,
+        input: Box<RawValue>,
     },
     ApplyQuery,
 }

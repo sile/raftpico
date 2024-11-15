@@ -17,7 +17,7 @@ mio = { version = "1.0.2", default-features=false, features = ["net", "os-poll"]
 raftbare = "0.1.1"
 rand = "0.8.5"
 serde = { version = "1.0.209", features = ["derive"] }
-serde_json = "1.0.127"
+serde_json = { version = "1.0.127", features = ["raw_value"] }
 
 [dev-dependencies]
 clap = { version = "4.5.16", features = ["derive"] }

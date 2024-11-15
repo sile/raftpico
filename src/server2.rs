@@ -275,7 +275,7 @@ impl<M: Machine2> RaftServer<M> {
 
         self.node.create_cluster(&[self.node.id()]); // Always succeeds
 
-        let command = Command2::<M>::CreateCluster {
+        let command = Command2::CreateCluster {
             seed_server_addr: self.listen_addr(),
             settings,
         };
@@ -290,7 +290,7 @@ impl<M: Machine2> RaftServer<M> {
         self.node.role().is_leader()
     }
 
-    fn propose_command(&mut self, command: Command2<M>) -> CommitPromise {
+    fn propose_command(&mut self, command: Command2) -> CommitPromise {
         if matches!(command, Command2::ApplyQuery) && self.is_leader() {
             if let Some(entries) = &self.node.actions().append_log_entries {
                 if !entries.is_empty() {
