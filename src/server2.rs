@@ -134,7 +134,7 @@ pub struct RaftServer<M> {
     node: Node,
     rng: StdRng,
     storage: Option<FileStorage>,
-    election_timeout: Option<Instant>,
+    election_abs_timeout: Instant,
     ongoing_proposals: BinaryHeap<OngoingProposal>,
     state: ReplicatedState<M>,
 }
@@ -153,7 +153,7 @@ impl<M: Machine2> RaftServer<M> {
             rng: StdRng::from_entropy(),
             storage: None, // TODO
             ongoing_proposals: BinaryHeap::new(),
-            election_timeout: None,
+            election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             state: ReplicatedState {
                 settings: ClusterSettings::default(),
                 machine,
@@ -179,7 +179,16 @@ impl<M: Machine2> RaftServer<M> {
 
     pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
         // I/O event handling.
-        self.poller.poll(&mut self.events, timeout)?;
+        let timeout = self
+            .election_abs_timeout
+            .saturating_duration_since(Instant::now())
+            .min(timeout.unwrap_or(Duration::MAX));
+        self.poller.poll(&mut self.events, Some(timeout))?;
+        if self.election_abs_timeout >= Instant::now() {
+            // TODO: stats per role
+            self.node.handle_election_timeout();
+        }
+
         for event in self.events.iter() {
             self.rpc_server.handle_event(&mut self.poller, event)?;
         }
@@ -247,7 +256,7 @@ impl<M: Machine2> RaftServer<M> {
             Role::Candidate => self.rng.gen_range(min..=max),
             Role::Leader => min,
         };
-        self.election_timeout = Some(Instant::now() + timeout);
+        self.election_abs_timeout = Instant::now() + timeout;
     }
 
     fn handle_request(&mut self, from: From, request: Request) -> std::io::Result<()> {
