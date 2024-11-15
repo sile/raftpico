@@ -7,7 +7,9 @@ use std::{
 use jsonlrpc::{ErrorCode, ErrorObject, ResponseObject};
 use jsonlrpc_mio::{From, RpcServer};
 use mio::{Events, Poll, Token};
-use raftbare::{Action, CommitPromise, LogEntries, LogIndex, Node, NodeId, Role};
+use raftbare::{
+    Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, Node, NodeId, Role, Term,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
@@ -201,7 +203,7 @@ impl<M: Machine2> RaftServer<M> {
         }
 
         // Commit handling.
-        self.handle_commit()?;
+        self.handle_committed_entries()?;
 
         // Raft action handling.
         while let Some(action) = self.node.actions_mut().next() {
@@ -211,11 +213,13 @@ impl<M: Machine2> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_commit(&mut self) -> std::io::Result<()> {
+    fn handle_committed_entries(&mut self) -> std::io::Result<()> {
+        self.handle_rejected_proposals()?;
+
         for index in
             (self.last_applied_index.get() + 1..=self.node.commit_index().get()).map(LogIndex::new)
         {
-            self.apply_committed_command(index)?;
+            self.handle_committed_entry(index)?;
         }
 
         if self.last_applied_index < self.node.commit_index() {
@@ -235,8 +239,55 @@ impl<M: Machine2> RaftServer<M> {
         Ok(())
     }
 
-    fn apply_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
+    fn handle_rejected_proposals(&mut self) -> std::io::Result<()> {
+        while let Some(proposal) = self.ongoing_proposals.peek() {
+            // TODO: remove `.clone()`
+            if !proposal.promise.clone().poll(&self.node).is_rejected() {
+                break;
+            }
+            todo!();
+        }
+        Ok(())
+    }
+
+    fn handle_committed_entry(&mut self, index: LogIndex) -> std::io::Result<()> {
+        let Some(entry) = self.node.log().entries().get_entry(index) else {
+            unreachable!("Bug: {index:?}");
+        };
+        match entry {
+            raftbare::LogEntry::Term(x) => self.handle_committed_term(x),
+            raftbare::LogEntry::ClusterConfig(x) => self.handle_committed_cluster_config(x),
+            raftbare::LogEntry::Command => self.handle_committed_command(index)?,
+        }
+
+        Ok(())
+    }
+
+    fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
         todo!()
+    }
+
+    fn handle_committed_term(&mut self, _term: Term) {
+        // TODO
+        // self.maybe_update_cluster_config();
+    }
+
+    fn handle_committed_cluster_config(&mut self, _config: ClusterConfig) {
+        // TODO: evict handling
+        // if c.is_joint_consensus() {
+        //     let mut evicted = Vec::new();
+        //     for m in self.members.values() {
+        //         if m.evicting && !c.new_voters.contains(&m.node_id) {
+        //             evicted.push(m.node_id);
+        //         }
+        //     }
+        //     for id in evicted {
+        //         self.handle_evicted(id)?;
+        //     }
+        // }
+
+        // TODO
+        // self.maybe_update_cluster_config();
     }
 
     fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
