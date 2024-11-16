@@ -610,6 +610,7 @@ impl Response<ProposeResult> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateClusterResult {
+    #[serde(default)] // TODO: remove
     pub success: bool,
 }
 

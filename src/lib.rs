@@ -74,13 +74,13 @@ mod tests {
         time::Duration,
     };
 
-    use jsonlrpc::{RequestId, RpcClient};
+    use jsonlrpc::{RequestId, ResponseObject, RpcClient};
     use machine::{Context2, Machine2};
     use request::{
         AddServerResult, CreateClusterResult, OutputResult, RemoveServerResult, Request, Response,
     };
     use serde::{Deserialize, Serialize};
-    use server2::RaftServer;
+    use server2::{ErrorKind, RaftServer};
 
     use super::*;
 
@@ -120,17 +120,15 @@ mod tests {
 
             // First call: OK
             let request = Request::create_cluster(request_id(0), None);
-            let response: Response<CreateClusterResult> =
-                client.call(&request).expect("call() failed");
-            let result = response.into_std_result().expect("error response");
-            assert_eq!(result.success, true);
+            let response: ResponseObject = client.call(&request).expect("call() failed");
+            let members = response.into_std_result().expect("error response");
+            assert_eq!(members.as_array().map(|x| x.len()), Some(1));
 
-            // // Second call: NG
-            // let request = Request::create_cluster(request_id(1), None);
-            // let response: Response<CreateClusterResult> =
-            //     client.call(&request).expect("call() failed");
-            // let result = response.into_std_result().expect("error response");
-            // assert_eq!(result.success, false);
+            // Second call: NG
+            let request = Request::create_cluster(request_id(1), None);
+            let response: ResponseObject = client.call(&request).expect("call() failed");
+            let error = response.into_std_result().expect_err("ok response");
+            assert_eq!(error.code, ErrorKind::ClusterAlreadyCreated.code());
         });
 
         while !handle.is_finished() {

@@ -161,7 +161,7 @@ impl<M: Machine2> SystemMachine<M> {
                 addr: seed_server_addr,
             },
         );
-        ctx.output(&());
+        ctx.output(&self.members.values().collect::<Vec<_>>());
     }
 }
 
