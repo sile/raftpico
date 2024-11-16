@@ -3,11 +3,12 @@ use std::net::SocketAddr;
 use jsonlrpc::{JsonRpcVersion, RequestId};
 use serde::{Deserialize, Serialize};
 
-use crate::server2::{ClusterSettings, Member};
+use crate::server2::{ClusterSettings, Commands, Member};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "method")]
 pub enum Request {
+    // External APIs
     CreateCluster {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
@@ -19,6 +20,17 @@ pub enum Request {
         id: RequestId,
         params: AddServerParams,
     },
+    // Internal messages
+    // Raft messages
+}
+
+impl Request {
+    pub(crate) fn from_raft_message(
+        message: raftbare::Message,
+        commands: &Commands,
+    ) -> Option<Self> {
+        todo!()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

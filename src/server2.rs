@@ -1,11 +1,11 @@
 use std::{
-    collections::{BTreeMap, BinaryHeap},
+    collections::{BTreeMap, BinaryHeap, HashMap},
     net::SocketAddr,
     time::{Duration, Instant},
 };
 
 use jsonlrpc::{ErrorCode, ErrorObject, ResponseObject};
-use jsonlrpc_mio::{From, RpcServer};
+use jsonlrpc_mio::{From, RpcClient, RpcServer};
 use mio::{Events, Poll, Token};
 use raftbare::{
     Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, Node, NodeId, Role, Term,
@@ -25,6 +25,9 @@ use crate::{
 
 const SERVER_TOKEN_MIN: Token = Token(usize::MAX / 2);
 const SERVER_TOKEN_MAX: Token = Token(usize::MAX);
+
+const CLIENT_TOKEN_MIN: Token = Token(0);
+const CLIENT_TOKEN_MAX: Token = Token(SERVER_TOKEN_MIN.0 - 1);
 
 const EVENTS_CAPACITY: usize = 1024;
 
@@ -156,7 +159,6 @@ pub struct Member {
 pub struct SystemMachine<M> {
     settings: ClusterSettings,
     members: BTreeMap<u64, Member>, // TODO: key type
-    next_node_id: u64,              // TODO: type
     user_machine: M,
 }
 
@@ -165,7 +167,6 @@ impl<M: Machine2> SystemMachine<M> {
         Self {
             settings: ClusterSettings::default(),
             members: BTreeMap::new(),
-            next_node_id: SEED_NODE_ID.get() + 1,
             user_machine,
         }
     }
@@ -194,9 +195,9 @@ impl<M: Machine2> SystemMachine<M> {
             return;
         }
 
-        let node_id = self.next_node_id;
-        self.next_node_id += 1;
-        self.members.insert(node_id, Member { addr: server_addr });
+        let node_id = NodeId::new(ctx.commit_index.get());
+        self.members
+            .insert(node_id.get(), Member { addr: server_addr });
         ctx.output(&CreateClusterOutput {
             members: self.members.values().cloned().collect(),
         });
@@ -226,6 +227,7 @@ pub struct RaftServer<M> {
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
+    rpc_clients: HashMap<NodeId, RpcClient>,
     node: Node,
     rng: StdRng,
     storage: Option<FileStorage>,
@@ -234,6 +236,7 @@ pub struct RaftServer<M> {
     local_commands: Commands,
     ongoing_proposals: BinaryHeap<OngoingProposal>,
     dirty_cluster_config: bool,
+    next_token: Token,
     machine: SystemMachine<M>,
 }
 
@@ -247,6 +250,7 @@ impl<M: Machine2> RaftServer<M> {
             poller,
             events,
             rpc_server,
+            rpc_clients: HashMap::new(),
             node: Node::start(UNINIT_NODE_ID),
             rng: StdRng::from_entropy(),
             storage: None, // TODO
@@ -255,6 +259,7 @@ impl<M: Machine2> RaftServer<M> {
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index: LogIndex::ZERO,
             dirty_cluster_config: false,
+            next_token: CLIENT_TOKEN_MIN,
             machine: SystemMachine::new(machine),
         })
     }
@@ -366,6 +371,8 @@ impl<M: Machine2> RaftServer<M> {
             InputKind::Command
         };
 
+        let member_change = matches!(command, Command2::AddServer { .. });
+
         // TODO: remove clone
         let caller = if self
             .ongoing_proposals
@@ -385,15 +392,36 @@ impl<M: Machine2> RaftServer<M> {
         };
         self.machine.apply(&mut ctx, command);
 
-        if !self.dirty_cluster_config {
-            self.dirty_cluster_config = matches!(command, Command2::AddServer { .. });
-        }
-
         if let Some(caller) = ctx.caller {
             self.reply_output(caller, ctx.output)?;
         }
 
+        if member_change {
+            self.dirty_cluster_config = true;
+            self.update_rpc_clients();
+        }
+
         Ok(())
+    }
+
+    fn update_rpc_clients(&mut self) {
+        for (&id, member) in &self.machine.members {
+            let id = NodeId::new(id);
+            if self.rpc_clients.contains_key(&id) {
+                continue;
+            }
+
+            // TODO: conflict check or leave note comment
+            let token = self.next_token;
+            if self.next_token == CLIENT_TOKEN_MAX {
+                self.next_token = CLIENT_TOKEN_MIN;
+            } else {
+                self.next_token.0 += 1;
+            }
+
+            let rpc_client = RpcClient::new(token, member.addr);
+            self.rpc_clients.insert(id, rpc_client);
+        }
     }
 
     fn reply_output(
@@ -480,16 +508,31 @@ impl<M: Machine2> RaftServer<M> {
             Action::SaveCurrentTerm => self.handle_save_current_term_action()?,
             Action::SaveVotedFor => self.handle_save_voted_for_action()?,
             Action::AppendLogEntries(entries) => self.handle_append_log_entries_action(entries)?,
-            Action::BroadcastMessage(_) => todo!(),
+            Action::BroadcastMessage(message) => self.handle_broadcast_message(message)?,
             Action::SendMessage(_, _) => todo!(),
             Action::InstallSnapshot(_) => todo!(),
         }
         Ok(())
     }
 
-    fn handle_append_log_entries_action(&mut self, entries: LogEntries) -> std::io::Result<()> {
+    fn handle_broadcast_message(&mut self, message: raftbare::Message) -> std::io::Result<()> {
+        let request = Request::from_raft_message(message, &self.local_commands)
+            .ok_or(std::io::ErrorKind::Other)?;
+        let request = serde_json::value::to_raw_value(&request)?;
+        for (&id, client) in &mut self.rpc_clients {
+            if id == self.node.id() {
+                continue;
+            }
+            if let Err(e) = client.send(&mut self.poller, &request) {
+                todo!("{e:?}");
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_append_log_entries_action(&mut self, _entries: LogEntries) -> std::io::Result<()> {
         // TODO: stats
-        if let Some(storage) = &mut self.storage {
+        if let Some(_storage) = &mut self.storage {
             // storage.append_entries(&entries, &self.commands)?;
             todo!()
         }
