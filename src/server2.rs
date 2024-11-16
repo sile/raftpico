@@ -17,7 +17,7 @@ use serde_json::value::RawValue;
 use crate::{
     command::{Caller, Command2},
     machine::{Context2, Machine2},
-    message::Request,
+    message::{AddServerParams, CreateClusterOutput, Request},
     request::CreateClusterParams,
     storage::FileStorage,
     InputKind,
@@ -127,7 +127,7 @@ impl Ord for OngoingProposal {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Member {
     pub addr: SocketAddr,
 }
@@ -161,7 +161,9 @@ impl<M: Machine2> SystemMachine<M> {
                 addr: seed_server_addr,
             },
         );
-        ctx.output(&self.members.values().collect::<Vec<_>>());
+        ctx.output(&CreateClusterOutput {
+            members: self.members.values().cloned().collect(),
+        });
     }
 }
 
@@ -454,7 +456,18 @@ impl<M: Machine2> RaftServer<M> {
             Request::CreateCluster { id, params, .. } => {
                 self.handle_create_cluster_request(Caller::new(from, id), params)
             }
+            Request::AddServer { id, params, .. } => {
+                self.handle_add_server_request(Caller::new(from, id), params)
+            }
         }
+    }
+
+    fn handle_add_server_request(
+        &mut self,
+        caller: Caller,
+        params: AddServerParams,
+    ) -> std::io::Result<()> {
+        todo!()
     }
 
     fn handle_create_cluster_request(

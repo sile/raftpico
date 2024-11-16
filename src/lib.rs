@@ -76,6 +76,7 @@ mod tests {
 
     use jsonlrpc::{RequestId, ResponseObject, RpcClient};
     use machine::{Context2, Machine2};
+    use message::CreateClusterOutput;
     use request::{
         AddServerResult, CreateClusterResult, OutputResult, RemoveServerResult, Request, Response,
     };
@@ -140,13 +141,13 @@ mod tests {
 
     #[test]
     fn add_and_remove_server() {
-        let mut server0 = Server::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
         assert!(server0.node().is_none());
 
         // Create a cluster.
-        let server_addr0 = server0.addr();
+        let server_addr0 = server0.listen_addr();
         let handle = std::thread::spawn(move || {
-            rpc::<CreateClusterResult>(server_addr0, Request::create_cluster(request_id(0), None))
+            rpc::<CreateClusterOutput>(server_addr0, Request::create_cluster(request_id(0), None))
         });
         while !handle.is_finished() {
             server0.poll(POLL_TIMEOUT).expect("poll() failed");
@@ -532,7 +533,9 @@ mod tests {
         T: for<'de> Deserialize<'de>,
     {
         let mut client = RpcClient::new(connect(server_addr));
-        let response: Response<T> = client.call(&request).expect("call() failed");
+        let response: serde_json::Value = client.call(&request).expect("call() failed");
+        let response: Response<T> =
+            serde_json::from_value(response.clone()).unwrap_or_else(|e| panic!("{e}: {response}"));
         response.into_std_result().expect("error response")
     }
 
