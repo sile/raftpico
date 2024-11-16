@@ -231,6 +231,7 @@ pub struct RaftServer<M> {
     last_applied_index: LogIndex,
     local_commands: Commands,
     ongoing_proposals: BinaryHeap<OngoingProposal>,
+    dirty_cluster_config: bool,
     machine: SystemMachine<M>,
 }
 
@@ -251,6 +252,7 @@ impl<M: Machine2> RaftServer<M> {
             ongoing_proposals: BinaryHeap::new(),
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index: LogIndex::ZERO,
+            dirty_cluster_config: false,
             machine: SystemMachine::new(machine),
         })
     }
@@ -349,6 +351,7 @@ impl<M: Machine2> RaftServer<M> {
             raftbare::LogEntry::ClusterConfig(x) => self.handle_committed_cluster_config(x),
             raftbare::LogEntry::Command => self.handle_committed_command(index)?,
         }
+        self.maybe_update_cluster_config();
 
         Ok(())
     }
@@ -380,9 +383,14 @@ impl<M: Machine2> RaftServer<M> {
         };
         self.machine.apply(&mut ctx, command);
 
+        if !self.dirty_cluster_config {
+            self.dirty_cluster_config = matches!(command, Command2::AddServer { .. });
+        }
+
         if let Some(caller) = ctx.caller {
             self.reply_output(caller, ctx.output)?;
         }
+
         Ok(())
     }
 
@@ -408,12 +416,48 @@ impl<M: Machine2> RaftServer<M> {
         Ok(())
     }
 
-    fn handle_committed_term(&mut self, _term: Term) {
-        // TODO
-        // self.maybe_update_cluster_config();
+    fn maybe_update_cluster_config(&mut self) {
+        if !self.dirty_cluster_config {
+            return;
+        }
+
+        if !self.is_leader() {
+            return;
+        }
+
+        if self.node.config().is_joint_consensus() {
+            return;
+        }
+
+        let mut adding = Vec::new();
+        let mut removing = Vec::new();
+        for (id, _m) in &self.machine.members {
+            let id = NodeId::new(*id);
+            // TODO: if !m.evicting && !self.node.config().voters.contains(id) {
+            if !self.node.config().voters.contains(&id) {
+                adding.push(id);
+            }
+        }
+        for &id in &self.node.config().voters {
+            // TODO: if self.members.get(id).map_or(true, |m| m.evicting) {
+            removing.push(id);
+        }
+        if adding.is_empty() && removing.is_empty() {
+            self.dirty_cluster_config = false;
+            return;
+        }
+
+        let new_config = self.node.config().to_joint_consensus(&adding, &removing);
+        self.node.propose_config(new_config); // Always succeeds
     }
 
-    fn handle_committed_cluster_config(&mut self, _config: ClusterConfig) {
+    fn handle_committed_term(&mut self, _term: Term) {
+        // TOOD: update dirty_cluster_config flag
+    }
+
+    fn handle_committed_cluster_config(&mut self, config: ClusterConfig) {
+        dbg!(&config);
+
         // TODO: evict handling
         // if c.is_joint_consensus() {
         //     let mut evicted = Vec::new();
@@ -426,9 +470,6 @@ impl<M: Machine2> RaftServer<M> {
         //         self.handle_evicted(id)?;
         //     }
         // }
-
-        // TODO
-        // self.maybe_update_cluster_config();
     }
 
     fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
