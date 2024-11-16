@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BinaryHeap, HashMap},
+    collections::{BTreeMap, BinaryHeap, HashMap, HashSet},
     net::SocketAddr,
     time::{Duration, Instant},
 };
@@ -227,7 +227,7 @@ pub struct RaftServer<M> {
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
-    rpc_clients: HashMap<NodeId, RpcClient>,
+    rpc_clients: HashMap<Token, RpcClient>,
     node: Node,
     rng: StdRng,
     storage: Option<FileStorage>,
@@ -293,7 +293,14 @@ impl<M: Machine2> RaftServer<M> {
         }
 
         for event in self.events.iter() {
-            self.rpc_server.handle_event(&mut self.poller, event)?;
+            if let Some(client) = self.rpc_clients.get_mut(&event.token()) {
+                client.handle_event(&mut self.poller, event)?;
+                while let Some(response) = client.try_recv() {
+                    todo!("{response:?}");
+                }
+            } else {
+                self.rpc_server.handle_event(&mut self.poller, event)?;
+            }
         }
 
         // RPC request handling.
@@ -405,9 +412,19 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     fn update_rpc_clients(&mut self) {
-        for (&id, member) in &self.machine.members {
-            let id = NodeId::new(id);
-            if self.rpc_clients.contains_key(&id) {
+        // Removed server handling.
+        let addrs = self
+            .machine
+            .members
+            .values()
+            .map(|m| m.addr)
+            .collect::<HashSet<_>>();
+        self.rpc_clients
+            .retain(|_, client| addrs.contains(&client.server_addr()));
+
+        // Added server handling.
+        for member in self.machine.members.values() {
+            if member.addr == self.listen_addr() {
                 continue;
             }
 
@@ -420,7 +437,7 @@ impl<M: Machine2> RaftServer<M> {
             }
 
             let rpc_client = RpcClient::new(token, member.addr);
-            self.rpc_clients.insert(id, rpc_client);
+            self.rpc_clients.insert(token, rpc_client);
         }
     }
 
@@ -519,11 +536,9 @@ impl<M: Machine2> RaftServer<M> {
         let request = Request::from_raft_message(message, &self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
         let request = serde_json::value::to_raw_value(&request)?;
-        for (&id, client) in &mut self.rpc_clients {
-            if id == self.node.id() {
-                continue;
-            }
+        for client in self.rpc_clients.values_mut() {
             if let Err(e) = client.send(&mut self.poller, &request) {
+                // Not a critial error.
                 todo!("{e:?}");
             }
         }
