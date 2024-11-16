@@ -98,9 +98,9 @@ mod tests {
     impl Machine2 for usize {
         type Input = usize;
 
-        fn apply(&mut self, ctx: &mut Context2, input: Self::Input) {
+        fn apply(&mut self, ctx: &mut Context2, input: &Self::Input) {
             if ctx.kind.is_command() {
-                *self += input;
+                *self += *input;
             }
             ctx.output(self);
         }

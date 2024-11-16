@@ -12,6 +12,7 @@ use raftbare::{
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 
 use crate::{
     command::{Caller, Command2},
@@ -80,6 +81,8 @@ impl TryFrom<CreateClusterParams> for ClusterSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ErrorKind {
     ClusterAlreadyCreated = 1,
+    NoMachineOutput = 2,
+    MalformedMachineOutput = 3,
 }
 
 impl ErrorKind {
@@ -90,6 +93,8 @@ impl ErrorKind {
     pub const fn message(&self) -> &'static str {
         match self {
             ErrorKind::ClusterAlreadyCreated => "Cluster already created",
+            ErrorKind::NoMachineOutput => "No machine output",
+            ErrorKind::MalformedMachineOutput => "Malformed machin",
         }
     }
 }
@@ -122,11 +127,18 @@ impl Ord for OngoingProposal {
     }
 }
 
-// TODO: SystemMachine?
-#[derive(Debug)]
-pub struct ReplicatedState<M> {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SystemMachine<M> {
     settings: ClusterSettings,
-    machine: M,
+    user_machine: M,
+}
+
+impl<M: Machine2> Machine2 for SystemMachine<M> {
+    type Input = Command2;
+
+    fn apply(&mut self, ctx: &mut Context2, input: &Self::Input) {
+        todo!()
+    }
 }
 
 pub type Commands = BTreeMap<LogIndex, Command2>;
@@ -143,7 +155,7 @@ pub struct RaftServer<M> {
     last_applied_index: LogIndex,
     local_commands: Commands,
     ongoing_proposals: BinaryHeap<OngoingProposal>,
-    state: ReplicatedState<M>,
+    machine: SystemMachine<M>,
 }
 
 impl<M: Machine2> RaftServer<M> {
@@ -163,9 +175,9 @@ impl<M: Machine2> RaftServer<M> {
             ongoing_proposals: BinaryHeap::new(),
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index: LogIndex::ZERO,
-            state: ReplicatedState {
+            machine: SystemMachine {
                 settings: ClusterSettings::default(),
-                machine,
+                user_machine: machine,
             },
         })
     }
@@ -179,11 +191,11 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     pub fn machine(&self) -> &M {
-        &self.state.machine
+        &self.machine.user_machine
     }
 
     pub fn machine_mut(&mut self) -> &mut M {
-        &mut self.state.machine
+        &mut self.machine.user_machine
     }
 
     pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
@@ -293,14 +305,38 @@ impl<M: Machine2> RaftServer<M> {
             output: None,
             caller,
         };
-        match command {
-            Command2::CreateCluster {
-                seed_server_addr,
-                settings,
-            } => todo!(),
-            Command2::ApplyCommand { input } => todo!(),
-            Command2::ApplyQuery => todo!(),
+        self.machine.apply(&mut ctx, command);
+
+        if let Some(caller) = ctx.caller {
+            self.reply_output(caller, ctx.output)?;
         }
+        Ok(())
+    }
+
+    fn reply_output(
+        &mut self,
+        caller: Caller,
+        output: Option<serde_json::Result<Box<RawValue>>>,
+    ) -> std::io::Result<()> {
+        let Some(output) = output else {
+            self.reply_error(caller, ErrorKind::NoMachineOutput, None)?;
+            return Ok(());
+        };
+
+        match output {
+            Err(e) => {
+                self.reply_error(
+                    caller,
+                    ErrorKind::MalformedMachineOutput,
+                    Some(serde_json::json!({"reason": e.to_string()})),
+                )?;
+            }
+            Ok(value) => {
+                self.reply_ok(caller, value)?;
+            }
+        }
+
+        Ok(())
     }
 
     fn handle_committed_term(&mut self, _term: Term) {
@@ -367,8 +403,8 @@ impl<M: Machine2> RaftServer<M> {
     fn handle_set_election_timeout_action(&mut self) {
         // TODO: self.stats.election_timeout_set_count += 1;
 
-        let min = self.state.settings.min_election_timeout;
-        let max = self.state.settings.max_election_timeout;
+        let min = self.machine.settings.min_election_timeout;
+        let max = self.machine.settings.max_election_timeout;
         let timeout = match self.node.role() {
             Role::Follower => max,
             Role::Candidate => self.rng.gen_range(min..=max),
@@ -433,6 +469,17 @@ impl<M: Machine2> RaftServer<M> {
                 .insert(promise.log_position().index, command);
         }
         promise
+    }
+
+    fn reply_ok<T: Serialize>(&mut self, caller: Caller, value: T) -> std::io::Result<()> {
+        let response = serde_json::json!({
+            "jsonrpc": jsonlrpc::JsonRpcVersion::V2,
+            "id": caller.request_id,
+            "result": value
+        });
+        self.rpc_server
+            .reply(&mut self.poller, caller.from, &response)?;
+        Ok(())
     }
 
     fn reply_error(

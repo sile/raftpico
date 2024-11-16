@@ -7,7 +7,7 @@ use crate::command::Caller;
 pub trait Machine2: Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
 
-    fn apply(&mut self, ctx: &mut Context2, input: Self::Input);
+    fn apply(&mut self, ctx: &mut Context2, input: &Self::Input);
 }
 
 pub trait Machine: Serialize + for<'de> Deserialize<'de> {
