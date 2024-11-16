@@ -31,6 +31,9 @@ pub enum Command2 {
         seed_server_addr: SocketAddr,
         settings: ClusterSettings,
     },
+    AddServer {
+        server_addr: SocketAddr,
+    },
     ApplyCommand {
         input: Box<RawValue>,
     },

@@ -121,9 +121,10 @@ mod tests {
 
             // First call: OK
             let request = Request::create_cluster(request_id(0), None);
-            let response: ResponseObject = client.call(&request).expect("call() failed");
-            let members = response.into_std_result().expect("error response");
-            assert_eq!(members.as_array().map(|x| x.len()), Some(1));
+            let response: Response<CreateClusterOutput> =
+                client.call(&request).expect("call() failed");
+            let output = response.into_std_result().expect("error response");
+            assert_eq!(output.members.len(), 1);
 
             // Second call: NG
             let request = Request::create_cluster(request_id(1), None);

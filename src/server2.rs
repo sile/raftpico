@@ -97,6 +97,22 @@ impl ErrorKind {
             ErrorKind::MalformedMachineOutput => "Malformed machin",
         }
     }
+
+    pub fn error_object(self) -> ErrorObject {
+        ErrorObject {
+            code: self.code(),
+            message: self.message().to_owned(),
+            data: None,
+        }
+    }
+
+    pub fn error_object_with_reason<T: std::fmt::Display>(self, reason: T) -> ErrorObject {
+        ErrorObject {
+            code: self.code(),
+            message: self.message().to_owned(),
+            data: Some(serde_json::json!({"reason": reason.to_string()})),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -165,6 +181,12 @@ impl<M: Machine2> SystemMachine<M> {
             members: self.members.values().cloned().collect(),
         });
     }
+
+    fn apply_add_server_command(&mut self, ctx: &mut Context2, server_addr: SocketAddr) {
+        if self.members.values().any(|m| m.addr == server_addr) {
+            return;
+        }
+    }
 }
 
 impl<M: Machine2> Machine2 for SystemMachine<M> {
@@ -176,6 +198,7 @@ impl<M: Machine2> Machine2 for SystemMachine<M> {
                 seed_server_addr,
                 settings,
             } => self.apply_create_cluster_command(ctx, *seed_server_addr, settings),
+            Command2::AddServer { server_addr } => self.apply_add_server_command(ctx, *server_addr),
             Command2::ApplyCommand { input } => todo!(),
             Command2::ApplyQuery => todo!(),
         }
@@ -354,20 +377,16 @@ impl<M: Machine2> RaftServer<M> {
     fn reply_output(
         &mut self,
         caller: Caller,
-        output: Option<serde_json::Result<Box<RawValue>>>,
+        output: Option<Result<Box<RawValue>, ErrorObject>>,
     ) -> std::io::Result<()> {
         let Some(output) = output else {
-            self.reply_error(caller, ErrorKind::NoMachineOutput, None)?;
+            self.reply_error(caller, ErrorKind::NoMachineOutput.error_object())?;
             return Ok(());
         };
 
         match output {
             Err(e) => {
-                self.reply_error(
-                    caller,
-                    ErrorKind::MalformedMachineOutput,
-                    Some(serde_json::json!({"reason": e.to_string()})),
-                )?;
+                self.reply_error(caller, e)?;
             }
             Ok(value) => {
                 self.reply_ok(caller, value)?;
@@ -467,7 +486,15 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         params: AddServerParams,
     ) -> std::io::Result<()> {
-        todo!()
+        assert!(self.is_leader()); // TODO: remote handling
+        let command = Command2::AddServer {
+            server_addr: params.server_addr,
+        };
+        let promise = self.propose_command(command); // Always succeeds
+        self.ongoing_proposals
+            .push(OngoingProposal { promise, caller });
+
+        Ok(())
     }
 
     fn handle_create_cluster_request(
@@ -476,7 +503,7 @@ impl<M: Machine2> RaftServer<M> {
         settings: ClusterSettings,
     ) -> std::io::Result<()> {
         if self.node().is_some() {
-            self.reply_error(caller, ErrorKind::ClusterAlreadyCreated, None)?;
+            self.reply_error(caller, ErrorKind::ClusterAlreadyCreated.error_object())?;
             return Ok(());
         }
 
@@ -531,17 +558,7 @@ impl<M: Machine2> RaftServer<M> {
         Ok(())
     }
 
-    fn reply_error(
-        &mut self,
-        caller: Caller,
-        kind: ErrorKind,
-        data: Option<serde_json::Value>,
-    ) -> std::io::Result<()> {
-        let error = ErrorObject {
-            code: kind.code(),
-            message: kind.message().to_owned(),
-            data,
-        };
+    fn reply_error(&mut self, caller: Caller, error: ErrorObject) -> std::io::Result<()> {
         let response = ResponseObject::Err {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             error,

@@ -1,8 +1,9 @@
+use jsonlrpc::ErrorObject;
 use raftbare::{LogIndex, Node};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-use crate::command::Caller;
+use crate::{command::Caller, server2::ErrorKind};
 
 pub trait Machine2: Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
@@ -22,14 +23,27 @@ pub struct Context2<'a> {
     pub node: &'a Node,
     pub commit_index: LogIndex,
 
-    pub(crate) output: Option<serde_json::Result<Box<RawValue>>>,
+    pub(crate) output: Option<Result<Box<RawValue>, ErrorObject>>,
     pub(crate) caller: Option<Caller>,
 }
 
 impl<'a> Context2<'a> {
     pub fn output<T: Serialize>(&mut self, output: &T) {
         if self.caller.is_some() {
-            self.output = Some(serde_json::value::to_raw_value(output));
+            match serde_json::value::to_raw_value(output) {
+                Ok(t) => self.output = Some(Ok(t)),
+                Err(e) => {
+                    self.output = Some(Err(
+                        ErrorKind::MalformedMachineOutput.error_object_with_reason(e)
+                    ))
+                }
+            }
+        }
+    }
+
+    pub fn error(&mut self, error: ErrorObject) {
+        if self.caller.is_some() {
+            self.output = Some(Err(error));
         }
     }
 }
