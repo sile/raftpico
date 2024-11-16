@@ -17,7 +17,7 @@ use serde_json::value::RawValue;
 use crate::{
     command::{Caller, Command2},
     machine::{Context2, Machine2},
-    message::{AddServerParams, CreateClusterOutput, Request},
+    message::{AddServerParams, AppendEntriesParams, CreateClusterOutput, Request},
     request::CreateClusterParams,
     storage::FileStorage,
     InputKind,
@@ -592,12 +592,21 @@ impl<M: Machine2> RaftServer<M> {
             Request::AddServer { id, params, .. } => {
                 self.handle_add_server_request(Caller::new(from, id), params)
             }
-            Request::AppendEntries {
-                jsonrpc,
-                id,
-                params,
-            } => todo!(),
+            Request::AppendEntries { id, params, .. } => {
+                self.handle_append_entries_request(Caller::new(from, id), params)
+            }
         }
+    }
+
+    fn handle_append_entries_request(
+        &mut self,
+        caller: Caller,
+        params: AppendEntriesParams,
+    ) -> std::io::Result<()> {
+        let message = params.into_raft_message(&caller, &mut self.local_commands);
+        self.node.handle_message(message);
+        // TODO: temparary save caller for reply
+        Ok(())
     }
 
     fn handle_add_server_request(

@@ -5,12 +5,9 @@ use raftbare::{LogEntries, LogIndex, MessageHeader};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    command::LogEntry,
+    command::{Caller, LogEntry},
     server2::{ClusterSettings, Commands, Member},
 };
-
-// TODO: note doc
-const RAFT_REQUEST_ID: RequestId = RequestId::Number(-1);
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "method")]
@@ -54,7 +51,7 @@ impl Request {
                 let params = AppendEntriesParams::new(header, commit_index, entries, commands)?;
                 Some(Self::AppendEntries {
                     jsonrpc: JsonRpcVersion::V2,
-                    id: RAFT_REQUEST_ID,
+                    id: RequestId::Number(header.seqno.get() as i64),
                     params,
                 })
             }
@@ -69,7 +66,6 @@ impl Request {
 pub struct AppendEntriesParams {
     pub from: u64,
     pub term: u64,
-    pub seqno: u64,
     pub commit_index: u64,
     pub prev_term: u64,
     pub prev_log_index: u64,
@@ -86,7 +82,6 @@ impl AppendEntriesParams {
         Some(Self {
             from: header.from.get(),
             term: header.term.get(),
-            seqno: header.seqno.get(),
             commit_index: commit_index.get(),
             prev_term: entries.prev_position().term.get(),
             prev_log_index: entries.prev_position().index.get(),
@@ -95,6 +90,10 @@ impl AppendEntriesParams {
                 .map(|(p, x)| LogEntry::new(p.index, &x, commands))
                 .collect::<Option<Vec<_>>>()?,
         })
+    }
+
+    pub fn into_raft_message(self, caller: &Caller, commands: &mut Commands) -> raftbare::Message {
+        todo!()
     }
 }
 
