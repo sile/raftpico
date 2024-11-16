@@ -591,6 +591,11 @@ impl<M: Machine2> RaftServer<M> {
             Request::AddServer { id, params, .. } => {
                 self.handle_add_server_request(Caller::new(from, id), params)
             }
+            Request::AppendEntries {
+                jsonrpc,
+                id,
+                params,
+            } => todo!(),
         }
     }
 
