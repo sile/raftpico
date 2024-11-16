@@ -33,9 +33,7 @@ impl<'a> Context2<'a> {
             match serde_json::value::to_raw_value(output) {
                 Ok(t) => self.output = Some(Ok(t)),
                 Err(e) => {
-                    self.output = Some(Err(
-                        ErrorKind::MalformedMachineOutput.error_object_with_reason(e)
-                    ))
+                    self.output = Some(Err(ErrorKind::MalformedMachineOutput.object_with_reason(e)))
                 }
             }
         }

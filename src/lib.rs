@@ -76,7 +76,7 @@ mod tests {
 
     use jsonlrpc::{RequestId, ResponseObject, RpcClient};
     use machine::{Context2, Machine2};
-    use message::CreateClusterOutput;
+    use message::{AddServerOutput, CreateClusterOutput};
     use request::{
         AddServerResult, CreateClusterResult, OutputResult, RemoveServerResult, Request, Response,
     };
@@ -159,11 +159,11 @@ mod tests {
         let mut server1 = Server::start(auto_addr(), 0).expect("start() failed");
         let server_addr1 = server1.addr();
         let handle = std::thread::spawn(move || {
-            let result: AddServerResult = rpc(
+            let output: AddServerOutput = rpc(
                 server_addr0,
                 Request::add_server(request_id(0), server_addr1),
             );
-            assert_eq!(result.error, None);
+            assert_eq!(output.members.len(), 2);
 
             // TODO: call machine.on_event(Event::ServerJoined)
             std::thread::sleep(Duration::from_millis(500));

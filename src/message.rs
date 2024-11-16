@@ -31,3 +31,8 @@ pub struct AddServerParams {
 pub struct CreateClusterOutput {
     pub members: Vec<Member>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddServerOutput {
+    pub members: Vec<Member>,
+}

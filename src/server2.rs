@@ -81,8 +81,9 @@ impl TryFrom<CreateClusterParams> for ClusterSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ErrorKind {
     ClusterAlreadyCreated = 1,
-    NoMachineOutput = 2,
-    MalformedMachineOutput = 3,
+    NoMachineOutput,
+    MalformedMachineOutput,
+    ServerAlreadyAdded,
 }
 
 impl ErrorKind {
@@ -95,10 +96,11 @@ impl ErrorKind {
             ErrorKind::ClusterAlreadyCreated => "Cluster already created",
             ErrorKind::NoMachineOutput => "No machine output",
             ErrorKind::MalformedMachineOutput => "Malformed machin",
+            ErrorKind::ServerAlreadyAdded => "Server already added",
         }
     }
 
-    pub fn error_object(self) -> ErrorObject {
+    pub fn object(self) -> ErrorObject {
         ErrorObject {
             code: self.code(),
             message: self.message().to_owned(),
@@ -106,7 +108,7 @@ impl ErrorKind {
         }
     }
 
-    pub fn error_object_with_reason<T: std::fmt::Display>(self, reason: T) -> ErrorObject {
+    pub fn object_with_reason<T: std::fmt::Display>(self, reason: T) -> ErrorObject {
         ErrorObject {
             code: self.code(),
             message: self.message().to_owned(),
@@ -152,6 +154,7 @@ pub struct Member {
 pub struct SystemMachine<M> {
     settings: ClusterSettings,
     members: BTreeMap<u64, Member>, // TODO: key type
+    next_node_id: u64,              // TODO: type
     user_machine: M,
 }
 
@@ -160,6 +163,7 @@ impl<M: Machine2> SystemMachine<M> {
         Self {
             settings: ClusterSettings::default(),
             members: BTreeMap::new(),
+            next_node_id: SEED_NODE_ID.get() + 1,
             user_machine,
         }
     }
@@ -184,8 +188,16 @@ impl<M: Machine2> SystemMachine<M> {
 
     fn apply_add_server_command(&mut self, ctx: &mut Context2, server_addr: SocketAddr) {
         if self.members.values().any(|m| m.addr == server_addr) {
+            ctx.error(ErrorKind::ServerAlreadyAdded.object());
             return;
         }
+
+        let node_id = self.next_node_id;
+        self.next_node_id += 1;
+        self.members.insert(node_id, Member { addr: server_addr });
+        ctx.output(&CreateClusterOutput {
+            members: self.members.values().cloned().collect(),
+        });
     }
 }
 
@@ -380,7 +392,7 @@ impl<M: Machine2> RaftServer<M> {
         output: Option<Result<Box<RawValue>, ErrorObject>>,
     ) -> std::io::Result<()> {
         let Some(output) = output else {
-            self.reply_error(caller, ErrorKind::NoMachineOutput.error_object())?;
+            self.reply_error(caller, ErrorKind::NoMachineOutput.object())?;
             return Ok(());
         };
 
@@ -503,7 +515,7 @@ impl<M: Machine2> RaftServer<M> {
         settings: ClusterSettings,
     ) -> std::io::Result<()> {
         if self.node().is_some() {
-            self.reply_error(caller, ErrorKind::ClusterAlreadyCreated.error_object())?;
+            self.reply_error(caller, ErrorKind::ClusterAlreadyCreated.object())?;
             return Ok(());
         }
 
