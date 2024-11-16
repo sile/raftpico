@@ -84,6 +84,7 @@ pub enum ErrorKind {
     NoMachineOutput,
     MalformedMachineOutput,
     ServerAlreadyAdded,
+    NotClusterMember,
 }
 
 impl ErrorKind {
@@ -97,6 +98,7 @@ impl ErrorKind {
             ErrorKind::NoMachineOutput => "No machine output",
             ErrorKind::MalformedMachineOutput => "Malformed machin",
             ErrorKind::ServerAlreadyAdded => "Server already added",
+            ErrorKind::NotClusterMember => "Not a cluster member",
         }
     }
 
@@ -539,6 +541,11 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         params: AddServerParams,
     ) -> std::io::Result<()> {
+        if self.node().is_none() {
+            self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
+            return Ok(());
+        }
+
         assert!(self.is_leader()); // TODO: remote handling
         let command = Command2::AddServer {
             server_addr: params.server_addr,
