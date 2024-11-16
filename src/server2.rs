@@ -264,6 +264,7 @@ impl<M: Machine2> RaftServer<M> {
         })
     }
 
+    // TODO: rename (server_addr for naming consistency)
     pub fn listen_addr(&self) -> SocketAddr {
         self.rpc_server.listen_addr()
     }
@@ -296,7 +297,7 @@ impl<M: Machine2> RaftServer<M> {
             if let Some(client) = self.rpc_clients.get_mut(&event.token()) {
                 client.handle_event(&mut self.poller, event)?;
                 while let Some(response) = client.try_recv() {
-                    todo!("{response:?}");
+                    todo!("[{}] {response:?}", self.node.id().get());
                 }
             } else {
                 self.rpc_server.handle_event(&mut self.poller, event)?;

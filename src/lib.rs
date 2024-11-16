@@ -156,8 +156,8 @@ mod tests {
         assert!(server0.node().is_some());
 
         // Add a server to the cluster.
-        let mut server1 = Server::start(auto_addr(), 0).expect("start() failed");
-        let server_addr1 = server1.addr();
+        let mut server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server_addr1 = server1.listen_addr();
         let handle = std::thread::spawn(move || {
             let output: AddServerOutput = rpc(
                 server_addr0,
