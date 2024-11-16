@@ -128,16 +128,55 @@ impl Ord for OngoingProposal {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct Member {
+    pub addr: SocketAddr,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SystemMachine<M> {
     settings: ClusterSettings,
+    members: BTreeMap<u64, Member>, // TODO: key type
     user_machine: M,
+}
+
+impl<M: Machine2> SystemMachine<M> {
+    fn new(user_machine: M) -> Self {
+        Self {
+            settings: ClusterSettings::default(),
+            members: BTreeMap::new(),
+            user_machine,
+        }
+    }
+
+    fn apply_create_cluster_command(
+        &mut self,
+        ctx: &mut Context2,
+        seed_server_addr: SocketAddr,
+        settings: &ClusterSettings,
+    ) {
+        self.settings = settings.clone();
+        self.members.insert(
+            SEED_NODE_ID.get(),
+            Member {
+                addr: seed_server_addr,
+            },
+        );
+        ctx.output(&());
+    }
 }
 
 impl<M: Machine2> Machine2 for SystemMachine<M> {
     type Input = Command2;
 
     fn apply(&mut self, ctx: &mut Context2, input: &Self::Input) {
-        todo!()
+        match input {
+            Command2::CreateCluster {
+                seed_server_addr,
+                settings,
+            } => self.apply_create_cluster_command(ctx, *seed_server_addr, settings),
+            Command2::ApplyCommand { input } => todo!(),
+            Command2::ApplyQuery => todo!(),
+        }
     }
 }
 
@@ -175,10 +214,7 @@ impl<M: Machine2> RaftServer<M> {
             ongoing_proposals: BinaryHeap::new(),
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index: LogIndex::ZERO,
-            machine: SystemMachine {
-                settings: ClusterSettings::default(),
-                user_machine: machine,
-            },
+            machine: SystemMachine::new(machine),
         })
     }
 
