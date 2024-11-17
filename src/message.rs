@@ -26,7 +26,11 @@ pub enum Request {
         id: RequestId,
         params: AddServerParams,
     },
-    // Internal messages
+    // Internal APIs
+    Propose {
+        jsonrpc: JsonRpcVersion,
+        params: ProposeParams,
+    },
     // Raft messages
     AppendEntries {
         jsonrpc: JsonRpcVersion,
@@ -163,6 +167,20 @@ impl AppendEntriesParams {
 // TODO: #[serde(rename_all = "camelCase")]
 pub struct AddServerParams {
     pub server_addr: SocketAddr,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProposeParams {
+    pub command: Command2,
+    pub proposer: Proposer,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Proposer {
+    pub addr: SocketAddr,
+    // TODO: Make `From` serializable
+    pub request_id: RequestId,
+    pub token: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

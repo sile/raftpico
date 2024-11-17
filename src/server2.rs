@@ -592,6 +592,7 @@ impl<M: Machine2> RaftServer<M> {
             Request::AddServer { id, params, .. } => {
                 self.handle_add_server_request(Caller::new(from, id), params)
             }
+            Request::Propose { params, .. } => todo!(),
             Request::AppendEntries { id, params, .. } => {
                 self.handle_append_entries_request(Caller::new(from, id), params)
             }
