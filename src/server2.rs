@@ -603,7 +603,17 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         params: AppendEntriesParams,
     ) -> std::io::Result<()> {
-        let message = params.into_raft_message(&caller, &mut self.local_commands);
+        if self.node().is_none() {
+            todo!();
+
+            // TODO: note comment
+            // let node_id = NodeId::new(1);
+            // self.node = Node::start(node_id);
+        }
+
+        let message = params
+            .into_raft_message(&caller, &mut self.local_commands)
+            .ok_or(std::io::ErrorKind::Other)?;
         self.node.handle_message(message);
         // TODO: temparary save caller for reply
         Ok(())

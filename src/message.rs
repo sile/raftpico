@@ -1,11 +1,13 @@
 use std::net::SocketAddr;
 
 use jsonlrpc::{JsonRpcVersion, RequestId};
-use raftbare::{LogEntries, LogIndex, MessageHeader};
+use raftbare::{
+    ClusterConfig, LogEntries, LogIndex, LogPosition, MessageHeader, MessageSeqNo, NodeId, Term,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    command::{Caller, LogEntry},
+    command::{Caller, Command2, LogEntry},
     server2::{ClusterSettings, Commands, Member},
 };
 
@@ -92,8 +94,68 @@ impl AppendEntriesParams {
         })
     }
 
-    pub fn into_raft_message(self, caller: &Caller, commands: &mut Commands) -> raftbare::Message {
-        todo!()
+    pub fn into_raft_message(
+        self,
+        caller: &Caller,
+        commands: &mut Commands,
+    ) -> Option<raftbare::Message> {
+        let RequestId::Number(request_id) = caller.request_id else {
+            return None;
+        };
+
+        let prev_position = LogPosition {
+            term: Term::new(self.prev_term),
+            index: LogIndex::new(self.prev_log_index),
+        };
+        let entries = (1..)
+            .map(|i| prev_position.index + LogIndex::new(i))
+            .zip(self.entries.into_iter())
+            .map(|(i, x)| match x {
+                LogEntry::Term(v) => raftbare::LogEntry::Term(Term::new(v)),
+                LogEntry::ClusterConfig { voters, new_voters } => {
+                    raftbare::LogEntry::ClusterConfig(ClusterConfig {
+                        voters: voters.into_iter().map(NodeId::new).collect(),
+                        new_voters: new_voters.into_iter().map(NodeId::new).collect(),
+                        ..ClusterConfig::default()
+                    })
+                }
+                LogEntry::CreateCluster {
+                    seed_server_addr,
+                    settings,
+                } => {
+                    commands.insert(
+                        i,
+                        Command2::CreateCluster {
+                            seed_server_addr,
+                            settings,
+                        },
+                    );
+                    raftbare::LogEntry::Command
+                }
+                LogEntry::AddServer { server_addr } => {
+                    commands.insert(i, Command2::AddServer { server_addr });
+                    raftbare::LogEntry::Command
+                }
+                LogEntry::ApplyCommand { input } => {
+                    commands.insert(i, Command2::ApplyCommand { input });
+                    raftbare::LogEntry::Command
+                }
+                LogEntry::ApplyQuery => {
+                    commands.insert(i, Command2::ApplyQuery);
+                    raftbare::LogEntry::Command
+                }
+            });
+        let entries = LogEntries::from_iter(prev_position, entries);
+
+        Some(raftbare::Message::AppendEntriesCall {
+            header: MessageHeader {
+                from: NodeId::new(self.from),
+                term: Term::new(self.term),
+                seqno: MessageSeqNo::new(request_id as u64),
+            },
+            commit_index: LogIndex::new(self.commit_index),
+            entries,
+        })
     }
 }
 
