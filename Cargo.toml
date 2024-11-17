@@ -17,6 +17,7 @@ raftbare = "0.1.1"
 rand = "0.8.5"
 serde = { version = "1.0.209", features = ["derive"] }
 serde_json = { version = "1.0.127", features = ["raw_value"] }
+uuid = { version = "1.11.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
 clap = { version = "4.5.16", features = ["derive"] }

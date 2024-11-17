@@ -13,6 +13,7 @@ use raftbare::{
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
+use uuid::Uuid;
 
 use crate::{
     command::{Caller, Command2},
@@ -223,6 +224,7 @@ pub type Commands = BTreeMap<LogIndex, Command2>;
 
 #[derive(Debug)]
 pub struct RaftServer<M> {
+    instance_id: Uuid,
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
@@ -246,6 +248,7 @@ impl<M: Machine2> RaftServer<M> {
         let rpc_server =
             RpcServer::start(&mut poller, listen_addr, SERVER_TOKEN_MIN, SERVER_TOKEN_MAX)?;
         Ok(Self {
+            instance_id: Uuid::new_v4(),
             poller,
             events,
             rpc_server,
@@ -537,6 +540,7 @@ impl<M: Machine2> RaftServer<M> {
             .ok_or(std::io::ErrorKind::Other)?;
         let request = serde_json::value::to_raw_value(&request)?;
         for client in self.rpc_clients.values_mut() {
+            // TODO: Drop if sending queue is full
             if let Err(e) = client.send(&mut self.poller, &request) {
                 // Not a critial error.
                 todo!("{e:?}");

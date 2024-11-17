@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use jsonlrpc::{JsonRpcVersion, RequestId};
+use jsonlrpc_mio::ClientId;
 use raftbare::{
     ClusterConfig, LogEntries, LogIndex, LogPosition, MessageHeader, MessageSeqNo, NodeId, Term,
 };
@@ -177,10 +178,8 @@ pub struct ProposeParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Proposer {
-    pub addr: SocketAddr,
-    // TODO: Make `From` serializable
-    pub request_id: RequestId,
-    pub token: u32,
+    pub server_addr: SocketAddr,
+    pub client: ClientId,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
