@@ -160,8 +160,8 @@ mod tests {
         let server_addr1 = server1.listen_addr();
         let handle = std::thread::spawn(move || {
             let output: AddServerOutput = rpc(
-                server_addr0,
-                Request::add_server(request_id(0), server_addr1),
+                server_addr1,
+                Request::add_server(request_id(0), server_addr0),
             );
             assert_eq!(output.members.len(), 2);
 

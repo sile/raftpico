@@ -18,7 +18,9 @@ use uuid::Uuid;
 use crate::{
     command::{Caller, Command2},
     machine::{Context2, Machine2},
-    message::{AddServerParams, AppendEntriesParams, CreateClusterOutput, Proposer, Request},
+    message::{
+        AddServerParams, AppendEntriesParams, CreateClusterOutput, ProposeParams, Proposer, Request,
+    },
     request::CreateClusterParams,
     storage::FileStorage,
     InputKind,
@@ -206,6 +208,7 @@ pub struct RaftServer<M> {
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
+    rpc_callers: HashMap<NodeId, ClientId>, // TODO: rename
     rpc_clients: HashMap<Token, RpcClient>,
     node: Node,
     rng: StdRng,
@@ -229,6 +232,7 @@ impl<M: Machine2> RaftServer<M> {
             poller,
             events,
             rpc_server,
+            rpc_callers: HashMap::new(),
             rpc_clients: HashMap::new(),
             node: Node::start(UNINIT_NODE_ID),
             rng: StdRng::from_entropy(),
@@ -565,19 +569,17 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         params: AppendEntriesParams,
     ) -> std::io::Result<()> {
-        if self.node().is_none() {
-            todo!();
-
-            // TODO: note comment
-            // let node_id = NodeId::new(1);
-            // self.node = Node::start(node_id);
-        }
-
         let message = params
             .into_raft_message(&caller, &mut self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
+
+        if self.node().is_none() {
+            todo!("initialize node");
+        }
+
+        self.rpc_callers.insert(message.from(), caller.from);
         self.node.handle_message(message);
-        // TODO: temparary save caller for reply
+
         Ok(())
     }
 
@@ -586,20 +588,30 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         params: AddServerParams,
     ) -> std::io::Result<()> {
-        if self.node().is_none() {
-            self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
+        if self.node().is_some() {
+            self.reply_error(caller, ErrorKind::ServerAlreadyAdded.object())?;
             return Ok(());
         }
 
-        assert!(self.is_leader()); // TODO: remote handling
         let command = Command2::AddServer {
-            server_addr: params.server_addr,
+            server_addr: self.listen_addr(),
             proposer: Proposer {
                 server: self.instance_id,
                 client: caller,
             },
         };
-        self.propose_command(command); // Always succeeds
+        let request = Request::Propose {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            params: ProposeParams { command },
+        };
+
+        // TODO: self.next_token();
+        let token = self.next_token;
+        self.next_token.0 += 1;
+
+        let mut client = RpcClient::new(token, params.server_addr);
+        client.send(&mut self.poller, &request)?;
+        self.rpc_clients.insert(token, client);
 
         Ok(())
     }

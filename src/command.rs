@@ -37,6 +37,7 @@ pub enum Command2 {
         settings: ClusterSettings,
         proposer: Proposer,
     },
+    // TODO: rename (JoinXXX)
     AddServer {
         server_addr: SocketAddr,
         proposer: Proposer,
