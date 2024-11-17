@@ -609,8 +609,22 @@ impl<M: Machine2> RaftServer<M> {
             Request::AppendEntries { id, params, .. } => {
                 self.handle_append_entries_request(Caller::new(from, id), params)
             }
-            Request::InitNode { params, .. } => todo!(),
+            Request::InitNode { params, .. } => self.handle_init_node_request(params),
         }
+    }
+
+    fn handle_init_node_request(&mut self, params: InitNodeParams) -> std::io::Result<()> {
+        if self.is_initialized() {
+            return Ok(());
+        }
+
+        let node_id = NodeId::new(params.node_id);
+        self.node = Node::start(node_id);
+        Ok(())
+    }
+
+    fn is_initialized(&self) -> bool {
+        self.node().is_some()
     }
 
     fn handle_propose_request(&mut self, params: ProposeParams) -> std::io::Result<()> {
