@@ -72,6 +72,13 @@ impl Request {
     }
 }
 
+// #[derive(Debug, Serialize, Deserialize)]
+// pub struct AppendEntriesRaftResponse {
+//     pub jsonrpc: JsonRpcVersion,
+//     pub id: RequestId,
+//     pub result: RaftResponseResult,
+// }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppendEntriesParams {
     pub from: u64,

@@ -538,14 +538,32 @@ impl<M: Machine2> RaftServer<M> {
             Action::SaveCurrentTerm => self.handle_save_current_term_action()?,
             Action::SaveVotedFor => self.handle_save_voted_for_action()?,
             Action::AppendLogEntries(entries) => self.handle_append_log_entries_action(entries)?,
-            Action::BroadcastMessage(message) => self.handle_broadcast_message(message)?,
-            Action::SendMessage(_, _) => todo!(),
+            Action::BroadcastMessage(message) => self.handle_broadcast_message_action(message)?,
+            Action::SendMessage(dst, message) => self.handle_send_message_action(dst, message)?,
             Action::InstallSnapshot(_) => todo!(),
         }
         Ok(())
     }
 
-    fn handle_broadcast_message(&mut self, message: raftbare::Message) -> std::io::Result<()> {
+    fn handle_send_message_action(
+        &mut self,
+        dst: NodeId,
+        message: raftbare::Message,
+    ) -> std::io::Result<()> {
+        let request = Request::from_raft_message(message, &self.local_commands)
+            .ok_or(std::io::ErrorKind::Other)?;
+        let request = serde_json::value::to_raw_value(&request)?;
+        let Some(from) = self.rpc_callers.get(&dst).copied() else {
+            return Ok(());
+        };
+        self.rpc_server.reply(&mut self.poller, from, &request)?;
+        Ok(())
+    }
+
+    fn handle_broadcast_message_action(
+        &mut self,
+        message: raftbare::Message,
+    ) -> std::io::Result<()> {
         let request = Request::from_raft_message(message, &self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
         let request = serde_json::value::to_raw_value(&request)?;
