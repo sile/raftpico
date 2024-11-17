@@ -31,6 +31,10 @@ pub enum Request {
         jsonrpc: JsonRpcVersion,
         params: ProposeParams,
     },
+    InitNode {
+        jsonrpc: JsonRpcVersion,
+        params: InitNodeParams,
+    },
     // Raft messages
     AppendEntries {
         jsonrpc: JsonRpcVersion,
@@ -183,6 +187,11 @@ pub struct AddServerParams {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeParams {
     pub command: Command2,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InitNodeParams {
+    pub node_id: u64,
 }
 
 // TODO: move

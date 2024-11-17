@@ -19,7 +19,8 @@ use crate::{
     command::{Caller, Command2},
     machine::{Context2, Machine2},
     message::{
-        AddServerParams, AppendEntriesParams, CreateClusterOutput, ProposeParams, Proposer, Request,
+        AddServerParams, AppendEntriesParams, CreateClusterOutput, InitNodeParams, ProposeParams,
+        Proposer, Request,
     },
     request::CreateClusterParams,
     storage::FileStorage,
@@ -116,10 +117,14 @@ impl ErrorKind {
     }
 
     pub fn object_with_reason<T: std::fmt::Display>(self, reason: T) -> ErrorObject {
+        self.object_with_data(serde_json::json!({"reason": reason.to_string()}))
+    }
+
+    pub fn object_with_data(self, data: serde_json::Value) -> ErrorObject {
         ErrorObject {
             code: self.code(),
             message: self.message().to_owned(),
-            data: Some(serde_json::json!({"reason": reason.to_string()})),
+            data: Some(data),
         }
     }
 }
@@ -275,15 +280,19 @@ impl<M: Machine2> RaftServer<M> {
             self.node.handle_election_timeout();
         }
 
+        let mut responses = Vec::new();
         for event in self.events.iter() {
             if let Some(client) = self.rpc_clients.get_mut(&event.token()) {
                 client.handle_event(&mut self.poller, event)?;
                 while let Some(response) = client.try_recv() {
-                    todo!("[{}] {response:?}", self.node.id().get());
+                    responses.push(response);
                 }
             } else {
                 self.rpc_server.handle_event(&mut self.poller, event)?;
             }
+        }
+        for response in responses {
+            self.handle_response(response)?;
         }
 
         // RPC request handling.
@@ -299,6 +308,45 @@ impl<M: Machine2> RaftServer<M> {
             self.handle_action(action)?;
         }
 
+        Ok(())
+    }
+
+    fn handle_response(&mut self, response: ResponseObject) -> std::io::Result<()> {
+        match response {
+            ResponseObject::Ok { result, id, .. } => todo!(),
+            ResponseObject::Err { error, .. }
+                if error.code == ErrorKind::NotClusterMember.code() =>
+            {
+                let data = error.data.ok_or(std::io::ErrorKind::Other)?;
+
+                #[derive(Deserialize)]
+                struct Data {
+                    addr: SocketAddr,
+                }
+                let Data { addr } = serde_json::from_value(data)?;
+
+                let Some(client) = self
+                    .rpc_clients
+                    .values_mut()
+                    .find(|c| c.server_addr() == addr)
+                else {
+                    return Ok(());
+                };
+                let Some((&node_id, _)) = self.machine.members.iter().find(|(_, m)| m.addr == addr)
+                else {
+                    return Ok(());
+                };
+                let request = Request::InitNode {
+                    jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+                    params: InitNodeParams { node_id },
+                };
+                let _ = client.send(&mut self.poller, &request);
+            }
+            ResponseObject::Err { .. } => {
+                // TODO
+                todo!("unexpected error response");
+            }
+        }
         Ok(())
     }
 
@@ -561,6 +609,7 @@ impl<M: Machine2> RaftServer<M> {
             Request::AppendEntries { id, params, .. } => {
                 self.handle_append_entries_request(Caller::new(from, id), params)
             }
+            Request::InitNode { params, .. } => todo!(),
         }
     }
 
@@ -579,17 +628,18 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         params: AppendEntriesParams,
     ) -> std::io::Result<()> {
-        dbg!(&params);
+        if self.node().is_none() {
+            self.reply_error(
+                caller,
+                ErrorKind::NotClusterMember
+                    .object_with_data(serde_json::json!({"addr": self.listen_addr()})),
+            )?;
+            return Ok(());
+        }
+
         let message = params
             .into_raft_message(&caller, &mut self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
-
-        if self.node().is_none() {
-            for command in &self.local_commands {
-                dbg!(command);
-            }
-            todo!("initialize node");
-        }
 
         self.rpc_callers.insert(message.from(), caller.from);
         self.node.handle_message(message);
