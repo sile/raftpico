@@ -557,11 +557,21 @@ impl<M: Machine2> RaftServer<M> {
             Request::AddServer { id, params, .. } => {
                 self.handle_add_server_request(Caller::new(from, id), params)
             }
-            Request::Propose { params, .. } => todo!(),
+            Request::Propose { params, .. } => self.handle_propose_request(params),
             Request::AppendEntries { id, params, .. } => {
                 self.handle_append_entries_request(Caller::new(from, id), params)
             }
         }
+    }
+
+    fn handle_propose_request(&mut self, params: ProposeParams) -> std::io::Result<()> {
+        if !self.is_leader() {
+            todo!("redirect");
+        }
+
+        let command = params.command;
+        let _ = self.propose_command(command); // Always succeeds
+        Ok(())
     }
 
     fn handle_append_entries_request(
@@ -569,11 +579,15 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         params: AppendEntriesParams,
     ) -> std::io::Result<()> {
+        dbg!(&params);
         let message = params
             .into_raft_message(&caller, &mut self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
 
         if self.node().is_none() {
+            for command in &self.local_commands {
+                dbg!(command);
+            }
             todo!("initialize node");
         }
 
@@ -588,30 +602,22 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         params: AddServerParams,
     ) -> std::io::Result<()> {
-        if self.node().is_some() {
-            self.reply_error(caller, ErrorKind::ServerAlreadyAdded.object())?;
+        if self.node().is_none() {
+            self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
+        }
+        if !self.is_leader() {
+            todo!("remote propose");
         }
 
         let command = Command2::AddServer {
-            server_addr: self.listen_addr(),
+            server_addr: params.server_addr,
             proposer: Proposer {
                 server: self.instance_id,
                 client: caller,
             },
         };
-        let request = Request::Propose {
-            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            params: ProposeParams { command },
-        };
-
-        // TODO: self.next_token();
-        let token = self.next_token;
-        self.next_token.0 += 1;
-
-        let mut client = RpcClient::new(token, params.server_addr);
-        client.send(&mut self.poller, &request)?;
-        self.rpc_clients.insert(token, client);
+        let _ = self.propose_command(command); // Always succeeds
 
         Ok(())
     }
@@ -650,6 +656,7 @@ impl<M: Machine2> RaftServer<M> {
         self.node.role().is_leader()
     }
 
+    // TODO: remove `-> CommitPromise`
     fn propose_command(&mut self, command: Command2) -> CommitPromise {
         if matches!(command, Command2::ApplyQuery) && self.is_leader() {
             if let Some(entries) = &self.node.actions().append_log_entries {

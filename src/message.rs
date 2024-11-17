@@ -21,7 +21,6 @@ pub enum Request {
         #[serde(default)]
         params: ClusterSettings,
     },
-    // TODO: rename (JoinXXX)
     AddServer {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
