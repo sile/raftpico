@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BinaryHeap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     net::SocketAddr,
     time::{Duration, Instant},
 };
@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::{
     command::{Caller, Command2},
     machine::{Context2, Machine2},
-    message::{AddServerParams, AppendEntriesParams, CreateClusterOutput, Request},
+    message::{AddServerParams, AppendEntriesParams, CreateClusterOutput, Proposer, Request},
     request::CreateClusterParams,
     storage::FileStorage,
     InputKind,
@@ -122,34 +122,6 @@ impl ErrorKind {
     }
 }
 
-#[derive(Debug)]
-pub struct OngoingProposal {
-    promise: CommitPromise,
-    caller: Caller,
-}
-
-impl PartialEq for OngoingProposal {
-    fn eq(&self, other: &Self) -> bool {
-        self.promise.log_position() == other.promise.log_position()
-    }
-}
-
-impl Eq for OngoingProposal {}
-
-impl PartialOrd for OngoingProposal {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(other.cmp(self))
-    }
-}
-
-impl Ord for OngoingProposal {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let p0 = self.promise.log_position();
-        let p1 = other.promise.log_position();
-        (p1.term, p1.index).cmp(&(p0.term, p0.index))
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Member {
     pub addr: SocketAddr,
@@ -212,9 +184,12 @@ impl<M: Machine2> Machine2 for SystemMachine<M> {
             Command2::CreateCluster {
                 seed_server_addr,
                 settings,
+                ..
             } => self.apply_create_cluster_command(ctx, *seed_server_addr, settings),
-            Command2::AddServer { server_addr } => self.apply_add_server_command(ctx, *server_addr),
-            Command2::ApplyCommand { input } => todo!(),
+            Command2::AddServer { server_addr, .. } => {
+                self.apply_add_server_command(ctx, *server_addr)
+            }
+            Command2::ApplyCommand { input, .. } => todo!(),
             Command2::ApplyQuery => todo!(),
         }
     }
@@ -222,9 +197,12 @@ impl<M: Machine2> Machine2 for SystemMachine<M> {
 
 pub type Commands = BTreeMap<LogIndex, Command2>;
 
+// TODO: struct
+pub type ServerInstanceId = Uuid;
+
 #[derive(Debug)]
 pub struct RaftServer<M> {
-    instance_id: Uuid,
+    instance_id: ServerInstanceId,
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
@@ -235,7 +213,6 @@ pub struct RaftServer<M> {
     election_abs_timeout: Instant,
     last_applied_index: LogIndex,
     local_commands: Commands,
-    ongoing_proposals: BinaryHeap<OngoingProposal>,
     dirty_cluster_config: bool,
     next_token: Token,
     machine: SystemMachine<M>,
@@ -257,7 +234,6 @@ impl<M: Machine2> RaftServer<M> {
             rng: StdRng::from_entropy(),
             storage: None, // TODO
             local_commands: Commands::new(),
-            ongoing_proposals: BinaryHeap::new(),
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index: LogIndex::ZERO,
             dirty_cluster_config: false,
@@ -323,8 +299,6 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     fn handle_committed_entries(&mut self) -> std::io::Result<()> {
-        self.handle_rejected_proposals()?;
-
         for index in
             (self.last_applied_index.get() + 1..=self.node.commit_index().get()).map(LogIndex::new)
         {
@@ -345,17 +319,6 @@ impl<M: Machine2> RaftServer<M> {
             // }
         }
 
-        Ok(())
-    }
-
-    fn handle_rejected_proposals(&mut self) -> std::io::Result<()> {
-        while let Some(proposal) = self.ongoing_proposals.peek() {
-            // TODO: remove `.clone()`
-            if !proposal.promise.clone().poll(&self.node).is_rejected() {
-                break;
-            }
-            todo!();
-        }
         Ok(())
     }
 
@@ -384,15 +347,10 @@ impl<M: Machine2> RaftServer<M> {
         let member_change = matches!(command, Command2::AddServer { .. });
 
         // TODO: remove clone
-        let caller = if self
-            .ongoing_proposals
-            .peek()
-            .map_or(false, |p| p.promise.clone().poll(&self.node).is_accepted())
-        {
-            self.ongoing_proposals.pop().map(|p| p.caller)
-        } else {
-            None
-        };
+        let caller = command
+            .proposer()
+            .filter(|p| p.server == self.instance_id)
+            .map(|p| p.client.clone());
         let mut ctx = Context2 {
             kind,
             node: &self.node,
@@ -636,10 +594,12 @@ impl<M: Machine2> RaftServer<M> {
         assert!(self.is_leader()); // TODO: remote handling
         let command = Command2::AddServer {
             server_addr: params.server_addr,
+            proposer: Proposer {
+                server: self.instance_id,
+                client: caller,
+            },
         };
-        let promise = self.propose_command(command); // Always succeeds
-        self.ongoing_proposals
-            .push(OngoingProposal { promise, caller });
+        self.propose_command(command); // Always succeeds
 
         Ok(())
     }
@@ -664,10 +624,12 @@ impl<M: Machine2> RaftServer<M> {
         let command = Command2::CreateCluster {
             seed_server_addr: self.listen_addr(),
             settings,
+            proposer: Proposer {
+                server: self.instance_id,
+                client: caller,
+            },
         };
-        let promise = self.propose_command(command); // Always succeeds
-        self.ongoing_proposals
-            .push(OngoingProposal { promise, caller });
+        self.propose_command(command); // Always succeeds
 
         Ok(())
     }

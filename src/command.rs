@@ -6,7 +6,10 @@ use raftbare::LogIndex;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-use crate::server2::{ClusterSettings, Commands};
+use crate::{
+    message::Proposer,
+    server2::{ClusterSettings, Commands},
+};
 
 // TODO: delete
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,18 +35,32 @@ pub enum Command2 {
     CreateCluster {
         seed_server_addr: SocketAddr,
         settings: ClusterSettings,
+        proposer: Proposer,
     },
     AddServer {
         server_addr: SocketAddr,
+        proposer: Proposer,
     },
     ApplyCommand {
         input: Box<RawValue>,
+        proposer: Proposer,
     },
     ApplyQuery,
 }
 
+impl Command2 {
+    pub fn proposer(&self) -> Option<&Proposer> {
+        match self {
+            Command2::CreateCluster { proposer, .. } => Some(proposer),
+            Command2::AddServer { proposer, .. } => Some(proposer),
+            Command2::ApplyCommand { proposer, .. } => Some(proposer),
+            Command2::ApplyQuery => None,
+        }
+    }
+}
+
 // TODO: move
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Caller {
     pub from: ClientId,
     pub request_id: RequestId,
@@ -66,13 +83,16 @@ pub enum LogEntry {
     CreateCluster {
         seed_server_addr: SocketAddr,
         settings: ClusterSettings,
+        proposer: Proposer,
     },
     AddServer {
         server_addr: SocketAddr,
+        proposer: Proposer,
     },
     ApplyCommand {
         // TODO: Cow? or Rc
         input: Box<RawValue>,
+        proposer: Proposer,
     },
     ApplyQuery,
 }
@@ -91,12 +111,22 @@ impl LogEntry {
                     Command2::CreateCluster {
                         seed_server_addr,
                         settings,
+                        proposer,
                     } => Self::CreateCluster {
                         seed_server_addr,
                         settings,
+                        proposer,
                     },
-                    Command2::AddServer { server_addr } => Self::AddServer { server_addr },
-                    Command2::ApplyCommand { input } => Self::ApplyCommand { input },
+                    Command2::AddServer {
+                        server_addr,
+                        proposer,
+                    } => Self::AddServer {
+                        server_addr,
+                        proposer,
+                    },
+                    Command2::ApplyCommand { input, proposer } => {
+                        Self::ApplyCommand { input, proposer }
+                    }
                     Command2::ApplyQuery => Self::ApplyQuery,
                 })
             }

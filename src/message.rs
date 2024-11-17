@@ -1,7 +1,6 @@
 use std::net::SocketAddr;
 
 use jsonlrpc::{JsonRpcVersion, RequestId};
-use jsonlrpc_mio::ClientId;
 use raftbare::{
     ClusterConfig, LogEntries, LogIndex, LogPosition, MessageHeader, MessageSeqNo, NodeId, Term,
 };
@@ -9,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{Caller, Command2, LogEntry},
-    server2::{ClusterSettings, Commands, Member},
+    server2::{ClusterSettings, Commands, Member, ServerInstanceId},
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -127,22 +126,33 @@ impl AppendEntriesParams {
                 LogEntry::CreateCluster {
                     seed_server_addr,
                     settings,
+                    proposer,
                 } => {
                     commands.insert(
                         i,
                         Command2::CreateCluster {
                             seed_server_addr,
                             settings,
+                            proposer,
                         },
                     );
                     raftbare::LogEntry::Command
                 }
-                LogEntry::AddServer { server_addr } => {
-                    commands.insert(i, Command2::AddServer { server_addr });
+                LogEntry::AddServer {
+                    server_addr,
+                    proposer,
+                } => {
+                    commands.insert(
+                        i,
+                        Command2::AddServer {
+                            server_addr,
+                            proposer,
+                        },
+                    );
                     raftbare::LogEntry::Command
                 }
-                LogEntry::ApplyCommand { input } => {
-                    commands.insert(i, Command2::ApplyCommand { input });
+                LogEntry::ApplyCommand { input, proposer } => {
+                    commands.insert(i, Command2::ApplyCommand { input, proposer });
                     raftbare::LogEntry::Command
                 }
                 LogEntry::ApplyQuery => {
@@ -173,13 +183,13 @@ pub struct AddServerParams {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeParams {
     pub command: Command2,
-    pub proposer: Proposer,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+// TODO: move
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Proposer {
-    pub server_addr: SocketAddr,
-    pub client: ClientId,
+    pub server: ServerInstanceId,
+    pub client: Caller, // TODO: rename
 }
 
 #[derive(Debug, Serialize, Deserialize)]
