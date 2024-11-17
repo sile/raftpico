@@ -19,8 +19,8 @@ use crate::{
     command::{Caller, Command2},
     machine::{Context2, Machine2},
     message::{
-        AddServerParams, AppendEntriesParams, CreateClusterOutput, InitNodeParams, ProposeParams,
-        Proposer, Request,
+        AddServerParams, AppendEntriesParams, CreateClusterOutput, InitNodeParams,
+        NotifyServerAddrParams, ProposeParams, Proposer, Request,
     },
     request::CreateClusterParams,
     storage::FileStorage,
@@ -91,6 +91,7 @@ pub enum ErrorKind {
     MalformedMachineOutput,
     ServerAlreadyAdded,
     NotClusterMember,
+    UnknownServer,
 }
 
 impl ErrorKind {
@@ -105,6 +106,7 @@ impl ErrorKind {
             ErrorKind::MalformedMachineOutput => "Malformed machin",
             ErrorKind::ServerAlreadyAdded => "Server already added",
             ErrorKind::NotClusterMember => "Not a cluster member",
+            ErrorKind::UnknownServer => "Unknown server",
         }
     }
 
@@ -213,8 +215,8 @@ pub struct RaftServer<M> {
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
-    rpc_callers: HashMap<NodeId, ClientId>, // TODO: rename
     rpc_clients: HashMap<Token, RpcClient>,
+    node_id_to_token: HashMap<NodeId, Token>,
     node: Node,
     rng: StdRng,
     storage: Option<FileStorage>,
@@ -237,8 +239,8 @@ impl<M: Machine2> RaftServer<M> {
             poller,
             events,
             rpc_server,
-            rpc_callers: HashMap::new(),
             rpc_clients: HashMap::new(),
+            node_id_to_token: HashMap::new(),
             node: Node::start(UNINIT_NODE_ID),
             rng: StdRng::from_entropy(),
             storage: None, // TODO
@@ -342,6 +344,30 @@ impl<M: Machine2> RaftServer<M> {
                 };
                 let _ = client.send(&mut self.poller, &request);
             }
+            ResponseObject::Err { error, .. } if error.code == ErrorKind::UnknownServer.code() => {
+                let data = error.data.ok_or(std::io::ErrorKind::Other)?;
+
+                #[derive(Deserialize)]
+                struct Data {
+                    node_id: u64,
+                }
+                let Data { node_id } = serde_json::from_value(data)?;
+                let Some(token) = self.node_id_to_token.get(&NodeId::new(node_id)) else {
+                    return Ok(());
+                };
+
+                let node_id = self.node.id().get();
+                let addr = self.listen_addr();
+                let Some(client) = self.rpc_clients.get_mut(&token) else {
+                    return Ok(());
+                };
+
+                let request = Request::NotifyServerAddr {
+                    jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+                    params: NotifyServerAddrParams { node_id, addr },
+                };
+                let _ = client.send(&mut self.poller, &request);
+            }
             ResponseObject::Err { .. } => {
                 // TODO
                 todo!("unexpected error response");
@@ -418,6 +444,8 @@ impl<M: Machine2> RaftServer<M> {
 
         if member_change {
             self.dirty_cluster_config = true;
+
+            // TODO: call when node.latest_config() is changed
             self.update_rpc_clients();
         }
 
@@ -434,9 +462,10 @@ impl<M: Machine2> RaftServer<M> {
             .collect::<HashSet<_>>();
         self.rpc_clients
             .retain(|_, client| addrs.contains(&client.server_addr()));
+        // TODO: Remove from node_id_to_token too (or don't remove rpc_clients at all)
 
         // Added server handling.
-        for member in self.machine.members.values() {
+        for (&node_id, member) in &self.machine.members {
             if member.addr == self.listen_addr() {
                 continue;
             }
@@ -451,6 +480,7 @@ impl<M: Machine2> RaftServer<M> {
 
             let rpc_client = RpcClient::new(token, member.addr);
             self.rpc_clients.insert(token, rpc_client);
+            self.node_id_to_token.insert(NodeId::new(node_id), token);
         }
     }
 
@@ -553,10 +583,13 @@ impl<M: Machine2> RaftServer<M> {
         let request = Request::from_raft_message(message, &self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
         let request = serde_json::value::to_raw_value(&request)?;
-        let Some(from) = self.rpc_callers.get(&dst).copied() else {
+        let Some(token) = self.node_id_to_token.get(&dst) else {
             return Ok(());
         };
-        self.rpc_server.reply(&mut self.poller, from, &request)?;
+        let Some(client) = self.rpc_clients.get_mut(token) else {
+            return Ok(());
+        };
+        client.send(&mut self.poller, &request)?;
         Ok(())
     }
 
@@ -628,6 +661,9 @@ impl<M: Machine2> RaftServer<M> {
                 self.handle_append_entries_request(Caller::new(from, id), params)
             }
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
+            Request::NotifyServerAddr { params, .. } => {
+                self.handle_notify_server_addr_request(params)
+            }
         }
     }
 
@@ -638,6 +674,26 @@ impl<M: Machine2> RaftServer<M> {
 
         let node_id = NodeId::new(params.node_id);
         self.node = Node::start(node_id);
+        Ok(())
+    }
+
+    fn handle_notify_server_addr_request(
+        &mut self,
+        params: NotifyServerAddrParams,
+    ) -> std::io::Result<()> {
+        let node_id = NodeId::new(params.node_id);
+        if self.node_id_to_token.contains_key(&node_id) {
+            return Ok(());
+        }
+
+        // TODO: self.next_token()
+        let token = self.next_token;
+        self.next_token.0 += 1;
+
+        let client = RpcClient::new(token, params.addr);
+        self.node_id_to_token.insert(node_id, token);
+        self.rpc_clients.insert(token, client);
+
         Ok(())
     }
 
@@ -668,12 +724,21 @@ impl<M: Machine2> RaftServer<M> {
             )?;
             return Ok(());
         }
+        if !self
+            .node_id_to_token
+            .contains_key(&NodeId::new(params.from))
+        {
+            self.reply_error(
+                caller,
+                ErrorKind::UnknownServer
+                    .object_with_data(serde_json::json!({"node_id": self.node.id().get()})),
+            )?;
+            return Ok(());
+        }
 
         let message = params
             .into_raft_message(&caller, &mut self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
-
-        self.rpc_callers.insert(message.from(), caller.from);
         self.node.handle_message(message);
 
         Ok(())
