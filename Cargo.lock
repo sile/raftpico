@@ -156,9 +156,9 @@ dependencies = [
 
 [[package]]
 name = "jsonlrpc_mio"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9baef77760e1708343e39b5806855bea76f7ea0a55807088c12ddc0e8c780c5f"
+checksum = "e0ffd77f41d760585e0d9613152550f16e5521a9ea9104039e867265ca7b23b0"
 dependencies = [
  "jsonlrpc",
  "mio",
@@ -171,12 +171,6 @@ name = "libc"
 version = "0.2.164"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "433bfe06b8c75da9b2e3fbea6e5329ff87748f0b144ef75306e674c3f6f7c13f"
-
-[[package]]
-name = "log"
-version = "0.4.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 
 [[package]]
 name = "memchr"
@@ -192,7 +186,6 @@ checksum = "80e04d1dcff3aae0704555fe5fee3bcfaf3d1fdf8a7e521d5b9d2b42acb52cec"
 dependencies = [
  "hermit-abi",
  "libc",
- "log",
  "wasi",
  "windows-sys 0.52.0",
 ]

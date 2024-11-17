@@ -5,7 +5,7 @@ use std::{
 };
 
 use jsonlrpc::{ErrorCode, ErrorObject, ResponseObject};
-use jsonlrpc_mio::{From, RpcClient, RpcServer};
+use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll, Token};
 use raftbare::{
     Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, Node, NodeId, Role, Term,
@@ -53,8 +53,7 @@ impl Default for ClusterSettings {
     }
 }
 
-// TODO: rename jsonlrpc_mio::From
-impl std::convert::From<ClusterSettings> for CreateClusterParams {
+impl From<ClusterSettings> for CreateClusterParams {
     fn from(value: ClusterSettings) -> Self {
         Self {
             min_election_timeout_ms: value.min_election_timeout.as_millis() as usize,
@@ -584,7 +583,7 @@ impl<M: Machine2> RaftServer<M> {
         self.election_abs_timeout = Instant::now() + timeout;
     }
 
-    fn handle_request(&mut self, from: From, request: Request) -> std::io::Result<()> {
+    fn handle_request(&mut self, from: ClientId, request: Request) -> std::io::Result<()> {
         match request {
             Request::CreateCluster { id, params, .. } => {
                 self.handle_create_cluster_request(Caller::new(from, id), params)

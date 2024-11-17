@@ -1,6 +1,7 @@
 use std::{net::SocketAddr, time::Duration};
 
 use jsonlrpc::RequestId;
+use jsonlrpc_mio::ClientId;
 use raftbare::LogIndex;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -44,12 +45,12 @@ pub enum Command2 {
 // TODO: move
 #[derive(Debug)]
 pub struct Caller {
-    pub from: jsonlrpc_mio::From,
+    pub from: ClientId,
     pub request_id: RequestId,
 }
 
 impl Caller {
-    pub fn new(from: jsonlrpc_mio::From, request_id: RequestId) -> Self {
+    pub fn new(from: ClientId, request_id: RequestId) -> Self {
         Self { from, request_id }
     }
 }
