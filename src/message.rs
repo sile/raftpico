@@ -26,6 +26,11 @@ pub enum Request {
         id: RequestId,
         params: AddServerParams,
     },
+    RemoveServer {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: RemoveServerParams,
+    },
     // Internal APIs
     Propose {
         jsonrpc: JsonRpcVersion,
@@ -236,6 +241,12 @@ impl AppendEntriesParams {
 #[derive(Debug, Serialize, Deserialize)]
 // TODO: #[serde(rename_all = "camelCase")]
 pub struct AddServerParams {
+    pub server_addr: SocketAddr,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+// TODO: #[serde(rename_all = "camelCase")]
+pub struct RemoveServerParams {
     pub server_addr: SocketAddr,
 }
 

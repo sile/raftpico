@@ -659,6 +659,7 @@ impl<M: Machine2> RaftServer<M> {
             Request::AddServer { id, params, .. } => {
                 self.handle_add_server_request(Caller::new(from, id), params)
             }
+            Request::RemoveServer { id, params, .. } => todo!(),
             Request::Propose { params, .. } => self.handle_propose_request(params),
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
             Request::NotifyServerAddr { params, .. } => {
