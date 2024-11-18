@@ -657,13 +657,14 @@ impl<M: Machine2> RaftServer<M> {
                 self.handle_add_server_request(Caller::new(from, id), params)
             }
             Request::Propose { params, .. } => self.handle_propose_request(params),
-            Request::AppendEntries { id, params, .. } => {
-                self.handle_append_entries_request(Caller::new(from, id), params)
-            }
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
             Request::NotifyServerAddr { params, .. } => {
                 self.handle_notify_server_addr_request(params)
             }
+            Request::AppendEntries { id, params, .. } => {
+                self.handle_append_entries_request(Caller::new(from, id), params)
+            }
+            Request::AppendEntriesResult { id, params, .. } => todo!(),
         }
     }
 

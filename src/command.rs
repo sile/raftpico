@@ -43,7 +43,7 @@ pub enum Command2 {
     },
     ApplyCommand {
         input: Box<RawValue>,
-        proposer: Proposer,
+        proposer: Proposer, // TODO: command_id: Uuid (?)
     },
     ApplyQuery,
 }

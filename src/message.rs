@@ -42,8 +42,13 @@ pub enum Request {
     // Raft messages
     AppendEntries {
         jsonrpc: JsonRpcVersion,
-        id: RequestId,
+        id: RequestId, // TODO: remove
         params: AppendEntriesParams,
+    },
+    AppendEntriesResult {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId, // TODO: remove
+        params: AppendEntriesResultParams,
     },
 }
 
@@ -52,7 +57,7 @@ impl Request {
         message: raftbare::Message,
         commands: &Commands,
     ) -> Option<Self> {
-        match message {
+        Some(match message {
             raftbare::Message::RequestVoteCall {
                 header,
                 last_position,
@@ -63,17 +68,39 @@ impl Request {
                 entries,
             } => {
                 let params = AppendEntriesParams::new(header, commit_index, entries, commands)?;
-                Some(Self::AppendEntries {
+                Self::AppendEntries {
                     jsonrpc: JsonRpcVersion::V2,
                     id: RequestId::Number(header.seqno.get() as i64),
                     params,
-                })
+                }
             }
-            _ => {
-                unreachable!();
-            }
-        }
+            raftbare::Message::RequestVoteReply {
+                header,
+                vote_granted,
+            } => todo!(),
+            raftbare::Message::AppendEntriesReply {
+                header,
+                last_position,
+            } => Self::AppendEntriesResult {
+                jsonrpc: JsonRpcVersion::V2,
+                id: RequestId::Number(header.seqno.get() as i64),
+                params: AppendEntriesResultParams {
+                    from: header.from.get(),
+                    term: header.term.get(),
+                    last_log_term: last_position.term.get(),
+                    last_log_index: last_position.index.get(),
+                },
+            },
+        })
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppendEntriesResultParams {
+    pub from: u64,
+    pub term: u64,
+    pub last_log_term: u64,
+    pub last_log_index: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
