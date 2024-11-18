@@ -41,6 +41,10 @@ pub enum Command2 {
         server_addr: SocketAddr,
         proposer: Proposer,
     },
+    RemoveServer {
+        server_addr: SocketAddr,
+        proposer: Proposer,
+    },
     ApplyCommand {
         input: Box<RawValue>,
         proposer: Proposer, // TODO: command_id: Uuid (?)
@@ -53,6 +57,7 @@ impl Command2 {
         match self {
             Command2::CreateCluster { proposer, .. } => Some(proposer),
             Command2::AddServer { proposer, .. } => Some(proposer),
+            Command2::RemoveServer { proposer, .. } => Some(proposer),
             Command2::ApplyCommand { proposer, .. } => Some(proposer),
             Command2::ApplyQuery => None,
         }
@@ -86,6 +91,10 @@ pub enum LogEntry {
         proposer: Proposer,
     },
     AddServer {
+        server_addr: SocketAddr,
+        proposer: Proposer,
+    },
+    RemoveServer {
         server_addr: SocketAddr,
         proposer: Proposer,
     },
@@ -124,6 +133,14 @@ impl LogEntry {
                         server_addr,
                         proposer,
                     },
+                    Command2::RemoveServer {
+                        server_addr,
+                        proposer,
+                    } => Self::RemoveServer {
+                        server_addr,
+                        proposer,
+                    },
+
                     Command2::ApplyCommand { input, proposer } => {
                         Self::ApplyCommand { input, proposer }
                     }

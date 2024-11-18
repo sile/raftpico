@@ -20,7 +20,8 @@ use crate::{
     machine::{Context2, Machine2},
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, CreateClusterOutput,
-        InitNodeParams, NotifyServerAddrParams, ProposeParams, Proposer, Request,
+        InitNodeParams, NotifyServerAddrParams, ProposeParams, Proposer, RemoveServerParams,
+        Request,
     },
     request::CreateClusterParams,
     storage::FileStorage,
@@ -197,6 +198,10 @@ impl<M: Machine2> Machine2 for SystemMachine<M> {
             } => self.apply_create_cluster_command(ctx, *seed_server_addr, settings),
             Command2::AddServer { server_addr, .. } => {
                 self.apply_add_server_command(ctx, *server_addr)
+            }
+            Command2::RemoveServer { server_addr, .. } => {
+                // self.apply_add_server_command(ctx, *server_addr)
+                todo!()
             }
             Command2::ApplyCommand { input, .. } => todo!(),
             Command2::ApplyQuery => todo!(),
@@ -659,7 +664,9 @@ impl<M: Machine2> RaftServer<M> {
             Request::AddServer { id, params, .. } => {
                 self.handle_add_server_request(Caller::new(from, id), params)
             }
-            Request::RemoveServer { id, params, .. } => todo!(),
+            Request::RemoveServer { id, params, .. } => {
+                self.handle_remove_server_request(Caller::new(from, id), params)
+            }
             Request::Propose { params, .. } => self.handle_propose_request(params),
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
             Request::NotifyServerAddr { params, .. } => {
@@ -780,6 +787,31 @@ impl<M: Machine2> RaftServer<M> {
         }
 
         let command = Command2::AddServer {
+            server_addr: params.server_addr,
+            proposer: Proposer {
+                server: self.instance_id,
+                client: caller,
+            },
+        };
+        let _ = self.propose_command(command); // Always succeeds
+
+        Ok(())
+    }
+
+    fn handle_remove_server_request(
+        &mut self,
+        caller: Caller,
+        params: RemoveServerParams,
+    ) -> std::io::Result<()> {
+        if self.node().is_none() {
+            self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
+            return Ok(());
+        }
+        if !self.is_leader() {
+            todo!("remote propose");
+        }
+
+        let command = Command2::RemoveServer {
             server_addr: params.server_addr,
             proposer: Proposer {
                 server: self.instance_id,

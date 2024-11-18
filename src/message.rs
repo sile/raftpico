@@ -215,6 +215,19 @@ impl AppendEntriesParams {
                     );
                     raftbare::LogEntry::Command
                 }
+                LogEntry::RemoveServer {
+                    server_addr,
+                    proposer,
+                } => {
+                    commands.insert(
+                        i,
+                        Command2::RemoveServer {
+                            server_addr,
+                            proposer,
+                        },
+                    );
+                    raftbare::LogEntry::Command
+                }
                 LogEntry::ApplyCommand { input, proposer } => {
                     commands.insert(i, Command2::ApplyCommand { input, proposer });
                     raftbare::LogEntry::Command
