@@ -277,7 +277,7 @@ impl<M: Machine2> RaftServer<M> {
             .saturating_duration_since(Instant::now())
             .min(timeout.unwrap_or(Duration::MAX));
         self.poller.poll(&mut self.events, Some(timeout))?;
-        if self.election_abs_timeout >= Instant::now() {
+        if self.election_abs_timeout <= Instant::now() {
             // TODO: stats per role
             self.node.handle_election_timeout();
         }
@@ -546,6 +546,8 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     fn handle_committed_cluster_config(&mut self, config: ClusterConfig) {
+        dbg!(self.node.id().get());
+        dbg!(self.is_leader());
         dbg!(&config);
 
         // TODO: evict handling
@@ -637,7 +639,6 @@ impl<M: Machine2> RaftServer<M> {
 
     fn handle_set_election_timeout_action(&mut self) {
         // TODO: self.stats.election_timeout_set_count += 1;
-
         let min = self.machine.settings.min_election_timeout;
         let max = self.machine.settings.max_election_timeout;
         let timeout = match self.node.role() {
