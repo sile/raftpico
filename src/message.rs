@@ -61,7 +61,11 @@ impl Request {
             raftbare::Message::RequestVoteCall {
                 header,
                 last_position,
-            } => todo!(),
+            } => {
+                dbg!(header);
+                dbg!(last_position);
+                todo!()
+            }
             raftbare::Message::AppendEntriesCall {
                 header,
                 commit_index,
@@ -101,6 +105,26 @@ pub struct AppendEntriesResultParams {
     pub term: u64,
     pub last_log_term: u64,
     pub last_log_index: u64,
+}
+
+impl AppendEntriesResultParams {
+    pub fn into_raft_message(self, caller: &Caller) -> raftbare::Message {
+        let RequestId::Number(request_id) = caller.request_id else {
+            todo!("make this branch unreachable");
+        };
+
+        raftbare::Message::AppendEntriesReply {
+            header: MessageHeader {
+                from: NodeId::new(self.from),
+                term: Term::new(self.term),
+                seqno: MessageSeqNo::new(request_id as u64),
+            },
+            last_position: LogPosition {
+                term: Term::new(self.last_log_term),
+                index: LogIndex::new(self.last_log_index),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

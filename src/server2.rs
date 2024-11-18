@@ -19,8 +19,8 @@ use crate::{
     command::{Caller, Command2},
     machine::{Context2, Machine2},
     message::{
-        AddServerParams, AppendEntriesParams, CreateClusterOutput, InitNodeParams,
-        NotifyServerAddrParams, ProposeParams, Proposer, Request,
+        AddServerParams, AppendEntriesParams, AppendEntriesResultParams, CreateClusterOutput,
+        InitNodeParams, NotifyServerAddrParams, ProposeParams, Proposer, Request,
     },
     request::CreateClusterParams,
     storage::FileStorage,
@@ -664,8 +664,25 @@ impl<M: Machine2> RaftServer<M> {
             Request::AppendEntries { id, params, .. } => {
                 self.handle_append_entries_request(Caller::new(from, id), params)
             }
-            Request::AppendEntriesResult { id, params, .. } => todo!(),
+            Request::AppendEntriesResult { id, params, .. } => {
+                self.handle_append_entries_result_request(Caller::new(from, id), params)
+            }
         }
+    }
+
+    fn handle_append_entries_result_request(
+        &mut self,
+        caller: Caller,
+        params: AppendEntriesResultParams,
+    ) -> std::io::Result<()> {
+        if !self.is_initialized() {
+            // TODO: stats
+            return Ok(());
+        }
+
+        let message = params.into_raft_message(&caller);
+        self.node.handle_message(message);
+        Ok(())
     }
 
     fn handle_init_node_request(&mut self, params: InitNodeParams) -> std::io::Result<()> {
