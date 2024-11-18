@@ -530,7 +530,9 @@ impl<M: Machine2> RaftServer<M> {
         }
         for &id in &self.node.config().voters {
             // TODO: if self.members.get(id).map_or(true, |m| m.evicting) {
-            removing.push(id);
+            if !self.machine.members.contains_key(&id.get()) {
+                removing.push(id);
+            }
         }
         if adding.is_empty() && removing.is_empty() {
             self.dirty_cluster_config = false;
@@ -546,9 +548,9 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     fn handle_committed_cluster_config(&mut self, config: ClusterConfig) {
-        dbg!(self.node.id().get());
-        dbg!(self.is_leader());
-        dbg!(&config);
+        // dbg!(self.node.id().get());
+        // dbg!(self.is_leader());
+        // dbg!(&config);
 
         // TODO: evict handling
         // if c.is_joint_consensus() {
