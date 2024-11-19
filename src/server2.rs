@@ -184,6 +184,20 @@ impl<M: Machine2> SystemMachine<M> {
             members: self.members.values().cloned().collect(),
         });
     }
+
+    fn apply_remove_server_command(&mut self, ctx: &mut Context2, server_addr: SocketAddr) {
+        let Some((&node_id, _member)) = self.members.iter().find(|(_, m)| m.addr == server_addr)
+        else {
+            ctx.error(ErrorKind::NotClusterMember.object());
+            return;
+        };
+
+        let node_id = NodeId::new(node_id);
+        self.members.remove(&node_id.get());
+        ctx.output(&CreateClusterOutput {
+            members: self.members.values().cloned().collect(),
+        });
+    }
 }
 
 impl<M: Machine2> Machine2 for SystemMachine<M> {
@@ -200,8 +214,7 @@ impl<M: Machine2> Machine2 for SystemMachine<M> {
                 self.apply_add_server_command(ctx, *server_addr)
             }
             Command2::RemoveServer { server_addr, .. } => {
-                // self.apply_add_server_command(ctx, *server_addr)
-                todo!()
+                self.apply_remove_server_command(ctx, *server_addr)
             }
             Command2::ApplyCommand { input, .. } => todo!(),
             Command2::ApplyQuery => todo!(),
@@ -552,7 +565,7 @@ impl<M: Machine2> RaftServer<M> {
         // TOOD: update dirty_cluster_config flag
     }
 
-    fn handle_committed_cluster_config(&mut self, config: ClusterConfig) {
+    fn handle_committed_cluster_config(&mut self, _config: ClusterConfig) {
         // dbg!(self.node.id().get());
         // dbg!(self.is_leader());
         // dbg!(&config);

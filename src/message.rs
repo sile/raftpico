@@ -295,3 +295,8 @@ pub struct CreateClusterOutput {
 pub struct AddServerOutput {
     pub members: Vec<Member>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RemoveServerOutput {
+    pub members: Vec<Member>,
+}
