@@ -742,12 +742,7 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     fn handle_propose_request(&mut self, params: ProposeParams) -> std::io::Result<()> {
-        if !self.is_leader() {
-            todo!("redirect");
-        }
-
-        let command = params.command;
-        let _ = self.propose_command(command); // Always succeeds
+        self.propose_command(params.command)?;
         Ok(())
     }
 
@@ -865,7 +860,37 @@ impl<M: Machine2> RaftServer<M> {
         assert!(self.is_initialized());
 
         if !self.is_leader() {
-            todo!("remote propose");
+            let Some(maybe_leader) = self.node.voted_for() else {
+                todo!("notify this error to the origin node");
+            };
+            if maybe_leader == self.node.id() {
+                todo!("notify this error to the origin node");
+            }
+
+            let request = Request::Propose {
+                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+                params: ProposeParams { command },
+            };
+
+            // TODO: optimize
+            let Some(addr) = self
+                .machine
+                .members
+                .iter()
+                .find(|(&id, _m)| id == maybe_leader.get())
+                .map(|(_, m)| m.addr)
+            else {
+                todo!();
+            };
+            let Some(client) = self
+                .rpc_clients
+                .values_mut()
+                .find(|c| c.server_addr() == addr)
+            else {
+                todo!();
+            };
+            client.send(&mut self.poller, &request)?;
+            return Ok(());
         }
 
         if matches!(command, Command2::ApplyQuery)

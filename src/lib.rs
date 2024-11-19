@@ -220,7 +220,7 @@ mod tests {
                 contact_addr = addr;
 
                 // TODO:
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(500));
             }
         });
         servers.push(server1);

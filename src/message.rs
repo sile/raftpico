@@ -266,6 +266,7 @@ pub struct RemoveServerParams {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeParams {
     pub command: Command2,
+    // TODO: origin_node_id
 }
 
 #[derive(Debug, Serialize, Deserialize)]
