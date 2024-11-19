@@ -4,7 +4,6 @@ use jsonlrpc::RequestId;
 use jsonlrpc_mio::ClientId;
 use raftbare::LogIndex;
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
 
 use crate::{
     message::Proposer,
@@ -46,7 +45,10 @@ pub enum Command2 {
         proposer: Proposer,
     },
     ApplyCommand {
-        input: Box<RawValue>,
+        // [NOTE] Cannot use RawValue here: https://github.com/serde-rs/json/issues/545
+        // TODO: consider workaround
+        // input: Box<RawValue>,
+        input: serde_json::Value,
         proposer: Proposer, // TODO: command_id: Uuid (?)
     },
     ApplyQuery,
@@ -100,7 +102,8 @@ pub enum LogEntry {
     },
     ApplyCommand {
         // TODO: Cow? or Rc
-        input: Box<RawValue>,
+        // TODO: input: Box<RawValue>,
+        input: serde_json::Value,
         proposer: Proposer,
     },
     ApplyQuery,

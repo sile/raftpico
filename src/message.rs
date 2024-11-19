@@ -274,6 +274,9 @@ pub struct ApplyParams {
     pub kind: InputKind,
     pub input: serde_json::Value,
     // [NOTE] Cannot use RawValue here: https://github.com/serde-rs/json/issues/545
+    //
+    // TODO: struct { jsonrpc, method, id, params: RawValue } then serde_json::from_str(RawValue.get())
+    //       (use RawValue in jsonlrpc_mio(?))
     // pub input: Box<RawValue>,
 }
 

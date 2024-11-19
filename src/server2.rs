@@ -17,9 +17,9 @@ use crate::{
     command::{Caller, Command2},
     machine::{Context2, Machine2},
     message::{
-        AddServerParams, AppendEntriesParams, AppendEntriesResultParams, CreateClusterOutput,
-        InitNodeParams, NotifyServerAddrParams, ProposeParams, Proposer, RemoveServerParams,
-        Request,
+        AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
+        CreateClusterOutput, InitNodeParams, NotifyServerAddrParams, ProposeParams, Proposer,
+        RemoveServerParams, Request,
     },
     request::CreateClusterParams,
     storage::FileStorage,
@@ -214,7 +214,10 @@ impl<M: Machine2> Machine2 for SystemMachine<M> {
             Command2::RemoveServer { server_addr, .. } => {
                 self.apply_remove_server_command(ctx, *server_addr)
             }
-            Command2::ApplyCommand { input, .. } => todo!(),
+            Command2::ApplyCommand { input, .. } => {
+                let input = serde_json::from_value(input.clone()).expect("TODO: error response");
+                self.user_machine.apply(ctx, &input)
+            }
             Command2::ApplyQuery => todo!(),
         }
     }
@@ -384,8 +387,9 @@ impl<M: Machine2> RaftServer<M> {
                 };
                 let _ = client.send(&mut self.poller, &request);
             }
-            ResponseObject::Err { .. } => {
+            e @ ResponseObject::Err { .. } => {
                 // TODO
+                dbg!(e);
                 todo!("unexpected error response");
             }
         }
@@ -678,7 +682,9 @@ impl<M: Machine2> RaftServer<M> {
             Request::RemoveServer { id, params, .. } => {
                 self.handle_remove_server_request(Caller::new(from, id), params)
             }
-            Request::Apply { id, params, .. } => todo!(),
+            Request::Apply { id, params, .. } => {
+                self.handle_apply_request(Caller::new(from, id), params)
+            }
             Request::Propose { params, .. } => self.handle_propose_request(params),
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
             Request::NotifyServerAddr { params, .. } => {
@@ -798,6 +804,28 @@ impl<M: Machine2> RaftServer<M> {
         };
         self.propose_command(command)?;
 
+        Ok(())
+    }
+
+    fn handle_apply_request(&mut self, caller: Caller, params: ApplyParams) -> std::io::Result<()> {
+        if !self.is_initialized() {
+            self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
+            return Ok(());
+        }
+        match params.kind {
+            InputKind::Command => {
+                let command = Command2::ApplyCommand {
+                    input: params.input,
+                    proposer: Proposer {
+                        server: self.instance_id,
+                        client: caller,
+                    },
+                };
+                self.propose_command(command)?;
+            }
+            InputKind::Query => todo!(),
+            InputKind::LocalQuery => todo!(),
+        }
         Ok(())
     }
 
