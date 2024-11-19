@@ -19,7 +19,7 @@ use crate::{
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
         CreateClusterOutput, InitNodeParams, NotifyServerAddrParams, ProposeParams, Proposer,
-        RemoveServerParams, Request,
+        RemoveServerParams, Request, RequestVoteParams,
     },
     request::CreateClusterParams,
     storage::FileStorage,
@@ -696,6 +696,9 @@ impl<M: Machine2> RaftServer<M> {
             Request::AppendEntriesResult { id, params, .. } => {
                 self.handle_append_entries_result_request(Caller::new(from, id), params)
             }
+            Request::RequestVote { id, params, .. } => {
+                self.handle_request_vote_request(Caller::new(from, id), params)
+            }
         }
     }
 
@@ -703,6 +706,21 @@ impl<M: Machine2> RaftServer<M> {
         &mut self,
         caller: Caller,
         params: AppendEntriesResultParams,
+    ) -> std::io::Result<()> {
+        if !self.is_initialized() {
+            // TODO: stats
+            return Ok(());
+        }
+
+        let message = params.into_raft_message(&caller);
+        self.node.handle_message(message);
+        Ok(())
+    }
+
+    fn handle_request_vote_request(
+        &mut self,
+        caller: Caller,
+        params: RequestVoteParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
             // TODO: stats
