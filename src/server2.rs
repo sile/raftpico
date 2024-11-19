@@ -795,10 +795,6 @@ impl<M: Machine2> RaftServer<M> {
             self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
         }
-        if !self.is_leader() {
-            todo!("remote propose");
-        }
-
         let command = Command2::AddServer {
             server_addr: params.server_addr,
             proposer: Proposer {
@@ -819,9 +815,6 @@ impl<M: Machine2> RaftServer<M> {
         if self.node().is_none() {
             self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
-        }
-        if !self.is_leader() {
-            todo!("remote propose");
         }
 
         let command = Command2::RemoveServer {
@@ -872,6 +865,10 @@ impl<M: Machine2> RaftServer<M> {
 
     // TODO: remove `-> CommitPromise`
     fn propose_command(&mut self, command: Command2) -> CommitPromise {
+        if !self.is_leader() {
+            todo!("remote propose");
+        }
+
         if matches!(command, Command2::ApplyQuery) && self.is_leader() {
             if let Some(entries) = &self.node.actions().append_log_entries {
                 if !entries.is_empty() {

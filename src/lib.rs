@@ -213,10 +213,10 @@ mod tests {
         let server_addr2 = server2.listen_addr();
         let handle = std::thread::spawn(move || {
             let mut contact_addr = server_addr0;
-            for addr in [server_addr1, server_addr2] {
-                let result: AddServerResult =
+            for (i, addr) in [server_addr1, server_addr2].into_iter().enumerate() {
+                let output: AddServerOutput =
                     rpc(contact_addr, Request::add_server(request_id(0), addr));
-                assert_eq!(result.error, None);
+                assert_eq!(output.members.len(), 2 + i);
                 contact_addr = addr;
 
                 // TODO:
