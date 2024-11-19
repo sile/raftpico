@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     command::{Caller, Command2, LogEntry},
     server2::{ClusterSettings, Commands, Member, ServerInstanceId},
+    InputKind,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,6 +31,11 @@ pub enum Request {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         params: RemoveServerParams,
+    },
+    Apply {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+        params: ApplyParams,
     },
     // Internal APIs
     Propose {
@@ -261,6 +267,14 @@ pub struct AddServerParams {
 // TODO: #[serde(rename_all = "camelCase")]
 pub struct RemoveServerParams {
     pub server_addr: SocketAddr,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ApplyParams {
+    pub kind: InputKind,
+    pub input: serde_json::Value,
+    // [NOTE] Cannot use RawValue here: https://github.com/serde-rs/json/issues/545
+    // pub input: Box<RawValue>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

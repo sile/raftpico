@@ -76,7 +76,7 @@ mod tests {
 
     use jsonlrpc::{RequestId, ResponseObject, RpcClient};
     use machine::{Context2, Machine2};
-    use message::{AddServerOutput, CreateClusterOutput, RemoveServerOutput};
+    use message::{AddServerOutput, ApplyParams, CreateClusterOutput, RemoveServerOutput};
     use request::{AddServerResult, CreateClusterResult, OutputResult, Request, Response};
     use serde::{Deserialize, Serialize};
     use server2::{ErrorKind, RaftServer};
@@ -239,10 +239,7 @@ mod tests {
         let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
         let handle = std::thread::spawn(move || {
             for (i, addr) in addrs.into_iter().enumerate() {
-                let _v: serde_json::Value = rpc(
-                    addr,
-                    Request::command(request_id(0), &i).expect("unreachable"),
-                );
+                let _v: serde_json::Value = rpc(addr, apply_command_request(i));
             }
         });
 
@@ -253,6 +250,17 @@ mod tests {
         }
         for server in &servers {
             assert_eq!(*server.machine(), 0 + 1 + 2);
+        }
+    }
+
+    fn apply_command_request<T: Serialize>(input: T) -> crate::message::Request {
+        crate::message::Request::Apply {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            id: RequestId::Number(0),
+            params: ApplyParams {
+                kind: InputKind::Command,
+                input: serde_json::to_value(&input).expect("unreachable"),
+            },
         }
     }
 
