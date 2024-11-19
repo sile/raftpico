@@ -66,6 +66,11 @@ pub enum Request {
         id: RequestId, // TODO: remove
         params: RequestVoteParams,
     },
+    RequestVoteResult {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId, // TODO: remove
+        params: RequestVoteResultParams,
+    },
 }
 
 impl Request {
@@ -102,7 +107,15 @@ impl Request {
             raftbare::Message::RequestVoteReply {
                 header,
                 vote_granted,
-            } => todo!(),
+            } => Self::RequestVoteResult {
+                jsonrpc: JsonRpcVersion::V2,
+                id: RequestId::Number(header.seqno.get() as i64),
+                params: RequestVoteResultParams {
+                    from: header.from.get(),
+                    term: header.term.get(),
+                    vote_granted,
+                },
+            },
             raftbare::Message::AppendEntriesReply {
                 header,
                 last_position,
@@ -172,6 +185,30 @@ impl RequestVoteParams {
                 term: Term::new(self.last_log_term),
                 index: LogIndex::new(self.last_log_index),
             },
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RequestVoteResultParams {
+    pub from: u64,
+    pub term: u64,
+    pub vote_granted: bool,
+}
+
+impl RequestVoteResultParams {
+    pub fn into_raft_message(self, caller: &Caller) -> raftbare::Message {
+        let RequestId::Number(request_id) = caller.request_id else {
+            todo!("make this branch unreachable");
+        };
+
+        raftbare::Message::RequestVoteReply {
+            header: MessageHeader {
+                from: NodeId::new(self.from),
+                term: Term::new(self.term),
+                seqno: MessageSeqNo::new(request_id as u64),
+            },
+            vote_granted: self.vote_granted,
         }
     }
 }

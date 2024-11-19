@@ -19,7 +19,7 @@ use crate::{
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
         CreateClusterOutput, InitNodeParams, NotifyServerAddrParams, ProposeParams, Proposer,
-        RemoveServerParams, Request, RequestVoteParams,
+        RemoveServerParams, Request, RequestVoteParams, RequestVoteResultParams,
     },
     request::CreateClusterParams,
     storage::FileStorage,
@@ -334,7 +334,7 @@ impl<M: Machine2> RaftServer<M> {
 
     fn handle_response(&mut self, response: ResponseObject) -> std::io::Result<()> {
         match response {
-            ResponseObject::Ok { result, id, .. } => todo!(),
+            ResponseObject::Ok { result, id, .. } => todo!("{result:?}, {id:?}"),
             ResponseObject::Err { error, .. }
                 if error.code == ErrorKind::NotClusterMember.code() =>
             {
@@ -699,6 +699,9 @@ impl<M: Machine2> RaftServer<M> {
             Request::RequestVote { id, params, .. } => {
                 self.handle_request_vote_request(Caller::new(from, id), params)
             }
+            Request::RequestVoteResult { id, params, .. } => {
+                self.handle_request_vote_result_request(Caller::new(from, id), params)
+            }
         }
     }
 
@@ -721,6 +724,21 @@ impl<M: Machine2> RaftServer<M> {
         &mut self,
         caller: Caller,
         params: RequestVoteParams,
+    ) -> std::io::Result<()> {
+        if !self.is_initialized() {
+            // TODO: stats
+            return Ok(());
+        }
+
+        let message = params.into_raft_message(&caller);
+        self.node.handle_message(message);
+        Ok(())
+    }
+
+    fn handle_request_vote_result_request(
+        &mut self,
+        caller: Caller,
+        params: RequestVoteResultParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
             // TODO: stats
