@@ -7,9 +7,7 @@ use std::{
 use jsonlrpc::{ErrorCode, ErrorObject, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll, Token};
-use raftbare::{
-    Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, Node, NodeId, Role, Term,
-};
+use raftbare::{Action, ClusterConfig, LogEntries, LogIndex, Node, NodeId, Role, Term};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -791,7 +789,7 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         params: AddServerParams,
     ) -> std::io::Result<()> {
-        if self.node().is_none() {
+        if !self.is_initialized() {
             self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
         }
@@ -802,7 +800,7 @@ impl<M: Machine2> RaftServer<M> {
                 client: caller,
             },
         };
-        let _ = self.propose_command(command); // Always succeeds
+        self.propose_command(command)?;
 
         Ok(())
     }
@@ -812,7 +810,7 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         params: RemoveServerParams,
     ) -> std::io::Result<()> {
-        if self.node().is_none() {
+        if !self.is_initialized() {
             self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
         }
@@ -824,7 +822,7 @@ impl<M: Machine2> RaftServer<M> {
                 client: caller,
             },
         };
-        let _ = self.propose_command(command); // Always succeeds
+        self.propose_command(command)?;
 
         Ok(())
     }
@@ -834,7 +832,7 @@ impl<M: Machine2> RaftServer<M> {
         caller: Caller,
         settings: ClusterSettings,
     ) -> std::io::Result<()> {
-        if self.node().is_some() {
+        if self.is_initialized() {
             self.reply_error(caller, ErrorKind::ClusterAlreadyCreated.object())?;
             return Ok(());
         }
@@ -854,7 +852,7 @@ impl<M: Machine2> RaftServer<M> {
                 client: caller,
             },
         };
-        self.propose_command(command); // Always succeeds
+        self.propose_command(command)?;
 
         Ok(())
     }
@@ -863,27 +861,30 @@ impl<M: Machine2> RaftServer<M> {
         self.node.role().is_leader()
     }
 
-    // TODO: remove `-> CommitPromise`
-    fn propose_command(&mut self, command: Command2) -> CommitPromise {
+    fn propose_command(&mut self, command: Command2) -> std::io::Result<()> {
+        assert!(self.is_initialized());
+
         if !self.is_leader() {
             todo!("remote propose");
         }
 
-        if matches!(command, Command2::ApplyQuery) && self.is_leader() {
-            if let Some(entries) = &self.node.actions().append_log_entries {
-                if !entries.is_empty() {
-                    // TODO: note comment (there are concurrent proposals)
-                    return CommitPromise::Pending(entries.last_position());
-                }
-            }
+        if matches!(command, Command2::ApplyQuery)
+            && self
+                .node
+                .actions()
+                .append_log_entries
+                .as_ref()
+                .map_or(false, |entries| !entries.is_empty())
+        {
+            // TODO: note comment
+            return Ok(());
         }
 
-        let promise = self.node.propose_command();
-        if !promise.is_rejected() {
-            self.local_commands
-                .insert(promise.log_position().index, command);
-        }
-        promise
+        let promise = self.node.propose_command(); // Always succeeds
+        self.local_commands
+            .insert(promise.log_position().index, command);
+
+        Ok(())
     }
 
     fn reply_ok<T: Serialize>(&mut self, caller: Caller, value: T) -> std::io::Result<()> {
