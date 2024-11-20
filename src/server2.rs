@@ -220,7 +220,9 @@ impl<M: Machine2> Machine2 for SystemMachine<M> {
                 let input = serde_json::from_value(input.clone()).expect("TODO: error response");
                 self.user_machine.apply(ctx, &input)
             }
-            Command2::ApplyQuery => todo!(),
+            Command2::ApplyQuery => {
+                // No action is required here.
+            }
         }
     }
 }
@@ -443,6 +445,7 @@ impl<M: Machine2> RaftServer<M> {
             }
 
             self.last_applied_index = self.node.commit_index();
+            self.handle_pending_queries()?;
 
             // TODO: snapshot handling
             // if self.commands.len() > self.max_log_entries_hint {
@@ -450,6 +453,37 @@ impl<M: Machine2> RaftServer<M> {
             // }
         }
 
+        Ok(())
+    }
+
+    fn handle_pending_queries(&mut self) -> std::io::Result<()> {
+        while let Some(query) = self.queries.peek() {
+            match query.promise.clone().poll(&self.node) {
+                CommitPromise::Pending(_) => {
+                    break;
+                }
+                CommitPromise::Rejected(_) => {
+                    todo!("error response");
+                }
+                CommitPromise::Accepted(_) => {
+                    let query = self.queries.pop().expect("unreachable");
+                    let input =
+                        serde_json::from_value(query.input).expect("TODO: reply error response");
+
+                    let mut ctx = Context2 {
+                        kind: InputKind::Query,
+                        node: &self.node,
+                        commit_index: self.last_applied_index,
+                        output: None,
+                        caller: Some(query.caller),
+                    };
+
+                    self.machine.user_machine.apply(&mut ctx, &input);
+                    let caller = ctx.caller.expect("unreachale");
+                    self.reply_output(caller, ctx.output)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -469,11 +503,9 @@ impl<M: Machine2> RaftServer<M> {
 
     fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
         let command = self.local_commands.get(&index).expect("bug");
-        let kind = if matches!(command, Command2::ApplyQuery) {
-            InputKind::Query
-        } else {
-            InputKind::Command
-        };
+        if matches!(command, Command2::ApplyQuery) {
+            return Ok(());
+        }
 
         let member_change = matches!(command, Command2::AddServer { .. });
 
@@ -483,7 +515,7 @@ impl<M: Machine2> RaftServer<M> {
             .filter(|p| p.server == self.instance_id)
             .map(|p| p.client.clone());
         let mut ctx = Context2 {
-            kind,
+            kind: InputKind::Command,
             node: &self.node,
             commit_index: index,
             output: None,
