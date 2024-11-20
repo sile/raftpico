@@ -77,7 +77,7 @@ mod tests {
     use jsonlrpc::{RequestId, ResponseObject, RpcClient};
     use machine::{Context2, Machine2};
     use message::{AddServerOutput, ApplyParams, CreateClusterOutput, RemoveServerOutput};
-    use request::{AddServerResult, CreateClusterResult, OutputResult, Request, Response};
+    use request::{CreateClusterResult, OutputResult, Request, Response};
     use serde::{Deserialize, Serialize};
     use server2::{ErrorKind, RaftServer};
 
@@ -475,12 +475,12 @@ mod tests {
     #[test]
     fn local_query() {
         let mut servers = Vec::new();
-        let mut server0 = Server::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
 
         // Create a cluster.
-        let server_addr0 = server0.addr();
+        let server_addr0 = server0.listen_addr();
         let handle = std::thread::spawn(move || {
-            rpc::<CreateClusterResult>(server_addr0, Request::create_cluster(request_id(0), None))
+            rpc::<CreateClusterOutput>(server_addr0, Request::create_cluster(request_id(0), None))
         });
         while !handle.is_finished() {
             server0.poll(POLL_TIMEOUT).expect("poll() failed");
@@ -488,20 +488,20 @@ mod tests {
         servers.push(server0);
 
         // Add two servers to the cluster.
-        let server1 = Server::start(auto_addr(), 1).expect("start() failed");
-        let server2 = Server::start(auto_addr(), 2).expect("start() failed");
-        let server_addr1 = server1.addr();
-        let server_addr2 = server2.addr();
+        let server1 = RaftServer::start(auto_addr(), 1).expect("start() failed");
+        let server2 = RaftServer::start(auto_addr(), 2).expect("start() failed");
+        let server_addr1 = server1.listen_addr();
+        let server_addr2 = server2.listen_addr();
         let handle = std::thread::spawn(move || {
             let mut contact_addr = server_addr0;
             for addr in [server_addr1, server_addr2] {
-                let result: AddServerResult =
+                let output: AddServerOutput =
                     rpc(contact_addr, Request::add_server(request_id(0), addr));
-                assert_eq!(result.error, None);
+                assert!(output.members.len() > 1);
                 contact_addr = addr;
 
                 // TODO:
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(500));
             }
         });
         servers.push(server1);
@@ -517,7 +517,7 @@ mod tests {
         }
 
         // Local query
-        let addrs = servers.iter().map(|s| s.addr()).collect::<Vec<_>>();
+        let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
         let handle = std::thread::spawn(move || {
             for (i, addr) in addrs.into_iter().enumerate() {
                 let v: OutputResult = rpc(
