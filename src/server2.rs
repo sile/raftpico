@@ -20,8 +20,9 @@ use crate::{
     machine::{Context2, Machine2},
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
-        CreateClusterOutput, InitNodeParams, NotifyServerAddrParams, ProposeParams, Proposer,
-        RemoveServerParams, Request, RequestVoteParams, RequestVoteResultParams,
+        CreateClusterOutput, InitNodeParams, NotifyServerAddrParams, ProposeParams,
+        ProposeQueryParams, Proposer, RemoveServerParams, Request, RequestVoteParams,
+        RequestVoteResultParams,
     },
     request::CreateClusterParams,
     storage::FileStorage,
@@ -749,6 +750,7 @@ impl<M: Machine2> RaftServer<M> {
                 self.handle_apply_request(Caller::new(from, id), params)
             }
             Request::Propose { params, .. } => self.handle_propose_request(params),
+            Request::ProposeQuery { params, .. } => self.handle_propose_query_request(params),
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
             Request::NotifyServerAddr { params, .. } => {
                 self.handle_notify_server_addr_request(params)
@@ -852,6 +854,10 @@ impl<M: Machine2> RaftServer<M> {
         Ok(())
     }
 
+    fn handle_propose_query_request(&mut self, params: ProposeQueryParams) -> std::io::Result<()> {
+        todo!()
+    }
+
     fn handle_append_entries_request(
         &mut self,
         caller: Caller,
@@ -947,7 +953,37 @@ impl<M: Machine2> RaftServer<M> {
             });
             return Ok(());
         }
-        todo!()
+
+        let Some(maybe_leader) = self.node.voted_for() else {
+            todo!("error response");
+        };
+        let request = Request::ProposeQuery {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            params: ProposeQueryParams {
+                origin_node_id: self.node.id().get(),
+            },
+        };
+
+        // TODO: optimize
+        let Some(addr) = self
+            .machine
+            .members
+            .iter()
+            .find(|x| *x.0 == maybe_leader.get())
+            .map(|x| x.1.addr)
+        else {
+            todo!();
+        };
+        let Some(client) = self
+            .rpc_clients
+            .values_mut()
+            .find(|c| c.server_addr() == addr)
+        else {
+            todo!("error response");
+        };
+        client.send(&mut self.poller, &request)?;
+
+        Ok(())
     }
 
     fn apply_local_query(
