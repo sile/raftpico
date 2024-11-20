@@ -860,8 +860,32 @@ impl<M: Machine2> RaftServer<M> {
                 self.propose_command(command)?;
             }
             InputKind::Query => todo!(),
-            InputKind::LocalQuery => todo!(),
+            InputKind::LocalQuery => {
+                self.apply_local_query(caller, params.input)?;
+            }
         }
+        Ok(())
+    }
+
+    fn apply_local_query(
+        &mut self,
+        caller: Caller,
+        input: serde_json::Value,
+    ) -> std::io::Result<()> {
+        let input = serde_json::from_value(input).expect("TODO: reply error response");
+
+        let mut ctx = Context2 {
+            kind: InputKind::LocalQuery,
+            node: &self.node,
+            commit_index: self.last_applied_index,
+            output: None,
+            caller: Some(caller),
+        };
+
+        self.machine.user_machine.apply(&mut ctx, &input);
+        let caller = ctx.caller.expect("unreachale");
+        self.reply_output(caller, ctx.output)?;
+
         Ok(())
     }
 

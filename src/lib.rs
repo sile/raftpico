@@ -77,7 +77,7 @@ mod tests {
     use jsonlrpc::{RequestId, ResponseObject, RpcClient};
     use machine::{Context2, Machine2};
     use message::{AddServerOutput, ApplyParams, CreateClusterOutput, RemoveServerOutput};
-    use request::{CreateClusterResult, OutputResult, Request, Response};
+    use request::{CreateClusterResult, Request, Response};
     use serde::{Deserialize, Serialize};
     use server2::{ErrorKind, RaftServer};
 
@@ -259,6 +259,17 @@ mod tests {
             id: RequestId::Number(0),
             params: ApplyParams {
                 kind: InputKind::Command,
+                input: serde_json::to_value(&input).expect("unreachable"),
+            },
+        }
+    }
+
+    fn apply_local_query_request<T: Serialize>(input: T) -> crate::message::Request {
+        crate::message::Request::Apply {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            id: RequestId::Number(0),
+            params: ApplyParams {
+                kind: InputKind::LocalQuery,
                 input: serde_json::to_value(&input).expect("unreachable"),
             },
         }
@@ -520,11 +531,8 @@ mod tests {
         let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
         let handle = std::thread::spawn(move || {
             for (i, addr) in addrs.into_iter().enumerate() {
-                let v: OutputResult = rpc(
-                    addr,
-                    Request::local_query(request_id(0), &0).expect("unreachable"),
-                );
-                assert_eq!(v.output, Some(serde_json::Value::Number(i.into())));
+                let v: usize = rpc(addr, apply_local_query_request(0));
+                assert_eq!(v, i);
             }
         });
 
