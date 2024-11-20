@@ -7,7 +7,9 @@ use std::{
 use jsonlrpc::{ErrorCode, ErrorObject, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll, Token};
-use raftbare::{Action, ClusterConfig, LogEntries, LogIndex, Node, NodeId, Role, Term};
+use raftbare::{
+    Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, Node, NodeId, Role, Term,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -859,12 +861,27 @@ impl<M: Machine2> RaftServer<M> {
                 };
                 self.propose_command(command)?;
             }
-            InputKind::Query => todo!(),
+            InputKind::Query => {
+                self.handle_apply_query_request(caller, params.input)?;
+            }
             InputKind::LocalQuery => {
                 self.apply_local_query(caller, params.input)?;
             }
         }
         Ok(())
+    }
+
+    fn handle_apply_query_request(
+        &mut self,
+        caller: Caller,
+        input: serde_json::Value,
+    ) -> std::io::Result<()> {
+        if self.is_leader() {
+            let command = Command2::ApplyQuery;
+            let promise = self.propose_command_leader(command);
+            return Ok(());
+        }
+        todo!()
     }
 
     fn apply_local_query(
@@ -982,23 +999,31 @@ impl<M: Machine2> RaftServer<M> {
             return Ok(());
         }
 
-        if matches!(command, Command2::ApplyQuery)
-            && self
-                .node
-                .actions()
-                .append_log_entries
-                .as_ref()
-                .map_or(false, |entries| !entries.is_empty())
+        self.propose_command_leader(command);
+        Ok(())
+    }
+
+    fn propose_command_leader(&mut self, command: Command2) -> CommitPromise {
+        if let Some(promise) = matches!(command, Command2::ApplyQuery)
+            .then_some(())
+            .and_then(|()| self.node.actions().append_log_entries.as_ref())
+            .and_then(|entries| {
+                if entries.is_empty() {
+                    None
+                } else {
+                    Some(CommitPromise::Pending(entries.last_position()))
+                }
+            })
         {
             // TODO: note comment
-            return Ok(());
+            return promise;
         }
 
         let promise = self.node.propose_command(); // Always succeeds
         self.local_commands
             .insert(promise.log_position().index, command);
 
-        Ok(())
+        promise
     }
 
     fn reply_ok<T: Serialize>(&mut self, caller: Caller, value: T) -> std::io::Result<()> {
