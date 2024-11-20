@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BinaryHeap, HashMap, HashSet},
     net::SocketAddr,
     time::{Duration, Instant},
 };
@@ -231,6 +231,35 @@ pub type Commands = BTreeMap<LogIndex, Command2>;
 pub type ServerInstanceId = Uuid;
 
 #[derive(Debug)]
+pub struct PendingQuery {
+    pub promise: CommitPromise,
+    pub input: serde_json::Value,
+    pub caller: Caller,
+}
+
+impl PartialEq for PendingQuery {
+    fn eq(&self, other: &Self) -> bool {
+        self.promise.log_position() == other.promise.log_position()
+    }
+}
+
+impl Eq for PendingQuery {}
+
+impl PartialOrd for PendingQuery {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PendingQuery {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let p0 = self.promise.log_position();
+        let p1 = other.promise.log_position();
+        (p0.term, p0.index).cmp(&(p1.term, p1.index)).reverse()
+    }
+}
+
+#[derive(Debug)]
 pub struct RaftServer<M> {
     instance_id: ServerInstanceId,
     poller: Poll,
@@ -245,6 +274,7 @@ pub struct RaftServer<M> {
     last_applied_index: LogIndex,
     local_commands: Commands,
     dirty_cluster_config: bool,
+    queries: BinaryHeap<PendingQuery>,
     next_token: Token,
     machine: SystemMachine<M>,
 }
@@ -269,6 +299,7 @@ impl<M: Machine2> RaftServer<M> {
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index: LogIndex::ZERO,
             dirty_cluster_config: false,
+            queries: BinaryHeap::new(),
             next_token: CLIENT_TOKEN_MIN,
             machine: SystemMachine::new(machine),
         })
@@ -879,6 +910,11 @@ impl<M: Machine2> RaftServer<M> {
         if self.is_leader() {
             let command = Command2::ApplyQuery;
             let promise = self.propose_command_leader(command);
+            self.queries.push(PendingQuery {
+                promise,
+                input,
+                caller,
+            });
             return Ok(());
         }
         todo!()
