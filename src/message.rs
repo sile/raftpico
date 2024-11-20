@@ -39,9 +39,16 @@ pub enum Request {
     },
     // Internal APIs
     Propose {
+        // TODO: ProposeCommand (?)
         jsonrpc: JsonRpcVersion,
         params: ProposeParams,
     },
+    // ProposeQuery {
+    //     jsonrpc: JsonRpcVersion,
+    // },
+    // NotifyQueryPromise {
+    //     jsonrpc: JsonRpcVersion,
+    // },
     InitNode {
         jsonrpc: JsonRpcVersion,
         params: InitNodeParams,

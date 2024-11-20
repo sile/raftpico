@@ -10,7 +10,7 @@ use mio::{Events, Poll, Token};
 use raftbare::{
     Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, Node, NodeId, Role, Term,
 };
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use uuid::Uuid;
@@ -270,7 +270,6 @@ pub struct RaftServer<M> {
     rpc_clients: HashMap<Token, RpcClient>,
     node_id_to_token: HashMap<NodeId, Token>,
     node: Node,
-    rng: StdRng,
     storage: Option<FileStorage>,
     election_abs_timeout: Instant,
     last_applied_index: LogIndex,
@@ -295,7 +294,6 @@ impl<M: Machine2> RaftServer<M> {
             rpc_clients: HashMap::new(),
             node_id_to_token: HashMap::new(),
             node: Node::start(UNINIT_NODE_ID),
-            rng: StdRng::from_entropy(),
             storage: None, // TODO
             local_commands: Commands::new(),
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
@@ -730,7 +728,7 @@ impl<M: Machine2> RaftServer<M> {
         let max = self.machine.settings.max_election_timeout;
         let timeout = match self.node.role() {
             Role::Follower => max,
-            Role::Candidate => self.rng.gen_range(min..=max),
+            Role::Candidate => rand::thread_rng().gen_range(min..=max),
             Role::Leader => min,
         };
         self.election_abs_timeout = Instant::now() + timeout;
