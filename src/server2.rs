@@ -8,7 +8,8 @@ use jsonlrpc::{ErrorCode, ErrorObject, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll, Token};
 use raftbare::{
-    Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, Node, NodeId, Role, Term,
+    Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, LogPosition, Node, NodeId, Role,
+    Term,
 };
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -871,6 +872,7 @@ impl<M: Machine2> RaftServer<M> {
                 params: NotifyQueryPromiseParams {
                     promise_term: promise.log_position().term.get(),
                     promise_log_index: promise.log_position().index.get(),
+                    input: params.input,
                     caller: params.caller,
                 },
             },
@@ -906,7 +908,16 @@ impl<M: Machine2> RaftServer<M> {
         &mut self,
         params: NotifyQueryPromiseParams,
     ) -> std::io::Result<()> {
-        todo!()
+        let promise = CommitPromise::Pending(LogPosition {
+            term: Term::new(params.promise_term),
+            index: LogIndex::new(params.promise_log_index),
+        });
+        self.queries.push(PendingQuery {
+            promise,
+            input: params.input,
+            caller: params.caller,
+        });
+        Ok(())
     }
 
     fn handle_append_entries_request(
@@ -1012,6 +1023,7 @@ impl<M: Machine2> RaftServer<M> {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             params: ProposeQueryParams {
                 origin_node_id: self.node.id().get(),
+                input,
                 caller,
             },
         };

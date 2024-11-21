@@ -372,6 +372,7 @@ pub struct ProposeParams {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeQueryParams {
     pub origin_node_id: u64,
+    pub input: serde_json::Value, // TODO: remove
     pub caller: Caller,
 }
 
@@ -379,6 +380,7 @@ pub struct ProposeQueryParams {
 pub struct NotifyQueryPromiseParams {
     pub promise_term: u64,
     pub promise_log_index: u64,
+    pub input: serde_json::Value, // TODO: remove
     pub caller: Caller,
 }
 
