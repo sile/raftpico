@@ -747,7 +747,9 @@ impl<M: Machine2> RaftServer<M> {
             Request::RemoveServer { id, params, .. } => {
                 self.handle_remove_server_request(Caller::new(from, id), params)
             }
-            Request::TakeSnapshot { id, .. } => todo!(),
+            Request::TakeSnapshot { id, .. } => {
+                self.handle_take_snapshot_request(Caller::new(from, id))
+            }
             Request::Apply { id, params, .. } => {
                 self.handle_apply_request(Caller::new(from, id), params)
             }
@@ -773,6 +775,10 @@ impl<M: Machine2> RaftServer<M> {
                 self.handle_request_vote_result_request(Caller::new(from, id), params)
             }
         }
+    }
+
+    fn handle_take_snapshot_request(&mut self, caller: Caller) -> std::io::Result<()> {
+        Ok(())
     }
 
     fn handle_append_entries_result_request(
