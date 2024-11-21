@@ -32,6 +32,10 @@ pub enum Request {
         id: RequestId,
         params: RemoveServerParams,
     },
+    TakeSnapshot {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+    },
     Apply {
         jsonrpc: JsonRpcVersion,
         id: RequestId,

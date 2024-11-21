@@ -41,7 +41,7 @@ const EVENTS_CAPACITY: usize = 1024;
 const SEED_NODE_ID: NodeId = NodeId::new(0);
 const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
 
-// TODO: move
+// TODO: move or remove?
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(into = "CreateClusterParams", try_from = "CreateClusterParams")]
 pub struct ClusterSettings {
@@ -747,6 +747,7 @@ impl<M: Machine2> RaftServer<M> {
             Request::RemoveServer { id, params, .. } => {
                 self.handle_remove_server_request(Caller::new(from, id), params)
             }
+            Request::TakeSnapshot { id, .. } => todo!(),
             Request::Apply { id, params, .. } => {
                 self.handle_apply_request(Caller::new(from, id), params)
             }
