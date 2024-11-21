@@ -20,9 +20,9 @@ use crate::{
     machine::{Context2, Machine2},
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
-        CreateClusterOutput, InitNodeParams, NotifyServerAddrParams, ProposeParams,
-        ProposeQueryParams, Proposer, RemoveServerParams, Request, RequestVoteParams,
-        RequestVoteResultParams,
+        CreateClusterOutput, InitNodeParams, NotifyQueryPromiseParams, NotifyServerAddrParams,
+        ProposeParams, ProposeQueryParams, Proposer, RemoveServerParams, Request,
+        RequestVoteParams, RequestVoteResultParams,
     },
     request::CreateClusterParams,
     storage::FileStorage,
@@ -751,6 +751,9 @@ impl<M: Machine2> RaftServer<M> {
             }
             Request::Propose { params, .. } => self.handle_propose_request(params),
             Request::ProposeQuery { params, .. } => self.handle_propose_query_request(params),
+            Request::NotifyQueryPromise { params, .. } => {
+                self.handle_notify_query_promise_request(params)
+            }
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
             Request::NotifyServerAddr { params, .. } => {
                 self.handle_notify_server_addr_request(params)
@@ -855,6 +858,54 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     fn handle_propose_query_request(&mut self, params: ProposeQueryParams) -> std::io::Result<()> {
+        if !self.is_leader() {
+            todo!("redirect if possible");
+        }
+
+        let promise = self.propose_command_leader(Command2::ApplyQuery);
+        let node_id = NodeId::new(params.origin_node_id);
+        self.send_to(
+            node_id,
+            &Request::NotifyQueryPromise {
+                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+                params: NotifyQueryPromiseParams {
+                    promise_term: promise.log_position().term.get(),
+                    promise_log_index: promise.log_position().index.get(),
+                    caller: params.caller,
+                },
+            },
+        )?;
+        Ok(())
+    }
+
+    fn send_to<T: Serialize>(&mut self, node_id: NodeId, message: &T) -> std::io::Result<()> {
+        // TODO: optimize
+        let Some(addr) = self
+            .machine
+            .members
+            .iter()
+            .find(|(&id, _)| id == node_id.get())
+            .map(|(_, m)| m.addr)
+        else {
+            return Ok(());
+        };
+
+        let Some(client) = self
+            .rpc_clients
+            .values_mut()
+            .find(|c| c.server_addr() == addr)
+        else {
+            return Ok(());
+        };
+
+        client.send(&mut self.poller, message)?;
+        Ok(())
+    }
+
+    fn handle_notify_query_promise_request(
+        &mut self,
+        params: NotifyQueryPromiseParams,
+    ) -> std::io::Result<()> {
         todo!()
     }
 
@@ -961,6 +1012,7 @@ impl<M: Machine2> RaftServer<M> {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             params: ProposeQueryParams {
                 origin_node_id: self.node.id().get(),
+                caller,
             },
         };
 

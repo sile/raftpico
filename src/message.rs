@@ -47,9 +47,10 @@ pub enum Request {
         jsonrpc: JsonRpcVersion,
         params: ProposeQueryParams,
     },
-    // NotifyQueryPromise {
-    //     jsonrpc: JsonRpcVersion,
-    // },
+    NotifyQueryPromise {
+        jsonrpc: JsonRpcVersion,
+        params: NotifyQueryPromiseParams,
+    },
     InitNode {
         jsonrpc: JsonRpcVersion,
         params: InitNodeParams,
@@ -371,6 +372,14 @@ pub struct ProposeParams {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeQueryParams {
     pub origin_node_id: u64,
+    pub caller: Caller,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NotifyQueryPromiseParams {
+    pub promise_term: u64,
+    pub promise_log_index: u64,
+    pub caller: Caller,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
