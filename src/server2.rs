@@ -47,7 +47,6 @@ const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
 pub struct ClusterSettings {
     pub min_election_timeout: Duration,
     pub max_election_timeout: Duration,
-    pub max_local_log_entries: usize,
 }
 
 impl Default for ClusterSettings {
@@ -55,7 +54,6 @@ impl Default for ClusterSettings {
         Self {
             min_election_timeout: Duration::from_millis(100),
             max_election_timeout: Duration::from_millis(1000),
-            max_local_log_entries: 100000,
         }
     }
 }
@@ -65,7 +63,6 @@ impl From<ClusterSettings> for CreateClusterParams {
         Self {
             min_election_timeout_ms: value.min_election_timeout.as_millis() as usize,
             max_election_timeout_ms: value.max_election_timeout.as_millis() as usize,
-            max_log_entries_hint: value.max_local_log_entries,
         }
     }
 }
@@ -81,7 +78,6 @@ impl TryFrom<CreateClusterParams> for ClusterSettings {
         Ok(Self {
             min_election_timeout: Duration::from_millis(value.min_election_timeout_ms as u64),
             max_election_timeout: Duration::from_millis(value.max_election_timeout_ms as u64),
-            max_local_log_entries: value.max_log_entries_hint,
         })
     }
 }
