@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{Caller, Command2, LogEntry},
+    request::SnapshotParams,
     server2::{ClusterSettings, Commands, Member, ServerInstanceId},
     InputKind,
 };
@@ -62,6 +63,10 @@ pub enum Request {
     NotifyServerAddr {
         jsonrpc: JsonRpcVersion,
         params: NotifyServerAddrParams,
+    },
+    Snapshot {
+        jsonrpc: JsonRpcVersion,
+        params: SnapshotParams,
     },
     // Raft messages
     AppendEntries {

@@ -677,8 +677,18 @@ impl<M: Machine2> RaftServer<M> {
             Action::AppendLogEntries(entries) => self.handle_append_log_entries_action(entries)?,
             Action::BroadcastMessage(message) => self.handle_broadcast_message_action(message)?,
             Action::SendMessage(dst, message) => self.handle_send_message_action(dst, message)?,
-            Action::InstallSnapshot(_) => todo!(),
+            Action::InstallSnapshot(dst) => self.handle_install_snapshot_action(dst)?,
         }
+        Ok(())
+    }
+
+    fn handle_install_snapshot_action(&mut self, dst: NodeId) -> std::io::Result<()> {
+        let snapshot = self.snapshot(self.node.commit_index())?;
+        let request = Request::Snapshot {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            params: snapshot,
+        };
+        self.send_to(dst, &request)?;
         Ok(())
     }
 
@@ -776,6 +786,7 @@ impl<M: Machine2> RaftServer<M> {
             Request::NotifyQueryPromise { params, .. } => {
                 self.handle_notify_query_promise_request(params)
             }
+            Request::Snapshot { params, .. } => self.handle_snapshot_request(params),
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
             Request::NotifyServerAddr { params, .. } => {
                 self.handle_notify_server_addr_request(params)
@@ -795,6 +806,45 @@ impl<M: Machine2> RaftServer<M> {
         }
     }
 
+    fn handle_snapshot_request(&mut self, params: SnapshotParams) -> std::io::Result<()> {
+        todo!()
+    }
+
+    // TODO
+    fn snapshot(&self, index: LogIndex) -> std::io::Result<SnapshotParams> {
+        let members = self
+            .machine
+            .members
+            .iter()
+            .map(|(&node_id, m)| MemberJson {
+                node_id,
+                server_addr: m.addr,
+                inviting: false, // TODO: remove
+                evicting: false, // TODO: remove
+            })
+            .collect();
+        let (last_included, config) = self
+            .node
+            .log()
+            .get_position_and_config(index)
+            .expect("unreachable");
+        let snapshot = SnapshotParams {
+            last_included_term: last_included.term.get(),
+            last_included_index: last_included.index.get(),
+            voters: config.voters.iter().map(|n| n.get()).collect(),
+            new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
+            min_election_timeout: Duration::default(), // TODO: remove
+            max_election_timeout: Duration::default(),
+            max_log_entries_hint: 0, // TODO: remove
+            next_node_id: 0,         // TODO: remove
+            members,
+
+            // TODO: impl Clone for Machine ?
+            machine: serde_json::to_value(&self.machine)?,
+        };
+        Ok(snapshot)
+    }
+
     fn take_snapshot(&mut self, index: LogIndex) -> std::io::Result<()> {
         let (position, config) = self
             .node
@@ -808,42 +858,15 @@ impl<M: Machine2> RaftServer<M> {
         self.local_commands = self.local_commands.split_off(&(index + LogIndex::new(1)));
 
         // TODO: factor out
-        if let Some(storage) = &mut self.storage {
-            let members = self
-                .machine
-                .members
-                .iter()
-                .map(|(&node_id, m)| MemberJson {
-                    node_id,
-                    server_addr: m.addr,
-                    inviting: false, // TODO: remove
-                    evicting: false, // TODO: remove
-                })
-                .collect();
-            let (last_included, config) = self
-                .node
-                .log()
-                .get_position_and_config(index)
-                .expect("unreachable");
-            let snapshot = SnapshotParams {
-                last_included_term: last_included.term.get(),
-                last_included_index: last_included.index.get(),
-                voters: config.voters.iter().map(|n| n.get()).collect(),
-                new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
-                min_election_timeout: Duration::default(), // TODO: remove
-                max_election_timeout: Duration::default(),
-                max_log_entries_hint: 0, // TODO: remove
-                next_node_id: 0,         // TODO: remove
-                members,
-
-                // TODO: impl Clone for Machine ?
-                machine: serde_json::to_value(&self.machine)?,
-            };
-            storage.install_snapshot(snapshot)?;
-            storage.save_node_id(self.node.id())?;
-            storage.save_current_term(self.node.current_term())?;
-            storage.save_voted_for(self.node.voted_for())?;
-            storage.append_entries2(self.node.log().entries(), &self.local_commands)?;
+        if self.storage.is_some() {
+            let snapshot = self.snapshot(index)?;
+            if let Some(storage) = &mut self.storage {
+                storage.install_snapshot(snapshot)?;
+                storage.save_node_id(self.node.id())?;
+                storage.save_current_term(self.node.current_term())?;
+                storage.save_voted_for(self.node.voted_for())?;
+                storage.append_entries2(self.node.log().entries(), &self.local_commands)?;
+            }
         }
 
         Ok(())
