@@ -7,7 +7,10 @@ use raftbare::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{command::Command, server::Commands};
+use crate::{
+    command::{Command, Command2},
+    server::Commands,
+};
 
 pub fn is_known_external_method(method: &str) -> bool {
     // TODO: update
@@ -206,6 +209,7 @@ impl AppendEntriesCallParams {
                     entries.push(raftbare::LogEntry::Command);
                     commands.insert(index, command);
                 }
+                _ => unreachable!(),
             }
         }
         Message::AppendEntriesCall {
@@ -328,6 +332,7 @@ pub enum LogEntry {
     },
     // TODO: flatten
     Command(Command),
+    Command2(Command2), // TODO
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

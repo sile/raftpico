@@ -420,3 +420,8 @@ pub struct AddServerOutput {
 pub struct RemoveServerOutput {
     pub members: Vec<Member>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TakeSnapshotOutput {
+    pub snapshot_index: u64,
+}

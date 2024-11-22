@@ -23,7 +23,7 @@ use crate::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
         CreateClusterOutput, InitNodeParams, NotifyQueryPromiseParams, NotifyServerAddrParams,
         ProposeParams, ProposeQueryParams, Proposer, RemoveServerParams, Request,
-        RequestVoteParams, RequestVoteResultParams,
+        RequestVoteParams, RequestVoteResultParams, TakeSnapshotOutput,
     },
     request::{CreateClusterParams, MemberJson, SnapshotParams},
     storage::FileStorage,
@@ -778,60 +778,64 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     fn handle_take_snapshot_request(&mut self, caller: Caller) -> std::io::Result<()> {
-        let index = self.node.commit_index();
-        let (position, config) = self
-            .node
-            .log()
-            .get_position_and_config(index)
-            .expect("unreachable");
-        let success = self
-            .node
-            .handle_snapshot_installed(position, config.clone());
-        assert!(success);
-        self.local_commands = self.local_commands.split_off(&(index + LogIndex::new(1)));
+        // let index = self.node.commit_index();
+        // let (position, config) = self
+        //     .node
+        //     .log()
+        //     .get_position_and_config(index)
+        //     .expect("unreachable");
+        // let success = self
+        //     .node
+        //     .handle_snapshot_installed(position, config.clone());
+        // assert!(success); // TODO:
+        // self.local_commands = self.local_commands.split_off(&(index + LogIndex::new(1)));
 
-        // TODO: factor out
-        if let Some(storage) = &mut self.storage {
-            let members = self
-                .machine
-                .members
-                .iter()
-                .map(|(&node_id, m)| MemberJson {
-                    node_id,
-                    server_addr: m.addr,
-                    inviting: false, // TODO: remove
-                    evicting: false, // TODO: remove
-                })
-                .collect();
-            let (last_included, config) = self
-                .node
-                .log()
-                .get_position_and_config(index)
-                .expect("unreachable");
-            let snapshot = SnapshotParams {
-                last_included_term: last_included.term.get(),
-                last_included_index: last_included.index.get(),
-                voters: config.voters.iter().map(|n| n.get()).collect(),
-                new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
-                min_election_timeout: Duration::default(), // TODO: remove
-                max_election_timeout: Duration::default(),
-                max_log_entries_hint: 0, // TODO: remove
-                next_node_id: 0,         // TODO: remove
-                members,
+        // // TODO: factor out
+        // if let Some(storage) = &mut self.storage {
+        //     let members = self
+        //         .machine
+        //         .members
+        //         .iter()
+        //         .map(|(&node_id, m)| MemberJson {
+        //             node_id,
+        //             server_addr: m.addr,
+        //             inviting: false, // TODO: remove
+        //             evicting: false, // TODO: remove
+        //         })
+        //         .collect();
+        //     let (last_included, config) = self
+        //         .node
+        //         .log()
+        //         .get_position_and_config(index)
+        //         .expect("unreachable");
+        //     let snapshot = SnapshotParams {
+        //         last_included_term: last_included.term.get(),
+        //         last_included_index: last_included.index.get(),
+        //         voters: config.voters.iter().map(|n| n.get()).collect(),
+        //         new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
+        //         min_election_timeout: Duration::default(), // TODO: remove
+        //         max_election_timeout: Duration::default(),
+        //         max_log_entries_hint: 0, // TODO: remove
+        //         next_node_id: 0,         // TODO: remove
+        //         members,
 
-                // TODO: impl Clone for Machine ?
-                machine: serde_json::to_value(&self.machine).expect("TODO"),
-            };
-            storage.install_snapshot(snapshot).expect("TODO");
-            storage.save_node_id(self.node.id()).expect("TODO");
-            storage
-                .save_current_term(self.node.current_term())
-                .expect("TODO");
-            storage.save_voted_for(self.node.voted_for()).expect("TODO");
-            storage
-                .append_entries(self.node.log().entries(), &self.local_commands)
-                .expect("TODO");
-        }
+        //         // TODO: impl Clone for Machine ?
+        //         machine: serde_json::to_value(&self.machine)?,
+        //     };
+        //     storage.install_snapshot(snapshot)?;
+        //     storage.save_node_id(self.node.id())?;
+        //     storage.save_current_term(self.node.current_term())?;
+        //     storage.save_voted_for(self.node.voted_for())?;
+        //     storage.append_entries2(self.node.log().entries(), &self.local_commands)?;
+        // }
+
+        // self.reply_ok(
+        //     caller,
+        //     TakeSnapshotOutput {
+        //         snapshot_index: index.get(),
+        //     },
+        // )?;
+
         Ok(())
     }
 

@@ -65,7 +65,7 @@ impl FileStorage {
         raft_log_entries: &raftbare::LogEntries,
         commands: &crate::server2::Commands,
     ) -> Result<()> {
-        let entries = Record::<_, SnapshotParams>::LogEntries(LogEntries::from_raftbare(
+        let entries = Record::<_, SnapshotParams>::LogEntries(LogEntries::from_raftbare2(
             raft_log_entries,
             commands,
         )?);
@@ -155,6 +155,30 @@ impl LogEntries {
         })
     }
 
+    pub fn from_raftbare2(
+        entries: &raftbare::LogEntries,
+        commands: &crate::server2::Commands,
+    ) -> Result<Self> {
+        Ok(Self {
+            prev_log_term: entries.prev_position().term.get(),
+            prev_log_index: entries.prev_position().index.get(),
+            entries: entries
+                .iter_with_positions()
+                .map(|(position, entry)| match entry {
+                    raftbare::LogEntry::Term(t) => LogEntry::Term(t.get()),
+                    raftbare::LogEntry::ClusterConfig(c) => LogEntry::Config {
+                        voters: c.voters.iter().map(|v| v.get()).collect(),
+                        new_voters: c.new_voters.iter().map(|v| v.get()).collect(),
+                    },
+                    raftbare::LogEntry::Command => {
+                        let command = commands.get(&position.index).expect("TODO: bug");
+                        LogEntry::Command2(command.clone())
+                    }
+                })
+                .collect(),
+        })
+    }
+
     pub fn to_raftbare(self, commands: &mut Commands) -> raftbare::LogEntries {
         let term = Term::new(self.prev_log_term);
         let mut index = LogIndex::new(self.prev_log_index);
@@ -173,6 +197,9 @@ impl LogEntries {
                 LogEntry::Command(command) => {
                     entries.push(raftbare::LogEntry::Command);
                     commands.insert(index, command);
+                }
+                _ => {
+                    todo!()
                 }
             }
         }

@@ -76,7 +76,9 @@ mod tests {
 
     use jsonlrpc::{RequestId, ResponseObject, RpcClient};
     use machine::{Context2, Machine2};
-    use message::{AddServerOutput, ApplyParams, CreateClusterOutput, RemoveServerOutput};
+    use message::{
+        AddServerOutput, ApplyParams, CreateClusterOutput, RemoveServerOutput, TakeSnapshotOutput,
+    };
     use request::{CreateClusterResult, Request, Response};
     use serde::{Deserialize, Serialize};
     use server2::{ErrorKind, RaftServer};
@@ -373,7 +375,7 @@ mod tests {
                 let _v: serde_json::Value = rpc(server_addr0, apply_command_request(i));
             }
 
-            let _v: serde_json::Value = rpc(
+            let _: TakeSnapshotOutput = rpc(
                 server_addr0,
                 crate::message::Request::TakeSnapshot {
                     jsonrpc: jsonlrpc::JsonRpcVersion::V2,
