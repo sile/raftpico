@@ -807,7 +807,35 @@ impl<M: Machine2> RaftServer<M> {
     }
 
     fn handle_snapshot_request(&mut self, params: SnapshotParams) -> std::io::Result<()> {
-        todo!()
+        if params.last_included_index <= self.node.commit_index().get() {
+            // TODO: stats
+            return Ok(());
+        }
+
+        self.machine = serde_json::from_value(params.machine.clone())?; // TODO: remove clone
+
+        let last_included = LogPosition {
+            term: params.last_included_term.into(),
+            index: params.last_included_index.into(),
+        };
+        let config = ClusterConfig {
+            voters: params.voters.iter().copied().map(NodeId::new).collect(),
+            new_voters: params.new_voters.iter().copied().map(NodeId::new).collect(),
+            ..Default::default()
+        };
+        self.last_applied_index = last_included.index;
+
+        let ok = self.node.handle_snapshot_installed(last_included, config);
+        assert!(ok); // TODO: error handling
+
+        if let Some(storage) = &mut self.storage {
+            storage.install_snapshot(params)?;
+            storage.save_node_id(self.node.id())?;
+            storage.save_current_term(self.node.current_term())?;
+            storage.save_voted_for(self.node.voted_for())?;
+            storage.append_entries2(self.node.log().entries(), &self.local_commands)?;
+        }
+        Ok(())
     }
 
     // TODO
