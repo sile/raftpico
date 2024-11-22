@@ -322,6 +322,10 @@ impl AppendEntriesParams {
                     );
                     raftbare::LogEntry::Command
                 }
+                LogEntry::TakeSnapshot { proposer } => {
+                    commands.insert(i, Command2::TakeSnapshot { proposer });
+                    raftbare::LogEntry::Command
+                }
                 LogEntry::ApplyCommand { input, proposer } => {
                     commands.insert(i, Command2::ApplyCommand { input, proposer });
                     raftbare::LogEntry::Command

@@ -222,6 +222,9 @@ impl<M: Machine2> Machine2 for SystemMachine<M> {
                 let input = serde_json::from_value(input.clone()).expect("TODO: error response");
                 self.user_machine.apply(ctx, &input)
             }
+            Command2::TakeSnapshot { .. } => {
+                unreachable!();
+            }
             Command2::ApplyQuery => {
                 // No action is required here.
             }
@@ -514,6 +517,21 @@ impl<M: Machine2> RaftServer<M> {
             .proposer()
             .filter(|p| p.server == self.instance_id)
             .map(|p| p.client.clone());
+        if matches!(command, Command2::TakeSnapshot { .. }) {
+            self.take_snapshot(index)?;
+
+            if let Some(caller) = caller {
+                self.reply_ok(
+                    caller,
+                    &TakeSnapshotOutput {
+                        snapshot_index: index.get(),
+                    },
+                )?;
+            }
+
+            return Ok(());
+        }
+
         let mut ctx = Context2 {
             kind: InputKind::Command,
             node: &self.node,
@@ -777,65 +795,68 @@ impl<M: Machine2> RaftServer<M> {
         }
     }
 
+    fn take_snapshot(&mut self, index: LogIndex) -> std::io::Result<()> {
+        let (position, config) = self
+            .node
+            .log()
+            .get_position_and_config(index)
+            .expect("unreachable");
+        let success = self
+            .node
+            .handle_snapshot_installed(position, config.clone());
+        assert!(success); // TODO:
+        self.local_commands = self.local_commands.split_off(&(index + LogIndex::new(1)));
+
+        // TODO: factor out
+        if let Some(storage) = &mut self.storage {
+            let members = self
+                .machine
+                .members
+                .iter()
+                .map(|(&node_id, m)| MemberJson {
+                    node_id,
+                    server_addr: m.addr,
+                    inviting: false, // TODO: remove
+                    evicting: false, // TODO: remove
+                })
+                .collect();
+            let (last_included, config) = self
+                .node
+                .log()
+                .get_position_and_config(index)
+                .expect("unreachable");
+            let snapshot = SnapshotParams {
+                last_included_term: last_included.term.get(),
+                last_included_index: last_included.index.get(),
+                voters: config.voters.iter().map(|n| n.get()).collect(),
+                new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
+                min_election_timeout: Duration::default(), // TODO: remove
+                max_election_timeout: Duration::default(),
+                max_log_entries_hint: 0, // TODO: remove
+                next_node_id: 0,         // TODO: remove
+                members,
+
+                // TODO: impl Clone for Machine ?
+                machine: serde_json::to_value(&self.machine)?,
+            };
+            storage.install_snapshot(snapshot)?;
+            storage.save_node_id(self.node.id())?;
+            storage.save_current_term(self.node.current_term())?;
+            storage.save_voted_for(self.node.voted_for())?;
+            storage.append_entries2(self.node.log().entries(), &self.local_commands)?;
+        }
+
+        Ok(())
+    }
+
     fn handle_take_snapshot_request(&mut self, caller: Caller) -> std::io::Result<()> {
-        // let index = self.node.commit_index();
-        // let (position, config) = self
-        //     .node
-        //     .log()
-        //     .get_position_and_config(index)
-        //     .expect("unreachable");
-        // let success = self
-        //     .node
-        //     .handle_snapshot_installed(position, config.clone());
-        // assert!(success); // TODO:
-        // self.local_commands = self.local_commands.split_off(&(index + LogIndex::new(1)));
-
-        // // TODO: factor out
-        // if let Some(storage) = &mut self.storage {
-        //     let members = self
-        //         .machine
-        //         .members
-        //         .iter()
-        //         .map(|(&node_id, m)| MemberJson {
-        //             node_id,
-        //             server_addr: m.addr,
-        //             inviting: false, // TODO: remove
-        //             evicting: false, // TODO: remove
-        //         })
-        //         .collect();
-        //     let (last_included, config) = self
-        //         .node
-        //         .log()
-        //         .get_position_and_config(index)
-        //         .expect("unreachable");
-        //     let snapshot = SnapshotParams {
-        //         last_included_term: last_included.term.get(),
-        //         last_included_index: last_included.index.get(),
-        //         voters: config.voters.iter().map(|n| n.get()).collect(),
-        //         new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
-        //         min_election_timeout: Duration::default(), // TODO: remove
-        //         max_election_timeout: Duration::default(),
-        //         max_log_entries_hint: 0, // TODO: remove
-        //         next_node_id: 0,         // TODO: remove
-        //         members,
-
-        //         // TODO: impl Clone for Machine ?
-        //         machine: serde_json::to_value(&self.machine)?,
-        //     };
-        //     storage.install_snapshot(snapshot)?;
-        //     storage.save_node_id(self.node.id())?;
-        //     storage.save_current_term(self.node.current_term())?;
-        //     storage.save_voted_for(self.node.voted_for())?;
-        //     storage.append_entries2(self.node.log().entries(), &self.local_commands)?;
-        // }
-
-        // self.reply_ok(
-        //     caller,
-        //     TakeSnapshotOutput {
-        //         snapshot_index: index.get(),
-        //     },
-        // )?;
-
+        let command = Command2::TakeSnapshot {
+            proposer: Proposer {
+                server: self.instance_id,
+                client: caller,
+            },
+        };
+        self.propose_command(command)?;
         Ok(())
     }
 

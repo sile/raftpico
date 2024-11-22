@@ -74,6 +74,7 @@ impl FileStorage {
         Ok(())
     }
 
+    // TODO: remove? (include this in system machine)
     pub fn save_node_id(&mut self, node_id: NodeId) -> Result<()> {
         self.file
             .write_value(&Record::<LogEntries, SnapshotParams>::NodeId(node_id.get()))?;

@@ -44,6 +44,9 @@ pub enum Command2 {
         server_addr: SocketAddr,
         proposer: Proposer,
     },
+    TakeSnapshot {
+        proposer: Proposer,
+    },
     ApplyCommand {
         // [NOTE] Cannot use RawValue here: https://github.com/serde-rs/json/issues/545
         // TODO: consider workaround
@@ -60,6 +63,7 @@ impl Command2 {
             Command2::CreateCluster { proposer, .. } => Some(proposer),
             Command2::AddServer { proposer, .. } => Some(proposer),
             Command2::RemoveServer { proposer, .. } => Some(proposer),
+            Command2::TakeSnapshot { proposer, .. } => Some(proposer),
             Command2::ApplyCommand { proposer, .. } => Some(proposer),
             Command2::ApplyQuery => None,
         }
@@ -100,6 +104,9 @@ pub enum LogEntry {
         server_addr: SocketAddr,
         proposer: Proposer,
     },
+    TakeSnapshot {
+        proposer: Proposer,
+    },
     ApplyCommand {
         // TODO: Cow? or Rc
         // TODO: input: Box<RawValue>,
@@ -136,6 +143,7 @@ impl LogEntry {
                         server_addr,
                         proposer,
                     },
+                    Command2::TakeSnapshot { proposer } => Self::TakeSnapshot { proposer },
                     Command2::RemoveServer {
                         server_addr,
                         proposer,
