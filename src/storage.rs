@@ -59,6 +59,21 @@ impl FileStorage {
         Ok(())
     }
 
+    // TOOD:
+    pub fn append_entries2(
+        &mut self,
+        raft_log_entries: &raftbare::LogEntries,
+        commands: &crate::server2::Commands,
+    ) -> Result<()> {
+        let entries = Record::<_, SnapshotParams>::LogEntries(LogEntries::from_raftbare(
+            raft_log_entries,
+            commands,
+        )?);
+        self.file.write_value(&entries)?;
+        self.maybe_fsync()?;
+        Ok(())
+    }
+
     pub fn save_node_id(&mut self, node_id: NodeId) -> Result<()> {
         self.file
             .write_value(&Record::<LogEntries, SnapshotParams>::NodeId(node_id.get()))?;
