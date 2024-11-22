@@ -2,15 +2,11 @@ use std::{net::SocketAddr, time::Duration};
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId, ResponseObject};
 use raftbare::{
-    ClusterConfig, CommitPromise, LogEntries, LogIndex, LogPosition, Message, MessageHeader,
-    MessageSeqNo, NodeId, Term,
+    CommitPromise, LogIndex, LogPosition, Message, MessageHeader, MessageSeqNo, NodeId, Term,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    command::{Command, Command2},
-    server::Commands,
-};
+use crate::command::{Command, Command2};
 
 pub fn is_known_external_method(method: &str) -> bool {
     // TODO: update
@@ -96,80 +92,6 @@ pub enum InternalRequest {
     },
 }
 
-impl InternalRequest {
-    pub fn from_raft_message(msg: Message, commands: &Commands) -> Self {
-        match msg {
-            Message::RequestVoteCall {
-                header: MessageHeader { from, term, seqno },
-                last_position,
-            } => Self::RequestVoteCall {
-                jsonrpc: JsonRpcVersion::V2,
-                params: RequestVoteCallParams {
-                    from: from.get(),
-                    term: term.get(),
-                    seqno: seqno.get(),
-                    last_log_term: last_position.term.get(),
-                    last_log_index: last_position.index.get(),
-                },
-            },
-            Message::RequestVoteReply {
-                header: MessageHeader { from, term, seqno },
-                vote_granted,
-            } => Self::RequestVoteReply {
-                jsonrpc: JsonRpcVersion::V2,
-                params: RequestVoteReplyParams {
-                    from: from.get(),
-                    term: term.get(),
-                    seqno: seqno.get(),
-                    vote_granted,
-                },
-            },
-            Message::AppendEntriesCall {
-                header: MessageHeader { from, term, seqno },
-                commit_index,
-                entries,
-            } => Self::AppendEntriesCall {
-                jsonrpc: JsonRpcVersion::V2,
-                params: AppendEntriesCallParams {
-                    from: from.get(),
-                    term: term.get(),
-                    seqno: seqno.get(),
-                    commit_index: commit_index.get(),
-                    prev_log_term: entries.prev_position().term.get(),
-                    prev_log_index: entries.prev_position().index.get(),
-                    entries: entries
-                        .iter_with_positions()
-                        .map(|(position, entry)| match entry {
-                            raftbare::LogEntry::Term(t) => LogEntry::Term(t.get()),
-                            raftbare::LogEntry::ClusterConfig(c) => LogEntry::Config {
-                                voters: c.voters.iter().map(|v| v.get()).collect(),
-                                new_voters: c.new_voters.iter().map(|v| v.get()).collect(),
-                            },
-                            raftbare::LogEntry::Command => {
-                                let command = commands.get(&position.index).expect("bug");
-                                LogEntry::Command(command.clone())
-                            }
-                        })
-                        .collect(),
-                },
-            },
-            Message::AppendEntriesReply {
-                header: MessageHeader { from, term, seqno },
-                last_position,
-            } => Self::AppendEntriesReply {
-                jsonrpc: JsonRpcVersion::V2,
-                params: AppendEntriesReplyParams {
-                    from: from.get(),
-                    term: term.get(),
-                    seqno: seqno.get(),
-                    last_log_term: last_position.term.get(),
-                    last_log_index: last_position.index.get(),
-                },
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppendEntriesCallParams {
     from: u64,
@@ -179,45 +101,6 @@ pub struct AppendEntriesCallParams {
     prev_log_term: u64,
     prev_log_index: u64,
     entries: Vec<LogEntry>,
-}
-
-impl AppendEntriesCallParams {
-    pub fn to_raft_message(self, commands: &mut Commands) -> Message {
-        let header = MessageHeader {
-            from: NodeId::new(self.from),
-            term: Term::new(self.term),
-            seqno: MessageSeqNo::new(self.seqno),
-        };
-
-        let mut index = LogIndex::new(self.prev_log_index);
-        let mut entries = LogEntries::new(LogPosition {
-            term: Term::new(self.prev_log_term),
-            index,
-        });
-        for entry in self.entries {
-            index = LogIndex::new(index.get() + 1);
-            match entry {
-                LogEntry::Term(t) => entries.push(raftbare::LogEntry::Term(Term::new(t))),
-                LogEntry::Config { voters, new_voters } => {
-                    entries.push(raftbare::LogEntry::ClusterConfig(ClusterConfig {
-                        voters: voters.into_iter().map(NodeId::new).collect(),
-                        new_voters: new_voters.into_iter().map(NodeId::new).collect(),
-                        ..Default::default()
-                    }))
-                }
-                LogEntry::Command(command) => {
-                    entries.push(raftbare::LogEntry::Command);
-                    commands.insert(index, command);
-                }
-                _ => unreachable!(),
-            }
-        }
-        Message::AppendEntriesCall {
-            header,
-            commit_index: LogIndex::new(self.commit_index),
-            entries,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

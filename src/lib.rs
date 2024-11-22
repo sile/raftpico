@@ -4,13 +4,11 @@ pub mod io;
 mod machine;
 pub mod message;
 pub mod request; // TODO: message?
-mod server;
 pub mod server2;
 pub mod stats;
 pub mod storage; // TODO
 
 pub use machine::{Context, InputKind, Machine};
-pub use server::{Server, ServerOptions};
 pub use stats::ServerStats;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -84,17 +82,6 @@ mod tests {
     use server2::{ErrorKind, RaftServer};
 
     use super::*;
-
-    impl Machine for usize {
-        type Input = usize;
-
-        fn handle_input(&mut self, ctx: &mut Context, input: Self::Input) {
-            if ctx.kind().is_command() {
-                *self += input;
-            }
-            ctx.output(self);
-        }
-    }
 
     impl Machine2 for usize {
         type Input = usize;

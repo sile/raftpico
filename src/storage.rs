@@ -1,13 +1,12 @@
-use std::{fs::File, io::Seek, path::Path};
+use std::fs::File;
 
 use jsonlrpc::JsonlStream;
-use raftbare::{ClusterConfig, LogIndex, LogPosition, NodeId, Term};
+use raftbare::{NodeId, Term};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     request::{LogEntry, SnapshotParams},
-    server::Commands,
-    Machine, Result, ServerOptions,
+    Result,
 };
 
 #[derive(Debug)]
@@ -17,17 +16,18 @@ pub struct FileStorage {
 }
 
 impl FileStorage {
-    pub fn new<P: AsRef<Path>>(path: P, options: &ServerOptions) -> Result<Self> {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(&path)?;
-        Ok(Self {
-            file: JsonlStream::new(file),
-            force_fsync: options.force_fsync,
-        })
-    }
+    // TODO
+    // pub fn new<P: AsRef<Path>>(path: P, options: &ServerOptions) -> Result<Self> {
+    //     let file = std::fs::OpenOptions::new()
+    //         .create(true)
+    //         .read(true)
+    //         .write(true)
+    //         .open(&path)?;
+    //     Ok(Self {
+    //         file: JsonlStream::new(file),
+    //         force_fsync: options.force_fsync,
+    //     })
+    // }
 
     pub fn install_snapshot<M: Serialize>(&mut self, snapshot: SnapshotParams<M>) -> Result<()> {
         // TODO: temorary file and move (and writing the temporary file on a worker thread)
@@ -45,21 +45,7 @@ impl FileStorage {
         Ok(())
     }
 
-    pub fn append_entries(
-        &mut self,
-        raft_log_entries: &raftbare::LogEntries,
-        commands: &Commands,
-    ) -> Result<()> {
-        let entries = Record::<_, SnapshotParams>::LogEntries(LogEntries::from_raftbare(
-            raft_log_entries,
-            commands,
-        )?);
-        self.file.write_value(&entries)?;
-        self.maybe_fsync()?;
-        Ok(())
-    }
-
-    // TOOD:
+    // TOOD: rename
     pub fn append_entries2(
         &mut self,
         raft_log_entries: &raftbare::LogEntries,
@@ -97,23 +83,24 @@ impl FileStorage {
         Ok(())
     }
 
-    pub fn load_record<M: Machine>(
-        &mut self,
-        commands: &mut Commands,
-    ) -> Result<Option<Record<raftbare::LogEntries, M>>> {
-        if self.file.inner().metadata()?.len() == self.file.inner().stream_position()? {
-            return Ok(None);
-        }
+    // TODO:
+    // pub fn load_record<M: Machine>(
+    //     &mut self,
+    //     commands: &mut Commands,
+    // ) -> Result<Option<Record<raftbare::LogEntries, M>>> {
+    //     if self.file.inner().metadata()?.len() == self.file.inner().stream_position()? {
+    //         return Ok(None);
+    //     }
 
-        let record: Record<LogEntries, _> = self.file.read_value()?;
-        match record {
-            Record::NodeId(v) => Ok(Some(Record::NodeId(v))),
-            Record::Term(v) => Ok(Some(Record::Term(v))),
-            Record::VotedFor(v) => Ok(Some(Record::VotedFor(v))),
-            Record::LogEntries(v) => Ok(Some(Record::LogEntries(v.to_raftbare(commands)))),
-            Record::Snapshot(v) => Ok(Some(Record::Snapshot(v))),
-        }
-    }
+    //     let record: Record<LogEntries, _> = self.file.read_value()?;
+    //     match record {
+    //         Record::NodeId(v) => Ok(Some(Record::NodeId(v))),
+    //         Record::Term(v) => Ok(Some(Record::Term(v))),
+    //         Record::VotedFor(v) => Ok(Some(Record::VotedFor(v))),
+    //         Record::LogEntries(v) => Ok(Some(Record::LogEntries(v.to_raftbare(commands)))),
+    //         Record::Snapshot(v) => Ok(Some(Record::Snapshot(v))),
+    //     }
+    // }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,27 +121,7 @@ pub struct LogEntries {
 }
 
 impl LogEntries {
-    pub fn from_raftbare(entries: &raftbare::LogEntries, commands: &Commands) -> Result<Self> {
-        Ok(Self {
-            prev_log_term: entries.prev_position().term.get(),
-            prev_log_index: entries.prev_position().index.get(),
-            entries: entries
-                .iter_with_positions()
-                .map(|(position, entry)| match entry {
-                    raftbare::LogEntry::Term(t) => LogEntry::Term(t.get()),
-                    raftbare::LogEntry::ClusterConfig(c) => LogEntry::Config {
-                        voters: c.voters.iter().map(|v| v.get()).collect(),
-                        new_voters: c.new_voters.iter().map(|v| v.get()).collect(),
-                    },
-                    raftbare::LogEntry::Command => {
-                        let command = commands.get(&position.index).expect("TODO: bug");
-                        LogEntry::Command(command.clone())
-                    }
-                })
-                .collect(),
-        })
-    }
-
+    // TODO: rename
     pub fn from_raftbare2(
         entries: &raftbare::LogEntries,
         commands: &crate::server2::Commands,
@@ -179,30 +146,31 @@ impl LogEntries {
         })
     }
 
-    pub fn to_raftbare(self, commands: &mut Commands) -> raftbare::LogEntries {
-        let term = Term::new(self.prev_log_term);
-        let mut index = LogIndex::new(self.prev_log_index);
-        let mut entries = raftbare::LogEntries::new(LogPosition { term, index });
-        for entry in self.entries {
-            index = LogIndex::new(index.get() + 1);
-            match entry {
-                LogEntry::Term(t) => entries.push(raftbare::LogEntry::Term(Term::new(t))),
-                LogEntry::Config { voters, new_voters } => {
-                    entries.push(raftbare::LogEntry::ClusterConfig(ClusterConfig {
-                        voters: voters.into_iter().map(NodeId::new).collect(),
-                        new_voters: new_voters.into_iter().map(NodeId::new).collect(),
-                        ..Default::default()
-                    }))
-                }
-                LogEntry::Command(command) => {
-                    entries.push(raftbare::LogEntry::Command);
-                    commands.insert(index, command);
-                }
-                _ => {
-                    todo!()
-                }
-            }
-        }
-        entries
-    }
+    // TODO
+    // pub fn to_raftbare(self, commands: &mut Commands) -> raftbare::LogEntries {
+    //     let term = Term::new(self.prev_log_term);
+    //     let mut index = LogIndex::new(self.prev_log_index);
+    //     let mut entries = raftbare::LogEntries::new(LogPosition { term, index });
+    //     for entry in self.entries {
+    //         index = LogIndex::new(index.get() + 1);
+    //         match entry {
+    //             LogEntry::Term(t) => entries.push(raftbare::LogEntry::Term(Term::new(t))),
+    //             LogEntry::Config { voters, new_voters } => {
+    //                 entries.push(raftbare::LogEntry::ClusterConfig(ClusterConfig {
+    //                     voters: voters.into_iter().map(NodeId::new).collect(),
+    //                     new_voters: new_voters.into_iter().map(NodeId::new).collect(),
+    //                     ..Default::default()
+    //                 }))
+    //             }
+    //             LogEntry::Command(command) => {
+    //                 entries.push(raftbare::LogEntry::Command);
+    //                 commands.insert(index, command);
+    //             }
+    //             _ => {
+    //                 todo!()
+    //             }
+    //         }
+    //     }
+    //     entries
+    // }
 }
