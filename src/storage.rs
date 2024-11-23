@@ -49,7 +49,7 @@ impl FileStorage {
     pub fn append_entries2(
         &mut self,
         raft_log_entries: &raftbare::LogEntries,
-        commands: &crate::server2::Commands,
+        commands: &crate::server::Commands,
     ) -> std::io::Result<()> {
         let entries = Record::<_, SnapshotParams>::LogEntries(LogEntries::from_raftbare2(
             raft_log_entries,
@@ -124,7 +124,7 @@ impl LogEntries {
     // TODO: rename
     pub fn from_raftbare2(
         entries: &raftbare::LogEntries,
-        commands: &crate::server2::Commands,
+        commands: &crate::server::Commands,
     ) -> std::io::Result<Self> {
         Ok(Self {
             prev_log_term: entries.prev_position().term.get(),

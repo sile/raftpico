@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     message::Proposer,
-    server2::{ClusterSettings, Commands},
+    server::{ClusterSettings, Commands},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{Caller, Command2, LogEntry},
-    server2::{ClusterSettings, Commands, Member, ServerInstanceId},
+    server::{ClusterSettings, Commands, Member, ServerInstanceId},
     InputKind,
 };
 

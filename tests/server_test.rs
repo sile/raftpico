@@ -9,7 +9,7 @@ use raftpico::{
         AddServerOutput, AddServerParams, ApplyParams, CreateClusterOutput, RemoveServerOutput,
         RemoveServerParams, Request, TakeSnapshotOutput,
     },
-    server2::{ClusterSettings, ErrorKind},
+    server::{ClusterSettings, ErrorKind},
     Context2, InputKind, Machine2, Server,
 };
 use serde::{Deserialize, Serialize};
