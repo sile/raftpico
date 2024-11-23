@@ -105,6 +105,7 @@ fn re_election() {
     // Create a cluster.
     let server_addr0 = server0.listen_addr();
     let handle = std::thread::spawn(move || {
+        // TODO: specify election timeout
         rpc::<CreateClusterOutput>(server_addr0, req_without_params("CreateCluster"))
     });
     while !handle.is_finished() {
@@ -139,7 +140,7 @@ fn re_election() {
     assert!(servers[0].node().expect("unreachable").role().is_leader());
 
     // Run until the leader changes.
-    for _ in 0..300 {
+    for _ in 0..200 {
         for server in servers.iter_mut().skip(1) {
             server.poll(POLL_TIMEOUT).expect("poll() failed");
         }

@@ -21,9 +21,9 @@ use crate::{
     machine::{Context2, Machine2},
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
-        CreateClusterOutput, InitNodeParams, MemberJson, NotifyQueryPromiseParams,
-        NotifyServerAddrParams, ProposeParams, ProposeQueryParams, Proposer, RemoveServerParams,
-        Request, RequestVoteParams, RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,
+        CreateClusterOutput, InitNodeParams, MemberJson, NotifyQueryPromiseParams, ProposeParams,
+        ProposeQueryParams, Proposer, RemoveServerParams, Request, RequestVoteParams,
+        RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,
     },
     storage::FileStorage,
     InputKind,
@@ -133,12 +133,14 @@ impl ErrorKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Member {
     pub addr: SocketAddr,
+    pub token: usize, // TODO: Token
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemMachine<M> {
     settings: ClusterSettings,
     members: BTreeMap<u64, Member>, // TODO: key type
+    next_token: usize,              // TOOD: token
     user_machine: M,
 }
 
@@ -147,6 +149,7 @@ impl<M: Machine2> SystemMachine<M> {
         Self {
             settings: ClusterSettings::default(),
             members: BTreeMap::new(),
+            next_token: CLIENT_TOKEN_MIN.0,
             user_machine,
         }
     }
@@ -162,8 +165,11 @@ impl<M: Machine2> SystemMachine<M> {
             SEED_NODE_ID.get(),
             Member {
                 addr: seed_server_addr,
+                token: self.next_token,
             },
         );
+        dbg!(&self.members);
+        self.next_token += 1; // TODO: max handling
         ctx.output(&CreateClusterOutput {
             members: self.members.values().cloned().collect(),
         });
@@ -176,8 +182,18 @@ impl<M: Machine2> SystemMachine<M> {
         }
 
         let node_id = NodeId::new(ctx.commit_index.get());
-        self.members
-            .insert(node_id.get(), Member { addr: server_addr });
+        let token = self.next_token;
+        self.next_token += 1; // TODO: max handling
+        assert!(self.next_token <= CLIENT_TOKEN_MAX.0); // TODO
+
+        self.members.insert(
+            node_id.get(),
+            Member {
+                addr: server_addr,
+                token,
+            },
+        );
+        dbg!(&self.members);
         ctx.output(&CreateClusterOutput {
             members: self.members.values().cloned().collect(),
         });
@@ -192,9 +208,12 @@ impl<M: Machine2> SystemMachine<M> {
 
         let node_id = NodeId::new(node_id);
         self.members.remove(&node_id.get());
+        dbg!(&self.members);
         ctx.output(&CreateClusterOutput {
             members: self.members.values().cloned().collect(),
         });
+
+        // TODO: reset self.node for removed server
     }
 }
 
@@ -269,7 +288,6 @@ pub struct Server<M> {
     events: Events,
     rpc_server: RpcServer<Request>,
     rpc_clients: HashMap<Token, RpcClient>,
-    node_id_to_token: HashMap<NodeId, Token>,
     node: Node,
     storage: Option<FileStorage>,
     election_abs_timeout: Instant,
@@ -277,7 +295,6 @@ pub struct Server<M> {
     local_commands: Commands,
     dirty_cluster_config: bool,
     queries: BinaryHeap<PendingQuery>,
-    next_token: Token,
     machine: SystemMachine<M>,
 }
 
@@ -299,7 +316,6 @@ impl<M: Machine2> Server<M> {
             events,
             rpc_server,
             rpc_clients: HashMap::new(),
-            node_id_to_token: HashMap::new(),
             node: Node::start(UNINIT_NODE_ID),
             storage,
             local_commands: Commands::new(),
@@ -307,7 +323,6 @@ impl<M: Machine2> Server<M> {
             last_applied_index: LogIndex::ZERO,
             dirty_cluster_config: false,
             queries: BinaryHeap::new(),
-            next_token: CLIENT_TOKEN_MIN,
             machine: SystemMachine::new(machine),
         })
     }
@@ -386,22 +401,17 @@ impl<M: Machine2> Server<M> {
                 }
                 let Data { addr } = serde_json::from_value(data)?;
 
-                let Some(client) = self
-                    .rpc_clients
-                    .values_mut()
-                    .find(|c| c.server_addr() == addr)
-                else {
-                    return Ok(());
-                };
                 let Some((&node_id, _)) = self.machine.members.iter().find(|(_, m)| m.addr == addr)
                 else {
                     return Ok(());
                 };
+
+                let snapshot = self.snapshot(self.last_applied_index)?;
                 let request = Request::InitNode {
                     jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                    params: InitNodeParams { node_id },
+                    params: InitNodeParams { node_id, snapshot },
                 };
-                let _ = client.send(&mut self.poller, &request);
+                self.send_to(NodeId::new(node_id), &request)?;
             }
             ResponseObject::Err { error, .. } if error.code == ErrorKind::UnknownServer.code() => {
                 let data = error.data.ok_or(std::io::ErrorKind::Other)?;
@@ -411,21 +421,10 @@ impl<M: Machine2> Server<M> {
                     node_id: u64,
                 }
                 let Data { node_id } = serde_json::from_value(data)?;
-                let Some(token) = self.node_id_to_token.get(&NodeId::new(node_id)) else {
-                    return Ok(());
-                };
 
-                let node_id = self.node.id().get();
-                let addr = self.listen_addr();
-                let Some(client) = self.rpc_clients.get_mut(&token) else {
-                    return Ok(());
-                };
+                let _ = node_id;
 
-                let request = Request::NotifyServerAddr {
-                    jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                    params: NotifyServerAddrParams { node_id, addr },
-                };
-                let _ = client.send(&mut self.poller, &request);
+                // TODO: send snapshot if need
             }
             e @ ResponseObject::Err { .. } => {
                 // TODO
@@ -557,6 +556,7 @@ impl<M: Machine2> Server<M> {
         Ok(())
     }
 
+    // TOOD: lazy update
     fn update_rpc_clients(&mut self) {
         // Removed server handling.
         let addrs = self
@@ -570,22 +570,18 @@ impl<M: Machine2> Server<M> {
         // TODO: Remove from node_id_to_token too (or don't remove rpc_clients at all)
 
         // Added server handling.
-        for (&node_id, member) in &self.machine.members {
+        for member in self.machine.members.values() {
             if member.addr == self.listen_addr() {
                 continue;
             }
 
-            // TODO: conflict check or leave note comment
-            let token = self.next_token;
-            if self.next_token == CLIENT_TOKEN_MAX {
-                self.next_token = CLIENT_TOKEN_MIN;
-            } else {
-                self.next_token.0 += 1;
+            let token = Token(member.token);
+            if self.rpc_clients.contains_key(&token) {
+                continue;
             }
 
             let rpc_client = RpcClient::new(token, member.addr);
             self.rpc_clients.insert(token, rpc_client);
-            self.node_id_to_token.insert(NodeId::new(node_id), token);
         }
     }
 
@@ -702,13 +698,7 @@ impl<M: Machine2> Server<M> {
         let request = Request::from_raft_message(message, &self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
         let request = serde_json::value::to_raw_value(&request)?;
-        let Some(token) = self.node_id_to_token.get(&dst) else {
-            return Ok(());
-        };
-        let Some(client) = self.rpc_clients.get_mut(token) else {
-            return Ok(());
-        };
-        client.send(&mut self.poller, &request)?;
+        self.send_to(dst, &request)?;
         Ok(())
     }
 
@@ -763,6 +753,14 @@ impl<M: Machine2> Server<M> {
             Role::Candidate => rand::thread_rng().gen_range(min..=max),
             Role::Leader => min,
         };
+        eprintln!(
+            "[{}] role={:?}, term={:?}, voted_for={:?}, timeout={:?}",
+            self.node.id().get(),
+            self.node.role(),
+            self.node.current_term(),
+            self.node.voted_for().map(|x| x.get()),
+            timeout
+        );
         self.election_abs_timeout = Instant::now() + timeout;
     }
 
@@ -790,9 +788,6 @@ impl<M: Machine2> Server<M> {
             }
             Request::Snapshot { params, .. } => self.handle_snapshot_request(params),
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
-            Request::NotifyServerAddr { params, .. } => {
-                self.handle_notify_server_addr_request(params)
-            }
             Request::AppendEntries { id, params, .. } => {
                 self.handle_append_entries_request(Caller::new(from, id), params)
             }
@@ -837,6 +832,9 @@ impl<M: Machine2> Server<M> {
             storage.save_voted_for(self.node.voted_for())?;
             storage.append_entries2(self.node.log().entries(), &self.local_commands)?;
         }
+
+        self.update_rpc_clients();
+
         Ok(())
     }
 
@@ -933,6 +931,7 @@ impl<M: Machine2> Server<M> {
         caller: Caller,
         params: RequestVoteParams,
     ) -> std::io::Result<()> {
+        dbg!(&params);
         if !self.is_initialized() {
             // TODO: stats
             return Ok(());
@@ -940,6 +939,7 @@ impl<M: Machine2> Server<M> {
 
         let message = params.into_raft_message(&caller);
         self.node.handle_message(message);
+        dbg!(&self.node.actions().send_messages);
         Ok(())
     }
 
@@ -948,6 +948,7 @@ impl<M: Machine2> Server<M> {
         caller: Caller,
         params: RequestVoteResultParams,
     ) -> std::io::Result<()> {
+        dbg!(&params);
         if !self.is_initialized() {
             // TODO: stats
             return Ok(());
@@ -965,25 +966,7 @@ impl<M: Machine2> Server<M> {
 
         let node_id = NodeId::new(params.node_id);
         self.node = Node::start(node_id);
-        Ok(())
-    }
-
-    fn handle_notify_server_addr_request(
-        &mut self,
-        params: NotifyServerAddrParams,
-    ) -> std::io::Result<()> {
-        let node_id = NodeId::new(params.node_id);
-        if self.node_id_to_token.contains_key(&node_id) {
-            return Ok(());
-        }
-
-        // TODO: self.next_token()
-        let token = self.next_token;
-        self.next_token.0 += 1;
-
-        let client = RpcClient::new(token, params.addr);
-        self.node_id_to_token.insert(node_id, token);
-        self.rpc_clients.insert(token, client);
+        self.handle_snapshot_request(params.snapshot)?;
 
         Ok(())
     }
@@ -1020,22 +1003,17 @@ impl<M: Machine2> Server<M> {
     }
 
     fn send_to<T: Serialize>(&mut self, node_id: NodeId, message: &T) -> std::io::Result<()> {
-        // TODO: optimize
-        let Some(addr) = self
+        let Some(token) = self
             .machine
             .members
-            .iter()
-            .find(|(&id, _)| id == node_id.get())
-            .map(|(_, m)| m.addr)
+            .get(&node_id.get())
+            .map(|m| Token(m.token))
         else {
             return Ok(());
         };
 
-        let Some(client) = self
-            .rpc_clients
-            .values_mut()
-            .find(|c| c.server_addr() == addr)
-        else {
+        let Some(client) = self.rpc_clients.get_mut(&token) else {
+            // TODO: use entry
             return Ok(());
         };
 
@@ -1072,10 +1050,8 @@ impl<M: Machine2> Server<M> {
             )?;
             return Ok(());
         }
-        if !self
-            .node_id_to_token
-            .contains_key(&NodeId::new(params.from))
-        {
+        if !self.machine.members.contains_key(&params.from) {
+            dbg!("here", self.node.id());
             self.reply_error(
                 caller,
                 ErrorKind::UnknownServer

@@ -59,10 +59,6 @@ pub enum Request {
         jsonrpc: JsonRpcVersion,
         params: InitNodeParams,
     },
-    NotifyServerAddr {
-        jsonrpc: JsonRpcVersion,
-        params: NotifyServerAddrParams,
-    },
     Snapshot {
         jsonrpc: JsonRpcVersion,
         params: SnapshotParams,
@@ -399,12 +395,7 @@ pub struct NotifyQueryPromiseParams {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InitNodeParams {
     pub node_id: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct NotifyServerAddrParams {
-    pub node_id: u64,
-    pub addr: SocketAddr,
+    pub snapshot: SnapshotParams, // TODO
 }
 
 // TODO: move
