@@ -3,7 +3,7 @@ use raftbare::{LogIndex, Node};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-use crate::{command::Caller, server::ErrorKind};
+use crate::{command::Caller, ErrorKind};
 
 pub trait Machine: Default + Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
