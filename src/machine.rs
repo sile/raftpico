@@ -5,14 +5,14 @@ use serde_json::value::RawValue;
 
 use crate::{command::Caller, server::ErrorKind};
 
-pub trait Machine2: Default + Serialize + for<'de> Deserialize<'de> {
+pub trait Machine: Default + Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
 
-    fn apply(&mut self, ctx: &mut Context2, input: &Self::Input);
+    fn apply(&mut self, ctx: &mut Context, input: &Self::Input);
 }
 
 #[derive(Debug)]
-pub struct Context2<'a> {
+pub struct Context<'a> {
     pub kind: InputKind, // TODO: private
     pub node: &'a Node,
     pub commit_index: LogIndex,
@@ -21,7 +21,7 @@ pub struct Context2<'a> {
     pub(crate) caller: Option<Caller>,
 }
 
-impl<'a> Context2<'a> {
+impl<'a> Context<'a> {
     pub fn output<T: Serialize>(&mut self, output: &T) {
         if self.caller.is_some() {
             match serde_json::value::to_raw_value(output) {

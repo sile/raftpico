@@ -10,7 +10,7 @@ use raftpico::{
         RemoveServerParams, Request, TakeSnapshotOutput,
     },
     server::{ClusterSettings, ErrorKind},
-    Context2, InputKind, Machine2, Server,
+    Context, InputKind, Machine, Server,
 };
 use serde::{Deserialize, Serialize};
 
@@ -20,10 +20,10 @@ const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(10));
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct Counter(usize);
 
-impl Machine2 for Counter {
+impl Machine for Counter {
     type Input = usize;
 
-    fn apply(&mut self, ctx: &mut Context2, input: &Self::Input) {
+    fn apply(&mut self, ctx: &mut Context, input: &Self::Input) {
         if ctx.kind.is_command() {
             self.0 += *input;
         }

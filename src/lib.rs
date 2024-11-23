@@ -4,7 +4,7 @@ pub mod message;
 pub mod server;
 pub mod storage; // TODO
 
-pub use machine::{Context2, InputKind, Machine2};
+pub use machine::{Context, InputKind, Machine};
 pub use message::Request;
 pub use server::Server;
 pub use storage::FileStorage;

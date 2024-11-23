@@ -1,7 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use raftpico::{Context2, FileStorage, Machine2, Server};
+use raftpico::{Context, FileStorage, Machine, Server};
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
@@ -29,10 +29,10 @@ struct KvsMachine {
     entries: HashMap<String, serde_json::Value>,
 }
 
-impl Machine2 for KvsMachine {
+impl Machine for KvsMachine {
     type Input = KvsInput;
 
-    fn apply(&mut self, ctx: &mut Context2, input: &Self::Input) {
+    fn apply(&mut self, ctx: &mut Context, input: &Self::Input) {
         let input = input.clone(); //TODO
         match input {
             KvsInput::Put { key, value } => {

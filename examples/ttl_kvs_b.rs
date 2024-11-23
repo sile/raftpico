@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::Parser;
-use raftpico::{Context2, Machine2, Server};
+use raftpico::{Context, Machine, Server};
 use serde::{Deserialize, Serialize};
 
 const TICK_RESOLUTION: Duration = Duration::from_millis(10);
@@ -82,10 +82,10 @@ struct KvsMachine {
     new_entries: Vec<(Duration, String)>,
 }
 
-impl Machine2 for KvsMachine {
+impl Machine for KvsMachine {
     type Input = KvsInput;
 
-    fn apply(&mut self, ctx: &mut Context2, input: &Self::Input) {
+    fn apply(&mut self, ctx: &mut Context, input: &Self::Input) {
         let input = input.clone();
         match input {
             KvsInput::Put { key, value, ttl_ms } => {

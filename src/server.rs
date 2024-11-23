@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::{
     command::{Caller, Command2},
-    machine::{Context2, Machine2},
+    machine::{Context, Machine},
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
         CreateClusterOutput, InitNodeParams, MemberJson, NotifyQueryPromiseParams, ProposeParams,
@@ -152,7 +152,7 @@ pub struct SystemMachine<M> {
 }
 
 //
-impl<M: Machine2> Default for SystemMachine<M> {
+impl<M: Machine> Default for SystemMachine<M> {
     fn default() -> Self {
         Self {
             settings: ClusterSettings::default(),
@@ -163,10 +163,10 @@ impl<M: Machine2> Default for SystemMachine<M> {
     }
 }
 
-impl<M: Machine2> SystemMachine<M> {
+impl<M: Machine> SystemMachine<M> {
     fn apply_create_cluster_command(
         &mut self,
-        ctx: &mut Context2,
+        ctx: &mut Context,
         seed_server_addr: SocketAddr,
         settings: &ClusterSettings,
     ) {
@@ -184,7 +184,7 @@ impl<M: Machine2> SystemMachine<M> {
         });
     }
 
-    fn apply_add_server_command(&mut self, ctx: &mut Context2, server_addr: SocketAddr) {
+    fn apply_add_server_command(&mut self, ctx: &mut Context, server_addr: SocketAddr) {
         if self.members.values().any(|m| m.addr == server_addr) {
             ctx.error(ErrorKind::ServerAlreadyAdded.object());
             return;
@@ -207,7 +207,7 @@ impl<M: Machine2> SystemMachine<M> {
         });
     }
 
-    fn apply_remove_server_command(&mut self, ctx: &mut Context2, server_addr: SocketAddr) {
+    fn apply_remove_server_command(&mut self, ctx: &mut Context, server_addr: SocketAddr) {
         let Some((&node_id, _member)) = self.members.iter().find(|(_, m)| m.addr == server_addr)
         else {
             ctx.error(ErrorKind::NotClusterMember.object());
@@ -224,10 +224,10 @@ impl<M: Machine2> SystemMachine<M> {
     }
 }
 
-impl<M: Machine2> Machine2 for SystemMachine<M> {
+impl<M: Machine> Machine for SystemMachine<M> {
     type Input = Command2;
 
-    fn apply(&mut self, ctx: &mut Context2, input: &Self::Input) {
+    fn apply(&mut self, ctx: &mut Context, input: &Self::Input) {
         match input {
             Command2::CreateCluster {
                 seed_server_addr,
@@ -305,7 +305,7 @@ pub struct Server<M> {
     machine: SystemMachine<M>,
 }
 
-impl<M: Machine2> Server<M> {
+impl<M: Machine> Server<M> {
     pub fn start(listen_addr: SocketAddr, storage: Option<FileStorage>) -> std::io::Result<Self> {
         // TODO: storage.load
 
@@ -477,7 +477,7 @@ impl<M: Machine2> Server<M> {
                     let input =
                         serde_json::from_value(query.input).expect("TODO: reply error response");
 
-                    let mut ctx = Context2 {
+                    let mut ctx = Context {
                         kind: InputKind::Query,
                         node: &self.node,
                         commit_index: self.last_applied_index,
@@ -536,7 +536,7 @@ impl<M: Machine2> Server<M> {
             return Ok(());
         }
 
-        let mut ctx = Context2 {
+        let mut ctx = Context {
             kind: InputKind::Command,
             node: &self.node,
             commit_index: index,
@@ -1163,7 +1163,7 @@ impl<M: Machine2> Server<M> {
     ) -> std::io::Result<()> {
         let input = serde_json::from_value(input).expect("TODO: reply error response");
 
-        let mut ctx = Context2 {
+        let mut ctx = Context {
             kind: InputKind::LocalQuery,
             node: &self.node,
             commit_index: self.last_applied_index,
