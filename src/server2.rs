@@ -282,7 +282,13 @@ pub struct RaftServer<M> {
 }
 
 impl<M: Machine2> RaftServer<M> {
-    pub fn start(listen_addr: SocketAddr, machine: M) -> std::io::Result<Self> {
+    pub fn start(
+        listen_addr: SocketAddr,
+        machine: M,
+        storage: Option<FileStorage>,
+    ) -> std::io::Result<Self> {
+        // TODO: storage.load
+
         let mut poller = Poll::new()?;
         let events = Events::with_capacity(EVENTS_CAPACITY);
         let rpc_server =
@@ -295,7 +301,7 @@ impl<M: Machine2> RaftServer<M> {
             rpc_clients: HashMap::new(),
             node_id_to_token: HashMap::new(),
             node: Node::start(UNINIT_NODE_ID),
-            storage: None, // TODO
+            storage,
             local_commands: Commands::new(),
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index: LogIndex::ZERO,
@@ -1116,10 +1122,10 @@ impl<M: Machine2> RaftServer<M> {
             InputKind::Command => {
                 let command = Command2::ApplyCommand {
                     input: params.input,
-                    proposer: Proposer {
+                    proposer: Some(Proposer {
                         server: self.instance_id,
                         client: caller,
-                    },
+                    }),
                 };
                 self.propose_command(command)?;
             }
@@ -1259,6 +1265,23 @@ impl<M: Machine2> RaftServer<M> {
 
     pub fn is_leader(&self) -> bool {
         self.node.role().is_leader()
+    }
+
+    // TODO:
+    pub fn propose_user_command(&mut self, input: &M::Input) -> std::io::Result<CommitPromise> {
+        if !self.is_initialized() {
+            todo!();
+        }
+        if !self.is_leader() {
+            todo!();
+        }
+
+        let command = Command2::ApplyCommand {
+            input: serde_json::to_value(input)?,
+            proposer: None,
+        };
+        let promise = self.propose_command_leader(command);
+        Ok(promise)
     }
 
     fn propose_command(&mut self, command: Command2) -> std::io::Result<()> {

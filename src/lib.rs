@@ -8,8 +8,10 @@ pub mod server2;
 pub mod stats;
 pub mod storage; // TODO
 
-pub use machine::{Context, InputKind, Machine};
+pub use machine::{Context2, InputKind, Machine, Machine2};
+pub use server2::RaftServer as Server;
 pub use stats::ServerStats;
+pub use storage::FileStorage;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -99,7 +101,7 @@ mod tests {
 
     #[test]
     fn create_cluster() {
-        let mut server = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
         assert!(server.node().is_none());
 
         let server_addr = server.listen_addr();
@@ -129,7 +131,7 @@ mod tests {
 
     #[test]
     fn add_and_remove_server() {
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
         assert!(server0.node().is_none());
 
         // Create a cluster.
@@ -143,7 +145,7 @@ mod tests {
         assert!(server0.node().is_some());
 
         // Add a server to the cluster.
-        let mut server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
         let server_addr1 = server1.listen_addr();
         let handle = std::thread::spawn(move || {
             let output: AddServerOutput = rpc(
@@ -183,7 +185,7 @@ mod tests {
     #[test]
     fn command() {
         let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
 
         // Create a cluster.
         let server_addr0 = server0.listen_addr();
@@ -196,8 +198,8 @@ mod tests {
         servers.push(server0);
 
         // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+        let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
         let server_addr1 = server1.listen_addr();
         let server_addr2 = server2.listen_addr();
         let handle = std::thread::spawn(move || {
@@ -278,7 +280,7 @@ mod tests {
     #[test]
     fn re_election() {
         let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
 
         // Create a cluster.
         let server_addr0 = server0.listen_addr();
@@ -291,8 +293,8 @@ mod tests {
         servers.push(server0);
 
         // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+        let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
         let server_addr1 = server1.listen_addr();
         let server_addr2 = server2.listen_addr();
         let handle = std::thread::spawn(move || {
@@ -344,7 +346,7 @@ mod tests {
     #[test]
     fn snapshot() {
         let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
 
         // Create a cluster with a small max log size.
         let server_addr0 = server0.listen_addr();
@@ -378,8 +380,8 @@ mod tests {
         assert_eq!(*servers[0].machine(), 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9);
 
         // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+        let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
         let server_addr1 = server1.listen_addr();
         let server_addr2 = server2.listen_addr();
         let handle = std::thread::spawn(move || {
@@ -433,7 +435,7 @@ mod tests {
     #[test]
     fn query() {
         let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
 
         // Create a cluster.
         let server_addr0 = server0.listen_addr();
@@ -446,8 +448,8 @@ mod tests {
         servers.push(server0);
 
         // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+        let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
         let server_addr1 = server1.listen_addr();
         let server_addr2 = server2.listen_addr();
         let handle = std::thread::spawn(move || {
@@ -497,7 +499,7 @@ mod tests {
     #[test]
     fn local_query() {
         let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0).expect("start() failed");
+        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
 
         // Create a cluster.
         let server_addr0 = server0.listen_addr();
@@ -510,8 +512,8 @@ mod tests {
         servers.push(server0);
 
         // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 1).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 2).expect("start() failed");
+        let server1 = RaftServer::start(auto_addr(), 1, None).expect("start() failed");
+        let server2 = RaftServer::start(auto_addr(), 2, None).expect("start() failed");
         let server_addr1 = server1.listen_addr();
         let server_addr2 = server2.listen_addr();
         let handle = std::thread::spawn(move || {

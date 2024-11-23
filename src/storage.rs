@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::{fs::File, path::Path};
 
 use jsonlrpc::JsonlStream;
 use raftbare::{NodeId, Term};
@@ -16,18 +16,18 @@ pub struct FileStorage {
 }
 
 impl FileStorage {
-    // TODO
-    // pub fn new<P: AsRef<Path>>(path: P, options: &ServerOptions) -> Result<Self> {
-    //     let file = std::fs::OpenOptions::new()
-    //         .create(true)
-    //         .read(true)
-    //         .write(true)
-    //         .open(&path)?;
-    //     Ok(Self {
-    //         file: JsonlStream::new(file),
-    //         force_fsync: options.force_fsync,
-    //     })
-    // }
+    // TODO: with_options
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&path)?;
+        Ok(Self {
+            file: JsonlStream::new(file),
+            force_fsync: true,
+        })
+    }
 
     pub fn install_snapshot<M: Serialize>(&mut self, snapshot: SnapshotParams<M>) -> Result<()> {
         // TODO: temorary file and move (and writing the temporary file on a worker thread)

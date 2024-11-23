@@ -1,7 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use raftpico::{Context, Machine, Result, Server, ServerOptions};
+use raftpico::{Context2, FileStorage, Machine2, Result, Server};
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
@@ -14,11 +14,11 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let options = ServerOptions {
-        file_path: args.storage_file,
-        ..Default::default()
-    };
-    let mut server = Server::with_options(args.listen_addr, KvsMachine::default(), options)?;
+    let storage = args
+        .storage_file
+        .map(|path| FileStorage::new(path))
+        .transpose()?;
+    let mut server = Server::start(args.listen_addr, KvsMachine::default(), storage)?;
     loop {
         server.poll(None)?;
     }
@@ -29,10 +29,11 @@ struct KvsMachine {
     entries: HashMap<String, serde_json::Value>,
 }
 
-impl Machine for KvsMachine {
+impl Machine2 for KvsMachine {
     type Input = KvsInput;
 
-    fn handle_input(&mut self, ctx: &mut Context, input: Self::Input) {
+    fn apply(&mut self, ctx: &mut Context2, input: &Self::Input) {
+        let input = input.clone(); //TODO
         match input {
             KvsInput::Put { key, value } => {
                 let value = self.entries.insert(key, value);
@@ -50,7 +51,7 @@ impl Machine for KvsMachine {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum KvsInput {
     Put {

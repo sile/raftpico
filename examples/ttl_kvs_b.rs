@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::Parser;
-use raftpico::{Context, Machine, Result, Server};
+use raftpico::{Context2, Machine2, Result, Server};
 use serde::{Deserialize, Serialize};
 
 const TICK_RESOLUTION: Duration = Duration::from_millis(10);
@@ -18,7 +18,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let mut server = Server::start(args.listen_addr, KvsMachine::default())?;
+    let mut server = Server::start(args.listen_addr, KvsMachine::default(), None)?;
     let mut last_tick = Duration::default();
     let mut new_leader = true;
     let mut expire_queue = BinaryHeap::new();
@@ -82,17 +82,18 @@ struct KvsMachine {
     new_entries: Vec<(Duration, String)>,
 }
 
-impl Machine for KvsMachine {
+impl Machine2 for KvsMachine {
     type Input = KvsInput;
 
-    fn handle_input(&mut self, ctx: &mut Context, input: Self::Input) {
+    fn apply(&mut self, ctx: &mut Context2, input: &Self::Input) {
+        let input = input.clone();
         match input {
             KvsInput::Put { key, value, ttl_ms } => {
                 let expire_time = self.now_unix_time + Duration::from_millis(ttl_ms as u64);
                 let entry = Entry { value, expire_time };
                 let old = self.entries.insert(key.clone(), entry);
 
-                if ctx.node().role().is_leader() {
+                if ctx.node.role().is_leader() {
                     self.new_entries.push((expire_time, key));
                 }
 
@@ -112,7 +113,7 @@ impl Machine for KvsMachine {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum KvsInput {
     Put {
