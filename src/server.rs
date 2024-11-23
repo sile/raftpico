@@ -248,10 +248,10 @@ pub struct Server<M> {
     rpc_server: RpcServer<Request>,
     rpc_clients: HashMap<Token, RpcClient>,
     node: Node,
-    storage: Option<FileStorage>,
     election_abs_timeout: Instant,
     last_applied_index: LogIndex,
     local_commands: Commands,
+    storage: Option<FileStorage>, // TODO: local_storage
     dirty_cluster_config: bool,
     queries: BinaryHeap<PendingQuery>,
     machine: SystemMachine<M>,
@@ -1218,25 +1218,7 @@ impl<M: Machine> Server<M> {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
                 params: ProposeParams { command },
             };
-
-            // TODO: optimize
-            let Some(addr) = self
-                .machine
-                .members
-                .iter()
-                .find(|(&id, _m)| id == maybe_leader.get())
-                .map(|(_, m)| m.addr)
-            else {
-                todo!();
-            };
-            let Some(client) = self
-                .rpc_clients
-                .values_mut()
-                .find(|c| c.server_addr() == addr)
-            else {
-                todo!();
-            };
-            client.send(&mut self.poller, &request)?;
+            self.send_to(maybe_leader, &request)?;
             return Ok(());
         }
 
