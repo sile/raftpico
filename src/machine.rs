@@ -5,7 +5,7 @@ use serde_json::value::RawValue;
 
 use crate::{command::Caller, server2::ErrorKind};
 
-pub trait Machine2: Serialize + for<'de> Deserialize<'de> {
+pub trait Machine2: Default + Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
 
     fn apply(&mut self, ctx: &mut Context2, input: &Self::Input);

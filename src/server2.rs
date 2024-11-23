@@ -151,16 +151,19 @@ pub struct SystemMachine<M> {
     user_machine: M,
 }
 
-impl<M: Machine2> SystemMachine<M> {
-    fn new(user_machine: M) -> Self {
+//
+impl<M: Machine2> Default for SystemMachine<M> {
+    fn default() -> Self {
         Self {
             settings: ClusterSettings::default(),
             members: BTreeMap::new(),
             next_token: CLIENT_TOKEN_MIN.0,
-            user_machine,
+            user_machine: M::default(),
         }
     }
+}
 
+impl<M: Machine2> SystemMachine<M> {
     fn apply_create_cluster_command(
         &mut self,
         ctx: &mut Context2,
@@ -303,11 +306,7 @@ pub struct Server<M> {
 }
 
 impl<M: Machine2> Server<M> {
-    pub fn start(
-        listen_addr: SocketAddr,
-        machine: M,
-        storage: Option<FileStorage>,
-    ) -> std::io::Result<Self> {
+    pub fn start(listen_addr: SocketAddr, storage: Option<FileStorage>) -> std::io::Result<Self> {
         // TODO: storage.load
 
         let mut poller = Poll::new()?;
@@ -327,7 +326,7 @@ impl<M: Machine2> Server<M> {
             last_applied_index: LogIndex::ZERO,
             dirty_cluster_config: false,
             queries: BinaryHeap::new(),
-            machine: SystemMachine::new(machine),
+            machine: SystemMachine::default(),
         })
     }
 

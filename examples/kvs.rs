@@ -18,7 +18,7 @@ fn main() -> std::io::Result<()> {
         .storage_file
         .map(|path| FileStorage::new(path))
         .transpose()?;
-    let mut server = Server::start(args.listen_addr, KvsMachine::default(), storage)?;
+    let mut server = Server::<KvsMachine>::start(args.listen_addr, storage)?;
     loop {
         server.poll(None)?;
     }

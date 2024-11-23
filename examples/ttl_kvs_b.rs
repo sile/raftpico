@@ -18,7 +18,7 @@ struct Args {
 
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
-    let mut server = Server::start(args.listen_addr, KvsMachine::default(), None)?;
+    let mut server = Server::<KvsMachine>::start(args.listen_addr, None)?;
     let mut last_tick = Duration::default();
     let mut new_leader = true;
     let mut expire_queue = BinaryHeap::new();
