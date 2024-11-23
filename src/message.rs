@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use jsonlrpc::{JsonRpcVersion, RequestId};
 use raftbare::{
@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{Caller, Command2, LogEntry},
-    request::SnapshotParams,
     server2::{ClusterSettings, Commands, Member, ServerInstanceId},
     InputKind,
 };
@@ -433,4 +432,31 @@ pub struct RemoveServerOutput {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TakeSnapshotOutput {
     pub snapshot_index: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotParams<M = serde_json::Value> {
+    // position and config
+    pub last_included_term: u64,
+    pub last_included_index: u64,
+    pub voters: Vec<u64>,
+    pub new_voters: Vec<u64>,
+
+    // system.
+    pub min_election_timeout: Duration,
+    pub max_election_timeout: Duration,
+    pub max_log_entries_hint: usize,
+    pub next_node_id: u64,
+    pub members: Vec<MemberJson>,
+
+    // user.
+    pub machine: M,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemberJson {
+    pub node_id: u64,
+    pub server_addr: SocketAddr,
+    pub inviting: bool,
+    pub evicting: bool,
 }

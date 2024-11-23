@@ -21,11 +21,10 @@ use crate::{
     machine::{Context2, Machine2},
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
-        CreateClusterOutput, InitNodeParams, NotifyQueryPromiseParams, NotifyServerAddrParams,
-        ProposeParams, ProposeQueryParams, Proposer, RemoveServerParams, Request,
-        RequestVoteParams, RequestVoteResultParams, TakeSnapshotOutput,
+        CreateClusterOutput, InitNodeParams, MemberJson, NotifyQueryPromiseParams,
+        NotifyServerAddrParams, ProposeParams, ProposeQueryParams, Proposer, RemoveServerParams,
+        Request, RequestVoteParams, RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,
     },
-    request::{CreateClusterParams, MemberJson, SnapshotParams},
     storage::FileStorage,
     InputKind,
 };
@@ -43,7 +42,7 @@ const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
 
 // TODO: move or remove?
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(into = "CreateClusterParams", try_from = "CreateClusterParams")]
+// TODO: #[serde(into = "CreateClusterParams", try_from = "CreateClusterParams")]
 pub struct ClusterSettings {
     pub min_election_timeout: Duration,
     pub max_election_timeout: Duration,
@@ -58,29 +57,30 @@ impl Default for ClusterSettings {
     }
 }
 
-impl From<ClusterSettings> for CreateClusterParams {
-    fn from(value: ClusterSettings) -> Self {
-        Self {
-            min_election_timeout_ms: value.min_election_timeout.as_millis() as usize,
-            max_election_timeout_ms: value.max_election_timeout.as_millis() as usize,
-        }
-    }
-}
+// TODO
+// impl From<ClusterSettings> for CreateClusterParams {
+//     fn from(value: ClusterSettings) -> Self {
+//         Self {
+//             min_election_timeout_ms: value.min_election_timeout.as_millis() as usize,
+//             max_election_timeout_ms: value.max_election_timeout.as_millis() as usize,
+//         }
+//     }
+// }
 
-impl TryFrom<CreateClusterParams> for ClusterSettings {
-    type Error = &'static str;
+// impl TryFrom<CreateClusterParams> for ClusterSettings {
+//     type Error = &'static str;
 
-    fn try_from(value: CreateClusterParams) -> Result<Self, Self::Error> {
-        if value.min_election_timeout_ms >= value.max_election_timeout_ms {
-            return Err("Empty election timeout range");
-        }
+//     fn try_from(value: CreateClusterParams) -> Result<Self, Self::Error> {
+//         if value.min_election_timeout_ms >= value.max_election_timeout_ms {
+//             return Err("Empty election timeout range");
+//         }
 
-        Ok(Self {
-            min_election_timeout: Duration::from_millis(value.min_election_timeout_ms as u64),
-            max_election_timeout: Duration::from_millis(value.max_election_timeout_ms as u64),
-        })
-    }
-}
+//         Ok(Self {
+//             min_election_timeout: Duration::from_millis(value.min_election_timeout_ms as u64),
+//             max_election_timeout: Duration::from_millis(value.max_election_timeout_ms as u64),
+//         })
+//     }
+// }
 
 // TODO: move
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

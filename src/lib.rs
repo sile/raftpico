@@ -1,7 +1,6 @@
 pub mod command;
 mod machine;
 pub mod message;
-pub mod request; // TODO: message?
 pub mod server2;
 pub mod stats;
 pub mod storage; // TODO
@@ -18,12 +17,11 @@ mod tests {
         time::Duration,
     };
 
-    use jsonlrpc::{RequestId, ResponseObject, RpcClient};
+    use jsonlrpc::{ErrorCode, RequestId, RequestObject, ResponseObject, RpcClient};
     use machine::{Context2, Machine2};
     use message::{
         AddServerOutput, ApplyParams, CreateClusterOutput, RemoveServerOutput, TakeSnapshotOutput,
     };
-    use request::{CreateClusterResult, Request, Response};
     use serde::{Deserialize, Serialize};
     use server2::{ErrorKind, RaftServer};
 
@@ -43,6 +41,15 @@ mod tests {
     const TEST_TIMEOUT: Duration = Duration::from_secs(3);
     const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(10));
 
+    fn req<T: Serialize>(method: &str, params: T) -> serde_json::Value {
+        serde_json::json!({
+            "jsonrpc": jsonlrpc::JsonRpcVersion::V2,
+            "method": method,
+            "params": params,
+            "id": 0
+        })
+    }
+
     #[test]
     fn create_cluster() {
         let mut server = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
@@ -50,20 +57,13 @@ mod tests {
 
         let server_addr = server.listen_addr();
         let handle = std::thread::spawn(move || {
-            let mut client = RpcClient::new(connect(server_addr));
-
             // First call: OK
-            let request = Request::create_cluster(request_id(0), None);
-            let response: Response<CreateClusterOutput> =
-                client.call(&request).expect("call() failed");
-            let output = response.into_std_result().expect("error response");
+            let output: CreateClusterOutput = rpc(server_addr, req("CreateCluster", ()));
             assert_eq!(output.members.len(), 1);
 
             // Second call: NG
-            let request = Request::create_cluster(request_id(1), None);
-            let response: ResponseObject = client.call(&request).expect("call() failed");
-            let error = response.into_std_result().expect_err("ok response");
-            assert_eq!(error.code, ErrorKind::ClusterAlreadyCreated.code());
+            let error = rpc_err(server_addr, req("CreateCluster", ()));
+            assert_eq!(error, ErrorKind::ClusterAlreadyCreated.code());
         });
 
         while !handle.is_finished() {
@@ -506,10 +506,18 @@ mod tests {
         T: for<'de> Deserialize<'de>,
     {
         let mut client = RpcClient::new(connect(server_addr));
-        let response: serde_json::Value = client.call(&request).expect("call() failed");
-        let response: Response<T> =
-            serde_json::from_value(response.clone()).unwrap_or_else(|e| panic!("{e}: {response}"));
-        response.into_std_result().expect("error response")
+        let response: ResponseObject = client.call(&request).expect("call() failed");
+        let result = response.into_std_result().expect("error response");
+        serde_json::from_value(result).expect("malformed result")
+    }
+
+    fn rpc_err(server_addr: SocketAddr, request: impl Serialize) -> ErrorCode {
+        let mut client = RpcClient::new(connect(server_addr));
+        let response: ResponseObject = client.call(&request).expect("call() failed");
+        response
+            .into_std_result()
+            .expect_err("not error response")
+            .code
     }
 
     fn connect(addr: SocketAddr) -> TcpStream {
