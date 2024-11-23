@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 
 use jsonlrpc::RequestId;
 use jsonlrpc_mio::ClientId;
@@ -9,25 +9,6 @@ use crate::{
     message::Proposer,
     server2::{ClusterSettings, Commands},
 };
-
-// TODO: delete
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Command {
-    InitCluster {
-        server_addr: SocketAddr,
-        min_election_timeout: Duration,
-        max_election_timeout: Duration,
-        max_log_entries_hint: usize,
-    },
-    InviteServer {
-        server_addr: SocketAddr,
-    },
-    EvictServer {
-        server_addr: SocketAddr,
-    },
-    Command(serde_json::Value),
-    Query,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command2 {

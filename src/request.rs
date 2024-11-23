@@ -6,7 +6,7 @@ use raftbare::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::command::{Command, Command2};
+use crate::command::Command2;
 
 pub fn is_known_external_method(method: &str) -> bool {
     // TODO: update
@@ -33,7 +33,6 @@ impl OutgoingMessage for InternalRequest {
     fn is_mandatory(&self) -> bool {
         match self {
             InternalRequest::Handshake { .. } => true,
-            InternalRequest::Propose { .. } => true,
             InternalRequest::AppendEntriesCall { .. } => false,
             InternalRequest::AppendEntriesReply { .. } => false,
             InternalRequest::RequestVoteCall { .. } => false,
@@ -63,12 +62,6 @@ pub enum InternalRequest {
     Handshake {
         jsonrpc: JsonRpcVersion,
         params: HandshakeParams,
-    },
-    Propose {
-        jsonrpc: JsonRpcVersion,
-        id: RequestId,
-        // TODO: timeout
-        params: ProposeParams,
     },
     AppendEntriesCall {
         jsonrpc: JsonRpcVersion,
@@ -214,7 +207,6 @@ pub enum LogEntry {
         new_voters: Vec<u64>,
     },
     // TODO: flatten
-    Command(Command),
     Command2(Command2), // TODO
 }
 
@@ -233,11 +225,6 @@ impl HandshakeParams {
     pub fn dst_node_id(&self) -> NodeId {
         NodeId::new(self.dst_node_id)
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProposeParams {
-    pub command: Command,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -6,7 +6,7 @@ pub mod server2;
 pub mod stats;
 pub mod storage; // TODO
 
-pub use machine::{Context2, InputKind, Machine, Machine2};
+pub use machine::{Context2, InputKind, Machine2};
 pub use server2::RaftServer as Server;
 pub use stats::ServerStats;
 pub use storage::FileStorage;
