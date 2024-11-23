@@ -263,7 +263,7 @@ impl Ord for PendingQuery {
 }
 
 #[derive(Debug)]
-pub struct RaftServer<M> {
+pub struct Server<M> {
     instance_id: ServerInstanceId,
     poller: Poll,
     events: Events,
@@ -281,7 +281,7 @@ pub struct RaftServer<M> {
     machine: SystemMachine<M>,
 }
 
-impl<M: Machine2> RaftServer<M> {
+impl<M: Machine2> Server<M> {
     pub fn start(
         listen_addr: SocketAddr,
         machine: M,

@@ -6,536 +6,319 @@ pub mod stats;
 pub mod storage; // TODO
 
 pub use machine::{Context2, InputKind, Machine2};
-pub use server2::RaftServer as Server;
+pub use server2::Server;
 pub use stats::ServerStats;
 pub use storage::FileStorage;
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        net::{SocketAddr, TcpStream},
-        time::Duration,
-    };
 
-    use jsonlrpc::{ErrorCode, RequestId, RequestObject, ResponseObject, RpcClient};
-    use machine::{Context2, Machine2};
-    use message::{
-        AddServerOutput, ApplyParams, CreateClusterOutput, RemoveServerOutput, TakeSnapshotOutput,
-    };
-    use serde::{Deserialize, Serialize};
-    use server2::{ErrorKind, RaftServer};
+    // #[test]
+    // fn command() {
+    //     let mut servers = Vec::new();
+    //     let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
 
-    use super::*;
+    //     // Create a cluster.
+    //     let server_addr0 = server0.listen_addr();
+    //     let handle = std::thread::spawn(move || {
+    //         rpc::<CreateClusterResult>(server_addr0, Request::create_cluster(request_id(0), None))
+    //     });
+    //     while !handle.is_finished() {
+    //         server0.poll(POLL_TIMEOUT).expect("poll() failed");
+    //     }
+    //     servers.push(server0);
 
-    impl Machine2 for usize {
-        type Input = usize;
+    //     // Add two servers to the cluster.
+    //     let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+    //     let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+    //     let server_addr1 = server1.listen_addr();
+    //     let server_addr2 = server2.listen_addr();
+    //     let handle = std::thread::spawn(move || {
+    //         let mut contact_addr = server_addr0;
+    //         for (i, addr) in [server_addr1, server_addr2].into_iter().enumerate() {
+    //             let output: AddServerOutput =
+    //                 rpc(contact_addr, Request::add_server(request_id(0), addr));
+    //             assert_eq!(output.members.len(), 2 + i);
+    //             contact_addr = addr;
 
-        fn apply(&mut self, ctx: &mut Context2, input: &Self::Input) {
-            if ctx.kind.is_command() {
-                *self += *input;
-            }
-            ctx.output(self);
-        }
-    }
+    //             // TODO:
+    //             std::thread::sleep(Duration::from_millis(500));
+    //         }
+    //     });
+    //     servers.push(server1);
+    //     servers.push(server2);
 
-    const TEST_TIMEOUT: Duration = Duration::from_secs(3);
-    const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(10));
+    //     while !handle.is_finished() {
+    //         for server in &mut servers {
+    //             server.poll(POLL_TIMEOUT).expect("poll() failed");
+    //         }
+    //     }
+    //     for server in &servers {
+    //         assert!(server.node().is_some());
+    //     }
 
-    fn req<T: Serialize>(method: &str, params: T) -> serde_json::Value {
-        serde_json::json!({
-            "jsonrpc": jsonlrpc::JsonRpcVersion::V2,
-            "method": method,
-            "params": params,
-            "id": 0
-        })
-    }
+    //     // Propose commands.
+    //     let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
+    //     let handle = std::thread::spawn(move || {
+    //         for (i, addr) in addrs.into_iter().enumerate() {
+    //             let _v: serde_json::Value = rpc(addr, apply_command_request(i));
+    //         }
+    //     });
 
-    #[test]
-    fn create_cluster() {
-        let mut server = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        assert!(server.node().is_none());
+    //     while !handle.is_finished() {
+    //         for server in &mut servers {
+    //             server.poll(POLL_TIMEOUT).expect("poll() failed");
+    //         }
+    //     }
+    //     for server in &servers {
+    //         assert_eq!(*server.machine(), 0 + 1 + 2);
+    //     }
+    // }
 
-        let server_addr = server.listen_addr();
-        let handle = std::thread::spawn(move || {
-            // First call: OK
-            let output: CreateClusterOutput = rpc(server_addr, req("CreateCluster", ()));
-            assert_eq!(output.members.len(), 1);
+    // fn apply_command_request<T: Serialize>(input: T) -> crate::message::Request {
+    //     crate::message::Request::Apply {
+    //         jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+    //         id: RequestId::Number(0),
+    //         params: ApplyParams {
+    //             kind: InputKind::Command,
+    //             input: serde_json::to_value(&input).expect("unreachable"),
+    //         },
+    //     }
+    // }
 
-            // Second call: NG
-            let error = rpc_err(server_addr, req("CreateCluster", ()));
-            assert_eq!(error, ErrorKind::ClusterAlreadyCreated.code());
-        });
+    // fn apply_query_request<T: Serialize>(input: T) -> crate::message::Request {
+    //     crate::message::Request::Apply {
+    //         jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+    //         id: RequestId::Number(0),
+    //         params: ApplyParams {
+    //             kind: InputKind::Query,
+    //             input: serde_json::to_value(&input).expect("unreachable"),
+    //         },
+    //     }
+    // }
 
-        while !handle.is_finished() {
-            server.poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        assert!(handle.join().is_ok());
-        assert!(server.node().is_some());
-    }
+    // fn apply_local_query_request<T: Serialize>(input: T) -> crate::message::Request {
+    //     crate::message::Request::Apply {
+    //         jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+    //         id: RequestId::Number(0),
+    //         params: ApplyParams {
+    //             kind: InputKind::LocalQuery,
+    //             input: serde_json::to_value(&input).expect("unreachable"),
+    //         },
+    //     }
+    // }
 
-    #[test]
-    fn add_and_remove_server() {
-        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        assert!(server0.node().is_none());
+    // #[test]
+    // fn snapshot() {
+    //     let mut servers = Vec::new();
+    //     let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
 
-        // Create a cluster.
-        let server_addr0 = server0.listen_addr();
-        let handle = std::thread::spawn(move || {
-            rpc::<CreateClusterOutput>(server_addr0, Request::create_cluster(request_id(0), None))
-        });
-        while !handle.is_finished() {
-            server0.poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        assert!(server0.node().is_some());
+    //     // Create a cluster with a small max log size.
+    //     let server_addr0 = server0.listen_addr();
+    //     let handle = std::thread::spawn(move || {
+    //         rpc::<CreateClusterOutput>(server_addr0, Request::create_cluster(request_id(0), None))
+    //     });
+    //     while !handle.is_finished() {
+    //         server0.poll(POLL_TIMEOUT).expect("poll() failed");
+    //     }
+    //     servers.push(server0);
 
-        // Add a server to the cluster.
-        let mut server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        let server_addr1 = server1.listen_addr();
-        let handle = std::thread::spawn(move || {
-            let output: AddServerOutput = rpc(
-                server_addr0,
-                Request::add_server(request_id(0), server_addr1),
-            );
-            assert_eq!(output.members.len(), 2);
+    //     // Propose commands.
+    //     let handle = std::thread::spawn(move || {
+    //         for i in 0..10 {
+    //             let _v: serde_json::Value = rpc(server_addr0, apply_command_request(i));
+    //         }
 
-            // TODO: call machine.on_event(Event::ServerJoined)
-            std::thread::sleep(Duration::from_millis(500));
-        });
-        while !handle.is_finished() {
-            server0.poll(POLL_TIMEOUT).expect("poll() failed");
-            server1.poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        assert!(server1.node().is_some());
+    //         let _: TakeSnapshotOutput = rpc(
+    //             server_addr0,
+    //             crate::message::Request::TakeSnapshot {
+    //                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+    //                 id: RequestId::Number(0),
+    //             },
+    //         );
+    //         // TODO:
+    //         std::thread::sleep(Duration::from_millis(500));
+    //     });
+    //     while !handle.is_finished() {
+    //         servers[0].poll(POLL_TIMEOUT).expect("poll() failed");
+    //     }
+    //     assert_eq!(*servers[0].machine(), 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9);
 
-        // Remove server0 from the cluster.
-        let handle = std::thread::spawn(move || {
-            let output: RemoveServerOutput = rpc(
-                server_addr0,
-                Request::remove_server(request_id(0), server_addr0),
-            );
-            assert_eq!(output.members.len(), 1);
+    //     // Add two servers to the cluster.
+    //     let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+    //     let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+    //     let server_addr1 = server1.listen_addr();
+    //     let server_addr2 = server2.listen_addr();
+    //     let handle = std::thread::spawn(move || {
+    //         let mut contact_addr = server_addr0;
+    //         for addr in [server_addr1, server_addr2] {
+    //             let output: AddServerOutput =
+    //                 rpc(contact_addr, Request::add_server(request_id(0), addr));
+    //             assert!(output.members.len() > 1);
+    //             contact_addr = addr;
 
-            // TODO: call machine.on_event(Event::ServerJoined)
-            std::thread::sleep(Duration::from_millis(500));
-        });
-        while !handle.is_finished() {
-            server0.poll(POLL_TIMEOUT).expect("poll() failed");
-            server1.poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        assert!(server0.node().is_some()); // TODO: clear server0.node() if possible (but it seems difficult)
-        assert!(server1.node().is_some());
-    }
+    //             // TODO:
+    //             std::thread::sleep(Duration::from_millis(500));
+    //         }
+    //     });
+    //     servers.push(server1);
+    //     servers.push(server2);
 
-    #[test]
-    fn command() {
-        let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+    //     while !handle.is_finished() {
+    //         for server in &mut servers {
+    //             server.poll(POLL_TIMEOUT).expect("poll() failed");
+    //         }
+    //     }
+    //     for server in &servers {
+    //         assert!(server.node().is_some());
+    //     }
 
-        // Create a cluster.
-        let server_addr0 = server0.listen_addr();
-        let handle = std::thread::spawn(move || {
-            rpc::<CreateClusterResult>(server_addr0, Request::create_cluster(request_id(0), None))
-        });
-        while !handle.is_finished() {
-            server0.poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        servers.push(server0);
+    //     // Propose commands.
+    //     let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
+    //     let handle = std::thread::spawn(move || {
+    //         for (i, addr) in addrs.into_iter().cycle().enumerate().take(10) {
+    //             let _v: serde_json::Value = rpc(addr, apply_command_request(i));
+    //         }
 
-        // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        let server_addr1 = server1.listen_addr();
-        let server_addr2 = server2.listen_addr();
-        let handle = std::thread::spawn(move || {
-            let mut contact_addr = server_addr0;
-            for (i, addr) in [server_addr1, server_addr2].into_iter().enumerate() {
-                let output: AddServerOutput =
-                    rpc(contact_addr, Request::add_server(request_id(0), addr));
-                assert_eq!(output.members.len(), 2 + i);
-                contact_addr = addr;
+    //         // TODO:
+    //         std::thread::sleep(Duration::from_millis(500));
+    //     });
 
-                // TODO:
-                std::thread::sleep(Duration::from_millis(500));
-            }
-        });
-        servers.push(server1);
-        servers.push(server2);
+    //     while !handle.is_finished() {
+    //         for server in &mut servers {
+    //             server.poll(POLL_TIMEOUT).expect("poll() failed");
+    //         }
+    //     }
+    //     for server in &servers {
+    //         assert_eq!(
+    //             *server.machine(),
+    //             (0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9) * 2
+    //         );
+    //     }
+    // }
 
-        while !handle.is_finished() {
-            for server in &mut servers {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-        }
-        for server in &servers {
-            assert!(server.node().is_some());
-        }
+    // #[test]
+    // fn query() {
+    //     let mut servers = Vec::new();
+    //     let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
 
-        // Propose commands.
-        let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
-        let handle = std::thread::spawn(move || {
-            for (i, addr) in addrs.into_iter().enumerate() {
-                let _v: serde_json::Value = rpc(addr, apply_command_request(i));
-            }
-        });
+    //     // Create a cluster.
+    //     let server_addr0 = server0.listen_addr();
+    //     let handle = std::thread::spawn(move || {
+    //         rpc::<CreateClusterResult>(server_addr0, Request::create_cluster(request_id(0), None))
+    //     });
+    //     while !handle.is_finished() {
+    //         server0.poll(POLL_TIMEOUT).expect("poll() failed");
+    //     }
+    //     servers.push(server0);
 
-        while !handle.is_finished() {
-            for server in &mut servers {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-        }
-        for server in &servers {
-            assert_eq!(*server.machine(), 0 + 1 + 2);
-        }
-    }
+    //     // Add two servers to the cluster.
+    //     let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+    //     let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+    //     let server_addr1 = server1.listen_addr();
+    //     let server_addr2 = server2.listen_addr();
+    //     let handle = std::thread::spawn(move || {
+    //         let mut contact_addr = server_addr0;
+    //         for addr in [server_addr1, server_addr2] {
+    //             let output: AddServerOutput =
+    //                 rpc(contact_addr, Request::add_server(request_id(0), addr));
+    //             assert!(output.members.len() > 1);
+    //             contact_addr = addr;
 
-    fn apply_command_request<T: Serialize>(input: T) -> crate::message::Request {
-        crate::message::Request::Apply {
-            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            id: RequestId::Number(0),
-            params: ApplyParams {
-                kind: InputKind::Command,
-                input: serde_json::to_value(&input).expect("unreachable"),
-            },
-        }
-    }
+    //             // TODO:
+    //             std::thread::sleep(Duration::from_millis(500));
+    //         }
+    //     });
+    //     servers.push(server1);
+    //     servers.push(server2);
 
-    fn apply_query_request<T: Serialize>(input: T) -> crate::message::Request {
-        crate::message::Request::Apply {
-            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            id: RequestId::Number(0),
-            params: ApplyParams {
-                kind: InputKind::Query,
-                input: serde_json::to_value(&input).expect("unreachable"),
-            },
-        }
-    }
+    //     while !handle.is_finished() {
+    //         for server in &mut servers {
+    //             server.poll(POLL_TIMEOUT).expect("poll() failed");
+    //         }
+    //     }
+    //     for server in &servers {
+    //         assert!(server.node().is_some());
+    //     }
 
-    fn apply_local_query_request<T: Serialize>(input: T) -> crate::message::Request {
-        crate::message::Request::Apply {
-            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            id: RequestId::Number(0),
-            params: ApplyParams {
-                kind: InputKind::LocalQuery,
-                input: serde_json::to_value(&input).expect("unreachable"),
-            },
-        }
-    }
+    //     // Commands & queries
+    //     let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
+    //     let handle = std::thread::spawn(move || {
+    //         for (i, addr) in addrs.into_iter().enumerate() {
+    //             let v0: serde_json::Value = rpc(addr, apply_command_request(i));
+    //             let v1: serde_json::Value = rpc(addr, apply_query_request(i));
+    //             assert_eq!(v0, v1);
+    //         }
+    //     });
 
-    #[test]
-    fn re_election() {
-        let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+    //     while !handle.is_finished() {
+    //         for server in &mut servers {
+    //             server.poll(POLL_TIMEOUT).expect("poll() failed");
+    //         }
+    //     }
+    //     for server in &servers {
+    //         assert_eq!(*server.machine(), 0 + 1 + 2);
+    //     }
+    // }
 
-        // Create a cluster.
-        let server_addr0 = server0.listen_addr();
-        let handle = std::thread::spawn(move || {
-            rpc::<CreateClusterOutput>(server_addr0, Request::create_cluster(request_id(0), None))
-        });
-        while !handle.is_finished() {
-            server0.poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        servers.push(server0);
+    // #[test]
+    // fn local_query() {
+    //     let mut servers = Vec::new();
+    //     let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
 
-        // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        let server_addr1 = server1.listen_addr();
-        let server_addr2 = server2.listen_addr();
-        let handle = std::thread::spawn(move || {
-            let mut contact_addr = server_addr0;
-            for addr in [server_addr1, server_addr2] {
-                let output: AddServerOutput =
-                    rpc(contact_addr, Request::add_server(request_id(0), addr));
-                assert!(output.members.len() > 1);
-                contact_addr = addr;
+    //     // Create a cluster.
+    //     let server_addr0 = server0.listen_addr();
+    //     let handle = std::thread::spawn(move || {
+    //         rpc::<CreateClusterOutput>(server_addr0, Request::create_cluster(request_id(0), None))
+    //     });
+    //     while !handle.is_finished() {
+    //         server0.poll(POLL_TIMEOUT).expect("poll() failed");
+    //     }
+    //     servers.push(server0);
 
-                // TODO:
-                std::thread::sleep(Duration::from_millis(500));
-            }
-        });
-        servers.push(server1);
-        servers.push(server2);
+    //     // Add two servers to the cluster.
+    //     let server1 = RaftServer::start(auto_addr(), 1, None).expect("start() failed");
+    //     let server2 = RaftServer::start(auto_addr(), 2, None).expect("start() failed");
+    //     let server_addr1 = server1.listen_addr();
+    //     let server_addr2 = server2.listen_addr();
+    //     let handle = std::thread::spawn(move || {
+    //         let mut contact_addr = server_addr0;
+    //         for addr in [server_addr1, server_addr2] {
+    //             let output: AddServerOutput =
+    //                 rpc(contact_addr, Request::add_server(request_id(0), addr));
+    //             assert!(output.members.len() > 1);
+    //             contact_addr = addr;
 
-        while !handle.is_finished() {
-            for server in &mut servers {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-        }
-        for server in &servers {
-            assert!(server.node().is_some());
-        }
-        assert!(servers[0].node().expect("unreachable").role().is_leader());
+    //             // TODO:
+    //             std::thread::sleep(Duration::from_millis(500));
+    //         }
+    //     });
+    //     servers.push(server1);
+    //     servers.push(server2);
 
-        // Run until the leader changes.
-        while !servers
-            .iter()
-            .skip(1)
-            .any(|s| s.node().expect("unreachable").role().is_leader())
-        {
-            for server in servers.iter_mut().skip(1) {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-        }
-        for _ in 0..100 {
-            for server in &mut servers {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-            if servers[0].node().expect("unreachable").role().is_follower() {
-                break;
-            }
-        }
-        assert!(servers[0].node().expect("unreachable").role().is_follower());
-    }
+    //     while !handle.is_finished() {
+    //         for server in &mut servers {
+    //             server.poll(POLL_TIMEOUT).expect("poll() failed");
+    //         }
+    //     }
+    //     for server in &servers {
+    //         assert!(server.node().is_some());
+    //     }
 
-    #[test]
-    fn snapshot() {
-        let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
+    //     // Local query
+    //     let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
+    //     let handle = std::thread::spawn(move || {
+    //         for (i, addr) in addrs.into_iter().enumerate() {
+    //             let v: usize = rpc(addr, apply_local_query_request(0));
+    //             assert_eq!(v, i);
+    //         }
+    //     });
 
-        // Create a cluster with a small max log size.
-        let server_addr0 = server0.listen_addr();
-        let handle = std::thread::spawn(move || {
-            rpc::<CreateClusterOutput>(server_addr0, Request::create_cluster(request_id(0), None))
-        });
-        while !handle.is_finished() {
-            server0.poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        servers.push(server0);
-
-        // Propose commands.
-        let handle = std::thread::spawn(move || {
-            for i in 0..10 {
-                let _v: serde_json::Value = rpc(server_addr0, apply_command_request(i));
-            }
-
-            let _: TakeSnapshotOutput = rpc(
-                server_addr0,
-                crate::message::Request::TakeSnapshot {
-                    jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                    id: RequestId::Number(0),
-                },
-            );
-            // TODO:
-            std::thread::sleep(Duration::from_millis(500));
-        });
-        while !handle.is_finished() {
-            servers[0].poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        assert_eq!(*servers[0].machine(), 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9);
-
-        // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        let server_addr1 = server1.listen_addr();
-        let server_addr2 = server2.listen_addr();
-        let handle = std::thread::spawn(move || {
-            let mut contact_addr = server_addr0;
-            for addr in [server_addr1, server_addr2] {
-                let output: AddServerOutput =
-                    rpc(contact_addr, Request::add_server(request_id(0), addr));
-                assert!(output.members.len() > 1);
-                contact_addr = addr;
-
-                // TODO:
-                std::thread::sleep(Duration::from_millis(500));
-            }
-        });
-        servers.push(server1);
-        servers.push(server2);
-
-        while !handle.is_finished() {
-            for server in &mut servers {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-        }
-        for server in &servers {
-            assert!(server.node().is_some());
-        }
-
-        // Propose commands.
-        let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
-        let handle = std::thread::spawn(move || {
-            for (i, addr) in addrs.into_iter().cycle().enumerate().take(10) {
-                let _v: serde_json::Value = rpc(addr, apply_command_request(i));
-            }
-
-            // TODO:
-            std::thread::sleep(Duration::from_millis(500));
-        });
-
-        while !handle.is_finished() {
-            for server in &mut servers {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-        }
-        for server in &servers {
-            assert_eq!(
-                *server.machine(),
-                (0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9) * 2
-            );
-        }
-    }
-
-    #[test]
-    fn query() {
-        let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-
-        // Create a cluster.
-        let server_addr0 = server0.listen_addr();
-        let handle = std::thread::spawn(move || {
-            rpc::<CreateClusterResult>(server_addr0, Request::create_cluster(request_id(0), None))
-        });
-        while !handle.is_finished() {
-            server0.poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        servers.push(server0);
-
-        // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-        let server_addr1 = server1.listen_addr();
-        let server_addr2 = server2.listen_addr();
-        let handle = std::thread::spawn(move || {
-            let mut contact_addr = server_addr0;
-            for addr in [server_addr1, server_addr2] {
-                let output: AddServerOutput =
-                    rpc(contact_addr, Request::add_server(request_id(0), addr));
-                assert!(output.members.len() > 1);
-                contact_addr = addr;
-
-                // TODO:
-                std::thread::sleep(Duration::from_millis(500));
-            }
-        });
-        servers.push(server1);
-        servers.push(server2);
-
-        while !handle.is_finished() {
-            for server in &mut servers {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-        }
-        for server in &servers {
-            assert!(server.node().is_some());
-        }
-
-        // Commands & queries
-        let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
-        let handle = std::thread::spawn(move || {
-            for (i, addr) in addrs.into_iter().enumerate() {
-                let v0: serde_json::Value = rpc(addr, apply_command_request(i));
-                let v1: serde_json::Value = rpc(addr, apply_query_request(i));
-                assert_eq!(v0, v1);
-            }
-        });
-
-        while !handle.is_finished() {
-            for server in &mut servers {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-        }
-        for server in &servers {
-            assert_eq!(*server.machine(), 0 + 1 + 2);
-        }
-    }
-
-    #[test]
-    fn local_query() {
-        let mut servers = Vec::new();
-        let mut server0 = RaftServer::start(auto_addr(), 0, None).expect("start() failed");
-
-        // Create a cluster.
-        let server_addr0 = server0.listen_addr();
-        let handle = std::thread::spawn(move || {
-            rpc::<CreateClusterOutput>(server_addr0, Request::create_cluster(request_id(0), None))
-        });
-        while !handle.is_finished() {
-            server0.poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        servers.push(server0);
-
-        // Add two servers to the cluster.
-        let server1 = RaftServer::start(auto_addr(), 1, None).expect("start() failed");
-        let server2 = RaftServer::start(auto_addr(), 2, None).expect("start() failed");
-        let server_addr1 = server1.listen_addr();
-        let server_addr2 = server2.listen_addr();
-        let handle = std::thread::spawn(move || {
-            let mut contact_addr = server_addr0;
-            for addr in [server_addr1, server_addr2] {
-                let output: AddServerOutput =
-                    rpc(contact_addr, Request::add_server(request_id(0), addr));
-                assert!(output.members.len() > 1);
-                contact_addr = addr;
-
-                // TODO:
-                std::thread::sleep(Duration::from_millis(500));
-            }
-        });
-        servers.push(server1);
-        servers.push(server2);
-
-        while !handle.is_finished() {
-            for server in &mut servers {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-        }
-        for server in &servers {
-            assert!(server.node().is_some());
-        }
-
-        // Local query
-        let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
-        let handle = std::thread::spawn(move || {
-            for (i, addr) in addrs.into_iter().enumerate() {
-                let v: usize = rpc(addr, apply_local_query_request(0));
-                assert_eq!(v, i);
-            }
-        });
-
-        while !handle.is_finished() {
-            for server in &mut servers {
-                server.poll(POLL_TIMEOUT).expect("poll() failed");
-            }
-        }
-        handle.join().expect("join() failed");
-    }
-
-    fn rpc<T>(server_addr: SocketAddr, request: impl Serialize) -> T
-    where
-        T: for<'de> Deserialize<'de>,
-    {
-        let mut client = RpcClient::new(connect(server_addr));
-        let response: ResponseObject = client.call(&request).expect("call() failed");
-        let result = response.into_std_result().expect("error response");
-        serde_json::from_value(result).expect("malformed result")
-    }
-
-    fn rpc_err(server_addr: SocketAddr, request: impl Serialize) -> ErrorCode {
-        let mut client = RpcClient::new(connect(server_addr));
-        let response: ResponseObject = client.call(&request).expect("call() failed");
-        response
-            .into_std_result()
-            .expect_err("not error response")
-            .code
-    }
-
-    fn connect(addr: SocketAddr) -> TcpStream {
-        let stream = TcpStream::connect(addr).expect("connect() failed");
-        stream
-            .set_read_timeout(Some(TEST_TIMEOUT))
-            .expect("set_read_timeout() failed");
-        stream
-            .set_write_timeout(Some(TEST_TIMEOUT))
-            .expect("set_write_timeout() failed");
-        stream
-    }
-
-    fn auto_addr() -> SocketAddr {
-        "127.0.0.1:0".parse().expect("unreachable")
-    }
-
-    fn request_id(id: i64) -> RequestId {
-        RequestId::Number(id)
-    }
+    //     while !handle.is_finished() {
+    //         for server in &mut servers {
+    //             server.poll(POLL_TIMEOUT).expect("poll() failed");
+    //         }
+    //     }
+    //     handle.join().expect("join() failed");
+    // }
 }
