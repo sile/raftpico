@@ -3,11 +3,11 @@ use std::{
     time::Duration,
 };
 
-use jsonlrpc::{ErrorCode, ResponseObject, RpcClient};
+use jsonlrpc::{ErrorCode, RequestId, ResponseObject, RpcClient};
 use raftpico::{
     message::{
         AddServerOutput, AddServerParams, ApplyParams, CreateClusterOutput, RemoveServerOutput,
-        RemoveServerParams,
+        RemoveServerParams, Request, TakeSnapshotOutput,
     },
     server2::{ClusterSettings, ErrorKind},
     Context2, InputKind, Machine2, Server,
@@ -333,6 +333,90 @@ fn local_query() {
         }
     }
     handle.join().expect("join() failed");
+}
+
+#[test]
+fn snapshot() {
+    let mut servers = Vec::new();
+    let mut server0 = Server::<Counter>::start(auto_addr(), None).expect("start() failed");
+
+    // Create a cluster with a small max log size.
+    let server_addr0 = server0.listen_addr();
+    let handle =
+        std::thread::spawn(move || rpc::<CreateClusterOutput>(server_addr0, create_cluster_req()));
+    while !handle.is_finished() {
+        server0.poll(POLL_TIMEOUT).expect("poll() failed");
+    }
+    servers.push(server0);
+
+    // Propose commands.
+    let handle = std::thread::spawn(move || {
+        for i in 0..10 {
+            let _: serde_json::Value = rpc(server_addr0, apply_command_req(i));
+        }
+
+        let _: TakeSnapshotOutput = rpc(
+            server_addr0,
+            Request::TakeSnapshot {
+                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+                id: RequestId::Number(0),
+            },
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    });
+    while !handle.is_finished() {
+        servers[0].poll(POLL_TIMEOUT).expect("poll() failed");
+    }
+    assert_eq!(
+        servers[0].machine().0,
+        0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9
+    );
+
+    // Add two servers to the cluster.
+    let server1 = Server::<Counter>::start(auto_addr(), None).expect("start() failed");
+    let server2 = Server::<Counter>::start(auto_addr(), None).expect("start() failed");
+    let server_addr1 = server1.listen_addr();
+    let server_addr2 = server2.listen_addr();
+    let handle = std::thread::spawn(move || {
+        let mut contact_addr = server_addr0;
+        for addr in [server_addr1, server_addr2] {
+            let _: AddServerOutput = rpc(contact_addr, add_server_req(addr));
+            contact_addr = addr;
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    servers.push(server1);
+    servers.push(server2);
+
+    while !handle.is_finished() {
+        for server in &mut servers {
+            server.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
+    }
+    for server in &servers {
+        assert!(server.node().is_some());
+    }
+
+    // Propose commands.
+    let addrs = servers.iter().map(|s| s.listen_addr()).collect::<Vec<_>>();
+    let handle = std::thread::spawn(move || {
+        for (i, addr) in addrs.into_iter().cycle().enumerate().take(10) {
+            let _: serde_json::Value = rpc(addr, apply_command_req(i));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    });
+
+    while !handle.is_finished() {
+        for server in &mut servers {
+            server.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
+    }
+    for server in &servers {
+        assert_eq!(
+            server.machine().0,
+            (0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9) * 2
+        );
+    }
 }
 
 fn auto_addr() -> SocketAddr {
