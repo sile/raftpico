@@ -42,7 +42,7 @@ const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
 
 // TODO: move or remove?
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-// TODO: #[serde(into = "CreateClusterParams", try_from = "CreateClusterParams")]
+#[serde(into = "serde_json::Value", try_from = "serde_json::Value")]
 pub struct ClusterSettings {
     pub min_election_timeout: Duration,
     pub max_election_timeout: Duration,
@@ -57,30 +57,37 @@ impl Default for ClusterSettings {
     }
 }
 
-// TODO
-// impl From<ClusterSettings> for CreateClusterParams {
-//     fn from(value: ClusterSettings) -> Self {
-//         Self {
-//             min_election_timeout_ms: value.min_election_timeout.as_millis() as usize,
-//             max_election_timeout_ms: value.max_election_timeout.as_millis() as usize,
-//         }
-//     }
-// }
+impl From<ClusterSettings> for serde_json::Value {
+    fn from(value: ClusterSettings) -> Self {
+        serde_json::json!({
+            "minElectionTimeoutMs": value.min_election_timeout.as_millis() as usize,
+            "maxElectionTimeoutMs": value.max_election_timeout.as_millis() as usize,
+        })
+    }
+}
 
-// impl TryFrom<CreateClusterParams> for ClusterSettings {
-//     type Error = &'static str;
+impl TryFrom<serde_json::Value> for ClusterSettings {
+    type Error = String;
 
-//     fn try_from(value: CreateClusterParams) -> Result<Self, Self::Error> {
-//         if value.min_election_timeout_ms >= value.max_election_timeout_ms {
-//             return Err("Empty election timeout range");
-//         }
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Object {
+            min_election_timeout_ms: usize,
+            max_election_timeout_ms: usize,
+        }
 
-//         Ok(Self {
-//             min_election_timeout: Duration::from_millis(value.min_election_timeout_ms as u64),
-//             max_election_timeout: Duration::from_millis(value.max_election_timeout_ms as u64),
-//         })
-//     }
-// }
+        let object: Object = serde_json::from_value(value).map_err(|e| e.to_string())?;
+        if object.min_election_timeout_ms >= object.max_election_timeout_ms {
+            return Err("Empty election timeout range".to_owned());
+        }
+
+        Ok(Self {
+            min_election_timeout: Duration::from_millis(object.min_election_timeout_ms as u64),
+            max_election_timeout: Duration::from_millis(object.max_election_timeout_ms as u64),
+        })
+    }
+}
 
 // TODO: move
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
