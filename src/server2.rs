@@ -168,7 +168,6 @@ impl<M: Machine2> SystemMachine<M> {
                 token: self.next_token,
             },
         );
-        dbg!(&self.members);
         self.next_token += 1; // TODO: max handling
         ctx.output(&CreateClusterOutput {
             members: self.members.values().cloned().collect(),
@@ -193,7 +192,6 @@ impl<M: Machine2> SystemMachine<M> {
                 token,
             },
         );
-        dbg!(&self.members);
         ctx.output(&CreateClusterOutput {
             members: self.members.values().cloned().collect(),
         });
@@ -208,7 +206,6 @@ impl<M: Machine2> SystemMachine<M> {
 
         let node_id = NodeId::new(node_id);
         self.members.remove(&node_id.get());
-        dbg!(&self.members);
         ctx.output(&CreateClusterOutput {
             members: self.members.values().cloned().collect(),
         });
@@ -753,14 +750,6 @@ impl<M: Machine2> Server<M> {
             Role::Candidate => rand::thread_rng().gen_range(min..=max),
             Role::Leader => min,
         };
-        eprintln!(
-            "[{}] role={:?}, term={:?}, voted_for={:?}, timeout={:?}",
-            self.node.id().get(),
-            self.node.role(),
-            self.node.current_term(),
-            self.node.voted_for().map(|x| x.get()),
-            timeout
-        );
         self.election_abs_timeout = Instant::now() + timeout;
     }
 
@@ -931,7 +920,6 @@ impl<M: Machine2> Server<M> {
         caller: Caller,
         params: RequestVoteParams,
     ) -> std::io::Result<()> {
-        dbg!(&params);
         if !self.is_initialized() {
             // TODO: stats
             return Ok(());
@@ -939,7 +927,6 @@ impl<M: Machine2> Server<M> {
 
         let message = params.into_raft_message(&caller);
         self.node.handle_message(message);
-        dbg!(&self.node.actions().send_messages);
         Ok(())
     }
 
@@ -948,7 +935,6 @@ impl<M: Machine2> Server<M> {
         caller: Caller,
         params: RequestVoteResultParams,
     ) -> std::io::Result<()> {
-        dbg!(&params);
         if !self.is_initialized() {
             // TODO: stats
             return Ok(());
@@ -1051,7 +1037,6 @@ impl<M: Machine2> Server<M> {
             return Ok(());
         }
         if !self.machine.members.contains_key(&params.from) {
-            dbg!("here", self.node.id());
             self.reply_error(
                 caller,
                 ErrorKind::UnknownServer
