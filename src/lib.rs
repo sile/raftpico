@@ -1,6 +1,4 @@
 pub mod command;
-pub mod connection;
-pub mod io;
 mod machine;
 pub mod message;
 pub mod request; // TODO: message?
@@ -12,60 +10,6 @@ pub use machine::{Context2, InputKind, Machine, Machine2};
 pub use server2::RaftServer as Server;
 pub use stats::ServerStats;
 pub use storage::FileStorage;
-
-pub type Result<T> = std::result::Result<T, Error>;
-
-// TODO: remove
-pub struct Error {
-    pub io: std::io::Error,
-    pub trace: std::backtrace::Backtrace,
-}
-
-impl From<std::io::Error> for Error {
-    fn from(value: std::io::Error) -> Self {
-        Self {
-            io: value,
-            trace: std::backtrace::Backtrace::capture(),
-        }
-    }
-}
-
-impl From<Error> for std::io::Error {
-    fn from(value: Error) -> Self {
-        value.io
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(value: serde_json::Error) -> Self {
-        Self {
-            io: value.into(),
-            trace: std::backtrace::Backtrace::capture(),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.io)
-    }
-}
-
-impl std::fmt::Debug for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self}")
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.trace.status() == std::backtrace::BacktraceStatus::Captured {
-            write!(f, "{}\n\nBacktrace:\n{}", self.io, self.trace)
-        } else {
-            write!(f, "{}", self.io)
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

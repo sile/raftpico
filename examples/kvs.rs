@@ -1,7 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use raftpico::{Context2, FileStorage, Machine2, Result, Server};
+use raftpico::{Context2, FileStorage, Machine2, Server};
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
@@ -12,7 +12,7 @@ struct Args {
     storage_file: Option<PathBuf>,
 }
 
-fn main() -> Result<()> {
+fn main() -> std::io::Result<()> {
     let args = Args::parse();
     let storage = args
         .storage_file

@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::Parser;
-use raftpico::{Context2, Machine2, Result, Server};
+use raftpico::{Context2, Machine2, Server};
 use serde::{Deserialize, Serialize};
 
 const TICK_RESOLUTION: Duration = Duration::from_millis(10);
@@ -16,7 +16,7 @@ struct Args {
     listen_addr: SocketAddr,
 }
 
-fn main() -> Result<()> {
+fn main() -> std::io::Result<()> {
     let args = Args::parse();
     let mut server = Server::start(args.listen_addr, KvsMachine::default(), None)?;
     let mut last_tick = Duration::default();
