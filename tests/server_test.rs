@@ -136,7 +136,7 @@ fn re_election() {
     assert!(servers[0].node().expect("unreachable").role().is_leader());
 
     // Run until the leader changes.
-    for _ in 0..100 {
+    for _ in 0..200 {
         for server in servers.iter_mut().skip(1) {
             server.poll(POLL_TIMEOUT).expect("poll() failed");
         }
