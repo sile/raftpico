@@ -4,7 +4,7 @@ use jsonlrpc::JsonlStream;
 use raftbare::{NodeId, Term};
 use serde::{Deserialize, Serialize};
 
-use crate::{command::Command, message::SnapshotParams};
+use crate::{command::Command, rpc::SnapshotParams};
 
 #[derive(Debug)]
 pub struct FileStorage {
@@ -45,8 +45,7 @@ impl FileStorage {
         Ok(())
     }
 
-    // TOOD: rename
-    pub fn append_entries2(
+    pub fn append_entries(
         &mut self,
         raft_log_entries: &raftbare::LogEntries,
         commands: &crate::server::Commands,

@@ -1,15 +1,13 @@
-pub mod command;
+mod command;
 mod constants;
-mod error;
 mod machine;
 mod machines;
-pub mod message;
-pub mod server;
-pub mod storage; // TODO
+pub mod rpc;
+pub mod server; // TODO:
+mod storage;
 
-pub use error::ErrorKind;
 pub use machine::{Context, InputKind, Machine};
 pub use machines::{Machines, SystemMachine};
-pub use message::Request;
+pub use rpc::Request;
 pub use server::Server;
 pub use storage::FileStorage;

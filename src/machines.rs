@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     command::Command,
     constants::{CLIENT_TOKEN_MAX, CLIENT_TOKEN_MIN, SEED_NODE_ID},
-    message::CreateClusterOutput,
+    rpc::{CreateClusterOutput, ErrorKind},
     server::ClusterSettings,
-    Context, ErrorKind, Machine,
+    Context, Machine,
 };
 
 #[derive(Debug, Default, Serialize, Deserialize)]

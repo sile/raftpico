@@ -22,14 +22,14 @@ use crate::{
         EVENTS_CAPACITY, SEED_NODE_ID, SERVER_TOKEN_MAX, SERVER_TOKEN_MIN, UNINIT_NODE_ID,
     },
     machine::{Context, Machine},
-    message::{
-        AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
+    rpc::{
+        AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams, ErrorKind,
         InitNodeParams, NotifyQueryPromiseParams, ProposeParams, ProposeQueryParams, Proposer,
         RemoveServerParams, Request, RequestVoteParams, RequestVoteResultParams, SnapshotParams,
         TakeSnapshotOutput,
     },
     storage::FileStorage,
-    ErrorKind, InputKind, Machines,
+    InputKind, Machines,
 };
 
 // TODO: move or remove?
@@ -658,7 +658,7 @@ impl<M: Machine> Server<M> {
             storage.save_node_id(self.node.id())?;
             storage.save_current_term(self.node.current_term())?;
             storage.save_voted_for(self.node.voted_for())?;
-            storage.append_entries2(self.node.log().entries(), &self.local_commands)?;
+            storage.append_entries(self.node.log().entries(), &self.local_commands)?;
         }
 
         self.update_rpc_clients();
@@ -705,7 +705,7 @@ impl<M: Machine> Server<M> {
                 storage.save_node_id(self.node.id())?;
                 storage.save_current_term(self.node.current_term())?;
                 storage.save_voted_for(self.node.voted_for())?;
-                storage.append_entries2(self.node.log().entries(), &self.local_commands)?;
+                storage.append_entries(self.node.log().entries(), &self.local_commands)?;
             }
         }
 
