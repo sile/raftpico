@@ -9,9 +9,13 @@ use crate::{
     ApplyContext, Machine,
 };
 
+/// System and user state machines.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Machines<M> {
+    /// System state machine.
     pub system: SystemMachine,
+
+    /// User state mavhine.
     pub user: M,
 }
 
@@ -30,7 +34,7 @@ impl<M: Machine> Machine for Machines<M> {
                 self.user.apply(ctx, &input)
             }
             Command::TakeSnapshot { .. } | Command::ApplyQuery => {
-                // TODO: unreachable!();
+                unreachable!();
             }
         }
     }
