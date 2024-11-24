@@ -24,7 +24,7 @@ use crate::{
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, Token},
-    InputKind, Machines,
+    ApplyKind, Machines,
 };
 
 pub const EVENTS_CAPACITY: usize = 1024;
@@ -260,7 +260,7 @@ impl<M: Machine> Server<M> {
                         serde_json::from_value(query.input).expect("TODO: reply error response");
 
                     let mut ctx = Context {
-                        kind: InputKind::Query,
+                        kind: ApplyKind::Query,
                         node: &self.node,
                         commit_index: self.last_applied_index,
                         output: None,
@@ -319,7 +319,7 @@ impl<M: Machine> Server<M> {
         }
 
         let mut ctx = Context {
-            kind: InputKind::Command,
+            kind: ApplyKind::Command,
             node: &self.node,
             commit_index: index,
             output: None,
@@ -840,7 +840,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
         match params.kind {
-            InputKind::Command => {
+            ApplyKind::Command => {
                 let command = Command::ApplyCommand {
                     input: params.input,
                     proposer: Proposer {
@@ -850,10 +850,10 @@ impl<M: Machine> Server<M> {
                 };
                 self.propose_command(command)?;
             }
-            InputKind::Query => {
+            ApplyKind::Query => {
                 self.handle_apply_query_request(caller, params.input)?;
             }
-            InputKind::LocalQuery => {
+            ApplyKind::LocalQuery => {
                 self.apply_local_query(caller, params.input)?;
             }
         }
@@ -919,7 +919,7 @@ impl<M: Machine> Server<M> {
         let input = serde_json::from_value(input).expect("TODO: reply error response");
 
         let mut ctx = Context {
-            kind: InputKind::LocalQuery,
+            kind: ApplyKind::LocalQuery,
             node: &self.node,
             commit_index: self.last_applied_index,
             output: None,

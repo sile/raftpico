@@ -1,7 +1,7 @@
 //! Basic types.
 use serde::{Deserialize, Serialize};
 
-/// Node identifier.
+/// Raft node identifier.
 ///
 /// This struct is the same as [`raftbare::NodeId`], except that it is serializable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -39,7 +39,7 @@ impl From<NodeId> for raftbare::NodeId {
 
 /// `mio` Token.
 ///
-/// This struct is the same as [`mio::NodeId`], except that it is serializable.
+/// This struct is the same as [`mio::Token`], except that it is serializable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(into = "usize", from = "usize")]
 pub struct Token(mio::Token);

@@ -9,7 +9,7 @@ use raftpico::{
         AddServerOutput, AddServerParams, ApplyParams, ClusterSettings, CreateClusterOutput,
         ErrorKind, RemoveServerOutput, RemoveServerParams, Request, TakeSnapshotOutput,
     },
-    Context, InputKind, Machine, Server,
+    ApplyKind, Context, Machine, Server,
 };
 use serde::{Deserialize, Serialize};
 
@@ -464,7 +464,7 @@ fn apply_command_req<T: Serialize>(input: T) -> serde_json::Value {
     req(
         "Apply",
         ApplyParams {
-            kind: InputKind::Command,
+            kind: ApplyKind::Command,
             input: serde_json::to_value(&input).expect("unreachable"),
         },
     )
@@ -474,7 +474,7 @@ fn apply_query_req<T: Serialize>(input: T) -> serde_json::Value {
     req(
         "Apply",
         ApplyParams {
-            kind: InputKind::Query,
+            kind: ApplyKind::Query,
             input: serde_json::to_value(&input).expect("unreachable"),
         },
     )
@@ -484,7 +484,7 @@ fn apply_local_query_req<T: Serialize>(input: T) -> serde_json::Value {
     req(
         "Apply",
         ApplyParams {
-            kind: InputKind::LocalQuery,
+            kind: ApplyKind::LocalQuery,
             input: serde_json::to_value(&input).expect("unreachable"),
         },
     )

@@ -13,7 +13,7 @@ pub trait Machine: Default + Serialize + for<'de> Deserialize<'de> {
 
 #[derive(Debug)]
 pub struct Context<'a> {
-    pub kind: InputKind, // TODO: private
+    pub kind: ApplyKind, // TODO: private
     pub node: &'a Node,
     pub commit_index: LogIndex,
 
@@ -40,25 +40,36 @@ impl<'a> Context<'a> {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// This enum specifies how to execute [`Machine::apply()`].
+///
+/// If the kind is not [`ApplyKind::Command`],
+/// the state machine must not be updated while executing [`Machine::apply()`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum InputKind {
-    #[default]
+pub enum ApplyKind {
+    /// Commands are executed on all servers in the cluster.
     Command,
+
+    /// Queries, also known as consistent queries, are executed on the server that received the request.
     Query,
+
+    /// Local queries are executed immediately on the server that received the request without guaranteeing that the state machine is up-to-date.
     LocalQuery,
 }
 
-impl InputKind {
-    pub fn is_command(self) -> bool {
-        matches!(self, InputKind::Command)
+impl ApplyKind {
+    /// Returns `true` if the kind is [`ApplyKind::Command`].
+    pub const fn is_command(self) -> bool {
+        matches!(self, Self::Command)
     }
 
-    pub fn is_query(self) -> bool {
-        !matches!(self, InputKind::Command)
+    /// Returns `true` if the kind is [`ApplyKind::Query`].
+    pub const fn is_query(self) -> bool {
+        matches!(self, Self::Query)
     }
 
-    pub fn is_local(self) -> bool {
-        matches!(self, InputKind::LocalQuery)
+    /// Returns `true` if the kind is [`ApplyKind::LocalQuery`].
+    pub const fn is_local_query(self) -> bool {
+        matches!(self, Self::LocalQuery)
     }
 }

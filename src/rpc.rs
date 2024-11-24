@@ -9,7 +9,7 @@ use crate::{
     machines::Member,
     server::{Commands, ServerInstanceId},
     types::{LogIndex, LogPosition, NodeId, Term},
-    InputKind,
+    ApplyKind,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -350,7 +350,7 @@ pub struct RemoveServerParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApplyParams {
-    pub kind: InputKind,
+    pub kind: ApplyKind,
     pub input: serde_json::Value,
     // [NOTE] Cannot use RawValue here: https://github.com/serde-rs/json/issues/545
     //
