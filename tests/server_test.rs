@@ -6,10 +6,9 @@ use std::{
 use jsonlrpc::{ErrorCode, RequestId, ResponseObject, RpcClient};
 use raftpico::{
     rpc::{
-        AddServerOutput, AddServerParams, ApplyParams, CreateClusterOutput, ErrorKind,
-        RemoveServerOutput, RemoveServerParams, Request, TakeSnapshotOutput,
+        AddServerOutput, AddServerParams, ApplyParams, ClusterSettings, CreateClusterOutput,
+        ErrorKind, RemoveServerOutput, RemoveServerParams, Request, TakeSnapshotOutput,
     },
-    server::ClusterSettings,
     Context, InputKind, Machine, Server,
 };
 use serde::{Deserialize, Serialize};

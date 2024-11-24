@@ -6,8 +6,8 @@ use raftbare::LogIndex;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    rpc::Proposer,
-    server::{ClusterSettings, Commands},
+    rpc::{ClusterSettings, Proposer},
+    server::Commands,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

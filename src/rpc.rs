@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
 use raftbare::{
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     command::{Caller, Command, LogEntry},
     machines::Member,
-    server::{ClusterSettings, Commands, ServerInstanceId},
+    server::{Commands, ServerInstanceId},
     InputKind,
 };
 
@@ -436,6 +436,55 @@ pub struct SnapshotParams<M = serde_json::Value> {
 
     // TODO: doc
     pub machine: M,
+}
+
+// TODO: move or remove?
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(into = "serde_json::Value", try_from = "serde_json::Value")]
+pub struct ClusterSettings {
+    pub min_election_timeout: Duration,
+    pub max_election_timeout: Duration,
+}
+
+impl Default for ClusterSettings {
+    fn default() -> Self {
+        Self {
+            min_election_timeout: Duration::from_millis(100),
+            max_election_timeout: Duration::from_millis(1000),
+        }
+    }
+}
+
+impl From<ClusterSettings> for serde_json::Value {
+    fn from(value: ClusterSettings) -> Self {
+        serde_json::json!({
+            "minElectionTimeoutMs": value.min_election_timeout.as_millis() as usize,
+            "maxElectionTimeoutMs": value.max_election_timeout.as_millis() as usize,
+        })
+    }
+}
+
+impl TryFrom<serde_json::Value> for ClusterSettings {
+    type Error = String;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Object {
+            min_election_timeout_ms: usize,
+            max_election_timeout_ms: usize,
+        }
+
+        let object: Object = serde_json::from_value(value).map_err(|e| e.to_string())?;
+        if object.min_election_timeout_ms >= object.max_election_timeout_ms {
+            return Err("Empty election timeout range".to_owned());
+        }
+
+        Ok(Self {
+            min_election_timeout: Duration::from_millis(object.min_election_timeout_ms as u64),
+            max_election_timeout: Duration::from_millis(object.max_election_timeout_ms as u64),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
