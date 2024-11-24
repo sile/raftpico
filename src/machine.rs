@@ -1,7 +1,6 @@
 use jsonlrpc::ErrorObject;
-use raftbare::Node;
+use raftbare::{Node, Role};
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
 
 use crate::{command::Caller, rpc::ErrorKind, types::LogIndex};
 
@@ -20,18 +19,29 @@ pub trait Machine: Default + Serialize + for<'de> Deserialize<'de> {
 
 #[derive(Debug)]
 pub struct ApplyContext<'a> {
-    pub kind: ApplyKind, // TODO: private
-    pub node: &'a Node,
-    pub commit_index: LogIndex,
-
-    pub(crate) output: Option<Result<Box<RawValue>, ErrorObject>>,
+    pub(crate) kind: ApplyKind,
+    pub(crate) node: &'a Node,
+    pub(crate) commit_index: LogIndex,
+    pub(crate) output: Option<Result<serde_json::Value, ErrorObject>>,
     pub(crate) caller: Option<Caller>,
 }
 
 impl<'a> ApplyContext<'a> {
+    pub fn kind(&self) -> ApplyKind {
+        self.kind
+    }
+
+    pub fn role(&self) -> Role {
+        self.node.role()
+    }
+
+    pub fn commit_index(&self) -> LogIndex {
+        self.commit_index
+    }
+
     pub fn output<T: Serialize>(&mut self, output: &T) {
         if self.caller.is_some() {
-            match serde_json::value::to_raw_value(output) {
+            match serde_json::to_value(output) {
                 Ok(t) => self.output = Some(Ok(t)),
                 Err(e) => {
                     self.output = Some(Err(ErrorKind::MalformedMachineOutput.object_with_reason(e)))

@@ -10,7 +10,6 @@ use mio::{Events, Poll};
 use raftbare::{Action, ClusterConfig, CommitStatus, LogEntries, Node, Role, Term};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
 use uuid::Uuid;
 
 use crate::{
@@ -373,7 +372,7 @@ impl<M: Machine> Server<M> {
     fn reply_output(
         &mut self,
         caller: Caller,
-        output: Option<Result<Box<RawValue>, ErrorObject>>,
+        output: Option<Result<serde_json::Value, ErrorObject>>,
     ) -> std::io::Result<()> {
         let Some(output) = output else {
             self.reply_error(caller, ErrorKind::NoMachineOutput.object())?;
@@ -483,7 +482,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         let request = Request::from_raft_message(message, &self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
-        let request = serde_json::value::to_raw_value(&request)?;
+        let request = serde_json::to_value(&request)?;
         self.send_to(dst, &request)?;
         Ok(())
     }
@@ -494,7 +493,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         let request = Request::from_raft_message(message, &self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
-        let request = serde_json::value::to_raw_value(&request)?;
+        let request = serde_json::value::to_value(&request)?;
         for client in self.rpc_clients.values_mut() {
             // TODO: Drop if sending queue is full
             if let Err(e) = client.send(&mut self.poller, &request) {
