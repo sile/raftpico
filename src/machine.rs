@@ -1,9 +1,9 @@
 use jsonlrpc::ErrorObject;
-use raftbare::{LogIndex, Node};
+use raftbare::Node;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-use crate::{command::Caller, rpc::ErrorKind};
+use crate::{command::Caller, rpc::ErrorKind, types::LogIndex};
 
 pub trait Machine: Default + Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;

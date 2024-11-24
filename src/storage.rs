@@ -136,7 +136,7 @@ impl LogEntries {
                         new_voters: c.new_voters.iter().map(|v| v.get()).collect(),
                     },
                     raftbare::LogEntry::Command => {
-                        let command = commands.get(&position.index).expect("TODO: bug");
+                        let command = commands.get(&position.index.into()).expect("TODO: bug");
                         LogEntry::Command2(command.clone())
                     }
                 })

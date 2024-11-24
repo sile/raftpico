@@ -85,7 +85,7 @@ impl SystemMachine {
             return;
         }
 
-        let node_id = NodeId::from(ctx.commit_index.get());
+        let node_id = NodeId::from(u64::from(ctx.commit_index));
         let token = self.next_token.next_client_token();
 
         self.members.insert(

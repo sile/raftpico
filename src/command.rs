@@ -106,7 +106,7 @@ impl LogEntry {
                 new_voters: cluster_config.new_voters.iter().map(|x| x.get()).collect(),
             }),
             raftbare::LogEntry::Command => {
-                let command = commands.get(&index).cloned()?;
+                let command = commands.get(&index.into()).cloned()?;
                 Some(match command {
                     Command::CreateCluster {
                         seed_server_addr,

@@ -7,9 +7,7 @@ use std::{
 use jsonlrpc::{ErrorObject, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll};
-use raftbare::{
-    Action, ClusterConfig, CommitStatus, LogEntries, LogIndex, LogPosition, Node, Role, Term,
-};
+use raftbare::{Action, ClusterConfig, CommitStatus, LogEntries, Node, Role, Term};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -25,7 +23,7 @@ use crate::{
         RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,
     },
     storage::FileStorage,
-    types::{NodeId, Token},
+    types::{LogIndex, LogPosition, NodeId, Token},
     InputKind, Machines,
 };
 
@@ -102,7 +100,7 @@ impl<M: Machine> Server<M> {
             storage,
             local_commands: Commands::new(),
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
-            last_applied_index: LogIndex::ZERO,
+            last_applied_index: LogIndex::from(0),
             dirty_cluster_config: false,
             queries: BinaryHeap::new(),
             machines: Machines::default(),
@@ -223,19 +221,19 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_committed_entries(&mut self) -> std::io::Result<()> {
-        for index in
-            (self.last_applied_index.get() + 1..=self.node.commit_index().get()).map(LogIndex::new)
+        for index in (u64::from(self.last_applied_index) + 1..=self.node.commit_index().get())
+            .map(LogIndex::from)
         {
             self.handle_committed_entry(index)?;
         }
 
-        if self.last_applied_index < self.node.commit_index() {
+        if self.last_applied_index < self.node.commit_index().into() {
             if self.is_leader() {
                 // TODO: doc  (Quickly notify followers about the latest commit index)
                 self.node.heartbeat();
             }
 
-            self.last_applied_index = self.node.commit_index();
+            self.last_applied_index = self.node.commit_index().into();
             self.handle_pending_queries()?;
 
             // TODO: snapshot handling
@@ -249,7 +247,7 @@ impl<M: Machine> Server<M> {
 
     fn handle_pending_queries(&mut self) -> std::io::Result<()> {
         while let Some(query) = self.queries.peek() {
-            match self.node.get_commit_status(query.commit_position) {
+            match self.node.get_commit_status(query.commit_position.into()) {
                 CommitStatus::InProgress => {
                     break;
                 }
@@ -279,7 +277,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_committed_entry(&mut self, index: LogIndex) -> std::io::Result<()> {
-        let Some(entry) = self.node.log().entries().get_entry(index) else {
+        let Some(entry) = self.node.log().entries().get_entry(index.into()) else {
             unreachable!("Bug: {index:?}");
         };
         match entry {
@@ -312,7 +310,7 @@ impl<M: Machine> Server<M> {
                 self.reply_ok(
                     caller,
                     &TakeSnapshotOutput {
-                        snapshot_index: index.get(),
+                        snapshot_index: index.into(),
                     },
                 )?;
             }
@@ -469,7 +467,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_install_snapshot_action(&mut self, dst: NodeId) -> std::io::Result<()> {
-        let snapshot = self.snapshot(self.node.commit_index())?;
+        let snapshot = self.snapshot(self.node.commit_index().into())?;
         let request = Request::Snapshot {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             params: snapshot,
@@ -584,26 +582,23 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_snapshot_request(&mut self, params: SnapshotParams) -> std::io::Result<()> {
-        if params.last_included_index <= self.node.commit_index().get() {
+        if params.last_included_position.index <= self.node.commit_index().into() {
             // TODO: stats
             return Ok(());
         }
 
         self.machines = serde_json::from_value(params.machine.clone())?; // TODO: remove clone
 
-        let last_included = LogPosition {
-            term: params.last_included_term.into(),
-            index: params.last_included_index.into(),
-        };
+        let last_included = params.last_included_position.into();
         let config = ClusterConfig {
             voters: params.voters.iter().copied().map(From::from).collect(),
             new_voters: params.new_voters.iter().copied().map(From::from).collect(),
             ..Default::default()
         };
-        self.last_applied_index = last_included.index;
 
         let ok = self.node.handle_snapshot_installed(last_included, config);
         assert!(ok); // TODO: error handling
+        self.last_applied_index = last_included.index.into();
 
         if let Some(storage) = &mut self.storage {
             storage.install_snapshot(params)?;
@@ -623,11 +618,10 @@ impl<M: Machine> Server<M> {
         let (last_included, config) = self
             .node
             .log()
-            .get_position_and_config(index)
+            .get_position_and_config(index.into())
             .expect("unreachable");
         let snapshot = SnapshotParams {
-            last_included_term: last_included.term.into(),
-            last_included_index: last_included.index.get(),
+            last_included_position: last_included.into(),
             voters: config.voters.iter().map(|n| n.get()).collect(),
             new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
 
@@ -641,13 +635,15 @@ impl<M: Machine> Server<M> {
         let (position, config) = self
             .node
             .log()
-            .get_position_and_config(index)
+            .get_position_and_config(index.into())
             .expect("unreachable");
         let success = self
             .node
             .handle_snapshot_installed(position, config.clone());
         assert!(success); // TODO:
-        self.local_commands = self.local_commands.split_off(&(index + LogIndex::new(1)));
+        self.local_commands = self
+            .local_commands
+            .split_off(&(u64::from(index) + 1).into());
 
         // TODO: factor out
         if self.storage.is_some() {
@@ -752,8 +748,7 @@ impl<M: Machine> Server<M> {
             &Request::NotifyQueryPromise {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
                 params: NotifyQueryPromiseParams {
-                    promise_term: position.term.into(),
-                    promise_log_index: position.index.get(),
+                    commit_position: position,
                     input: params.input,
                     caller: params.caller,
                 },
@@ -780,12 +775,8 @@ impl<M: Machine> Server<M> {
         &mut self,
         params: NotifyQueryPromiseParams,
     ) -> std::io::Result<()> {
-        let commit_position = LogPosition {
-            term: params.promise_term.into(),
-            index: LogIndex::new(params.promise_log_index),
-        };
         self.queries.push(PendingQuery {
-            commit_position,
+            commit_position: params.commit_position,
             input: params.input,
             caller: params.caller,
         });
@@ -1034,10 +1025,10 @@ impl<M: Machine> Server<M> {
             })
         {
             // TODO: note comment
-            return promise;
+            return promise.into();
         }
 
-        let position = self.node.propose_command(); // Always succeeds
+        let position = LogPosition::from(self.node.propose_command()); // Always succeeds
         self.local_commands.insert(position.index, command);
 
         position

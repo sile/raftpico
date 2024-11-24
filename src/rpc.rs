@@ -1,14 +1,14 @@
 use std::{net::SocketAddr, time::Duration};
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
-use raftbare::{ClusterConfig, LogEntries, LogIndex, LogPosition, MessageHeader, MessageSeqNo};
+use raftbare::{ClusterConfig, LogEntries, MessageHeader, MessageSeqNo};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{Caller, Command, LogEntry},
     machines::Member,
     server::{Commands, ServerInstanceId},
-    types::{NodeId, Term},
+    types::{LogIndex, LogPosition, NodeId, Term},
     InputKind,
 };
 
@@ -101,8 +101,7 @@ impl Request {
                 params: RequestVoteParams {
                     from: header.from.into(),
                     term: header.term.into(),
-                    last_log_term: last_position.term.into(),
-                    last_log_index: last_position.index.get(),
+                    last_log_position: last_position.into(),
                 },
             },
             raftbare::Message::AppendEntriesCall {
@@ -110,7 +109,8 @@ impl Request {
                 commit_index,
                 entries,
             } => {
-                let params = AppendEntriesParams::new(header, commit_index, entries, commands)?;
+                let params =
+                    AppendEntriesParams::new(header, commit_index.into(), entries, commands)?;
                 Self::AppendEntries {
                     jsonrpc: JsonRpcVersion::V2,
                     id: RequestId::Number(header.seqno.get() as i64),
@@ -138,8 +138,7 @@ impl Request {
                 params: AppendEntriesResultParams {
                     from: header.from.into(),
                     term: header.term.into(),
-                    last_log_term: last_position.term.into(),
-                    last_log_index: last_position.index.get(),
+                    last_log_position: last_position.into(),
                 },
             },
         })
@@ -150,8 +149,7 @@ impl Request {
 pub struct AppendEntriesResultParams {
     pub from: NodeId,
     pub term: Term,
-    pub last_log_term: Term,
-    pub last_log_index: u64,
+    pub last_log_position: LogPosition,
 }
 
 impl AppendEntriesResultParams {
@@ -166,10 +164,7 @@ impl AppendEntriesResultParams {
                 term: self.term.into(),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
-            last_position: LogPosition {
-                term: self.last_log_term.into(),
-                index: LogIndex::new(self.last_log_index),
-            },
+            last_position: self.last_log_position.into(),
         }
     }
 }
@@ -178,8 +173,7 @@ impl AppendEntriesResultParams {
 pub struct RequestVoteParams {
     pub from: NodeId,
     pub term: Term,
-    pub last_log_term: Term,
-    pub last_log_index: u64,
+    pub last_log_position: LogPosition,
 }
 
 impl RequestVoteParams {
@@ -194,10 +188,7 @@ impl RequestVoteParams {
                 term: self.term.into(),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
-            last_position: LogPosition {
-                term: self.last_log_term.into(),
-                index: LogIndex::new(self.last_log_index),
-            },
+            last_position: self.last_log_position.into(),
         }
     }
 }
@@ -230,9 +221,8 @@ impl RequestVoteResultParams {
 pub struct AppendEntriesParams {
     pub from: NodeId,
     pub term: Term,
-    pub commit_index: u64,
-    pub prev_term: Term,
-    pub prev_log_index: u64,
+    pub commit_index: LogIndex,
+    pub prev_position: LogPosition,
     pub entries: Vec<LogEntry>,
 }
 
@@ -246,9 +236,8 @@ impl AppendEntriesParams {
         Some(Self {
             from: header.from.into(),
             term: header.term.into(),
-            commit_index: commit_index.get(),
-            prev_term: entries.prev_position().term.into(),
-            prev_log_index: entries.prev_position().index.get(),
+            commit_index: commit_index.into(),
+            prev_position: entries.prev_position().into(),
             entries: entries
                 .iter_with_positions()
                 .map(|(p, x)| LogEntry::new(p.index, &x, commands))
@@ -265,12 +254,10 @@ impl AppendEntriesParams {
             return None;
         };
 
-        let prev_position = LogPosition {
-            term: self.prev_term.into(),
-            index: LogIndex::new(self.prev_log_index),
-        };
+        let prev_position = raftbare::LogPosition::from(self.prev_position);
+        let prev_index = u64::from(self.prev_position.index);
         let entries = (1..)
-            .map(|i| prev_position.index + LogIndex::new(i))
+            .map(|i| LogIndex::from(prev_index + i))
             .zip(self.entries.into_iter())
             .map(|(i, x)| match x {
                 LogEntry::Term(v) => raftbare::LogEntry::Term(v.into()),
@@ -343,7 +330,7 @@ impl AppendEntriesParams {
                 term: self.term.into(),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
-            commit_index: LogIndex::new(self.commit_index),
+            commit_index: self.commit_index.into(),
             entries,
         })
     }
@@ -386,9 +373,7 @@ pub struct ProposeQueryParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NotifyQueryPromiseParams {
-    // TODO: rename
-    pub promise_term: Term,
-    pub promise_log_index: u64,
+    pub commit_position: LogPosition,
     pub input: serde_json::Value, // TODO: remove
     pub caller: Caller,
 }
@@ -429,8 +414,7 @@ pub struct TakeSnapshotOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotParams<M = serde_json::Value> {
     // position and config
-    pub last_included_term: Term,
-    pub last_included_index: u64,
+    pub last_included_position: LogPosition,
     pub voters: Vec<u64>,
     pub new_voters: Vec<u64>,
 

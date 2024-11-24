@@ -115,3 +115,61 @@ impl From<Term> for raftbare::Term {
         value.0
     }
 }
+
+/// Raft log index.
+///
+/// This struct is the same as [`raftbare::LogIndex`], except that it is serializable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(into = "u64", from = "u64")]
+pub struct LogIndex(raftbare::LogIndex);
+
+impl From<u64> for LogIndex {
+    fn from(value: u64) -> Self {
+        Self(raftbare::LogIndex::new(value))
+    }
+}
+
+impl From<LogIndex> for u64 {
+    fn from(value: LogIndex) -> Self {
+        value.0.get()
+    }
+}
+
+impl From<raftbare::LogIndex> for LogIndex {
+    fn from(value: raftbare::LogIndex) -> Self {
+        Self(value)
+    }
+}
+
+impl From<LogIndex> for raftbare::LogIndex {
+    fn from(value: LogIndex) -> Self {
+        value.0
+    }
+}
+
+/// Raft log position.
+///
+/// This struct is the same as [`raftbare::LogPosition`], except that it is serializable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct LogPosition {
+    pub term: Term,
+    pub index: LogIndex,
+}
+
+impl From<raftbare::LogPosition> for LogPosition {
+    fn from(value: raftbare::LogPosition) -> Self {
+        Self {
+            term: value.term.into(),
+            index: value.index.into(),
+        }
+    }
+}
+
+impl From<LogPosition> for raftbare::LogPosition {
+    fn from(value: LogPosition) -> Self {
+        Self {
+            term: value.term.into(),
+            index: value.index.into(),
+        }
+    }
+}
