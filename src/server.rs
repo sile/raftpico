@@ -113,7 +113,7 @@ impl<M: Machine> Server<M> {
     }
 
     pub fn node(&self) -> Option<&Node> {
-        (self.node.id() != NodeId::UNINIT.into()).then(|| &self.node)
+        (self.node.id() != NodeId::UNINIT.into()).then_some(&self.node)
     }
 
     pub fn machine(&self) -> &M {
@@ -407,7 +407,7 @@ impl<M: Machine> Server<M> {
 
         let mut adding = Vec::new();
         let mut removing = Vec::new();
-        for (&id, _m) in &self.machines.system.members {
+        for &id in self.machines.system.members.keys() {
             // TODO: if !m.evicting && !self.node.config().voters.contains(id) {
             if !self.node.config().voters.contains(&id.into()) {
                 adding.push(id.into());
@@ -416,7 +416,7 @@ impl<M: Machine> Server<M> {
         for &id in &self.node.config().voters {
             // TODO: if self.members.get(id).map_or(true, |m| m.evicting) {
             if !self.machines.system.members.contains_key(&id.into()) {
-                removing.push(id.into());
+                removing.push(id);
             }
         }
         if adding.is_empty() && removing.is_empty() {
@@ -742,9 +742,8 @@ impl<M: Machine> Server<M> {
         }
 
         let position = self.propose_command_leader(Command::ApplyQuery);
-        let node_id = params.origin_node_id.into();
         self.send_to(
-            node_id,
+            params.origin_node_id,
             &Request::NotifyQueryPromise {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
                 params: NotifyQueryPromiseParams {

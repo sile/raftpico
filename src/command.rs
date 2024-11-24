@@ -28,6 +28,7 @@ pub enum Command {
     TakeSnapshot {
         proposer: Proposer,
     },
+    #[allow(clippy::enum_variant_names)]
     ApplyCommand {
         // [NOTE] Cannot use RawValue here: https://github.com/serde-rs/json/issues/545
         // TODO: consider workaround

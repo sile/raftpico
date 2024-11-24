@@ -17,6 +17,7 @@ impl FileStorage {
     pub fn new<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(&path)?;

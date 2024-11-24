@@ -236,7 +236,7 @@ impl AppendEntriesParams {
         Some(Self {
             from: header.from.into(),
             term: header.term.into(),
-            commit_index: commit_index.into(),
+            commit_index,
             prev_position: entries.prev_position().into(),
             entries: entries
                 .iter_with_positions()
@@ -258,7 +258,7 @@ impl AppendEntriesParams {
         let prev_index = u64::from(self.prev_position.index);
         let entries = (1..)
             .map(|i| LogIndex::from(prev_index + i))
-            .zip(self.entries.into_iter())
+            .zip(self.entries)
             .map(|(i, x)| match x {
                 LogEntry::Term(v) => raftbare::LogEntry::Term(v.into()),
                 LogEntry::ClusterConfig { voters, new_voters } => {
