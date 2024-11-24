@@ -10,13 +10,14 @@ pub trait Machine: Default + Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
 
     /// Applies the given input to the machine within the provided context,
-    /// potentially altering its state if [`ApplyContext::kind()`] is [`ApplyKind::Command`].
+    /// potentially altering its state deterministically if [`ApplyContext::kind()`] is [`ApplyKind::Command`].
     ///
     /// It is important to note that during the execution of this method,
-    /// [`ApplyContext::output()`] or [`ApplyContext::error()`] must be called to return the output to the caller.
+    /// [`ApplyContext::output()`] must be called to return the output to the caller.
     fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input);
 }
 
+/// Context of a [`Machine::apply()`] call.
 #[derive(Debug)]
 pub struct ApplyContext<'a> {
     pub(crate) kind: ApplyKind,
@@ -27,30 +28,32 @@ pub struct ApplyContext<'a> {
 }
 
 impl<'a> ApplyContext<'a> {
+    /// Returns the kind of the apply call.
     pub fn kind(&self) -> ApplyKind {
         self.kind
     }
 
+    /// Current role of the raft server.
     pub fn role(&self) -> Role {
         self.node.role()
     }
 
+    /// Index of the committed log entry that contains the input.
     pub fn commit_index(&self) -> LogIndex {
         self.commit_index
     }
 
+    /// Notifies the output of the apply call to the raft server.
     pub fn output<T: Serialize>(&mut self, output: &T) {
         if self.caller.is_some() {
-            match serde_json::to_value(output) {
-                Ok(t) => self.output = Some(Ok(t)),
-                Err(e) => {
-                    self.output = Some(Err(ErrorKind::MalformedMachineOutput.object_with_reason(e)))
-                }
-            }
+            self.output = Some(
+                serde_json::to_value(output)
+                    .map_err(|e| ErrorKind::MalformedMachineOutput.object_with_reason(e)),
+            )
         }
     }
 
-    pub fn error(&mut self, error: ErrorObject) {
+    pub(crate) fn error(&mut self, error: ErrorObject) {
         if self.caller.is_some() {
             self.output = Some(Err(error));
         }

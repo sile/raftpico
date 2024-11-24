@@ -23,7 +23,7 @@ impl Machine for Counter {
     type Input = usize;
 
     fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input) {
-        if ctx.kind.is_command() {
+        if ctx.kind().is_command() {
             self.0 += *input;
         }
         ctx.output(&self.0);
