@@ -6,7 +6,7 @@ use std::{
 
 use jsonlrpc::{ErrorObject, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
-use mio::{Events, Poll, Token};
+use mio::{Events, Poll};
 use raftbare::{
     Action, ClusterConfig, CommitStatus, LogEntries, LogIndex, LogPosition, Node, Role, Term,
 };
@@ -17,7 +17,6 @@ use uuid::Uuid;
 
 use crate::{
     command::{Caller, Command},
-    constants::{EVENTS_CAPACITY, SERVER_TOKEN_MAX, SERVER_TOKEN_MIN},
     machine::{Context, Machine},
     rpc::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
@@ -26,9 +25,11 @@ use crate::{
         RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,
     },
     storage::FileStorage,
-    types::NodeId,
+    types::{NodeId, Token},
     InputKind, Machines,
 };
+
+pub const EVENTS_CAPACITY: usize = 1024;
 
 pub type Commands = BTreeMap<LogIndex, Command>;
 
@@ -85,8 +86,12 @@ impl<M: Machine> Server<M> {
 
         let mut poller = Poll::new()?;
         let events = Events::with_capacity(EVENTS_CAPACITY);
-        let rpc_server =
-            RpcServer::start(&mut poller, listen_addr, SERVER_TOKEN_MIN, SERVER_TOKEN_MAX)?;
+        let rpc_server = RpcServer::start(
+            &mut poller,
+            listen_addr,
+            Token::SERVER_MIN.into(),
+            Token::SERVER_MAX.into(),
+        )?;
         Ok(Self {
             instance_id: Uuid::new_v4(),
             poller,
@@ -135,7 +140,7 @@ impl<M: Machine> Server<M> {
 
         let mut responses = Vec::new();
         for event in self.events.iter() {
-            if let Some(client) = self.rpc_clients.get_mut(&event.token()) {
+            if let Some(client) = self.rpc_clients.get_mut(&event.token().into()) {
                 client.handle_event(&mut self.poller, event)?;
                 while let Some(response) = client.try_recv() {
                     responses.push(response);
@@ -358,13 +363,12 @@ impl<M: Machine> Server<M> {
                 continue;
             }
 
-            let token = Token(member.token);
-            if self.rpc_clients.contains_key(&token) {
+            if self.rpc_clients.contains_key(&member.token) {
                 continue;
             }
 
-            let rpc_client = RpcClient::new(token, member.addr);
-            self.rpc_clients.insert(token, rpc_client);
+            let rpc_client = RpcClient::new(member.token.into(), member.addr);
+            self.rpc_clients.insert(member.token, rpc_client);
         }
     }
 
@@ -759,13 +763,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn send_to<T: Serialize>(&mut self, node_id: NodeId, message: &T) -> std::io::Result<()> {
-        let Some(token) = self
-            .machines
-            .system
-            .members
-            .get(&node_id)
-            .map(|m| Token(m.token))
-        else {
+        let Some(token) = self.machines.system.members.get(&node_id).map(|m| m.token) else {
             return Ok(());
         };
 

@@ -1,5 +1,4 @@
 mod command;
-mod constants;
 mod machine;
 mod machines;
 pub mod rpc;

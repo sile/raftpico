@@ -1,5 +1,4 @@
 //! Basic types.
-
 use serde::{Deserialize, Serialize};
 
 /// Node identifier.
@@ -34,6 +33,54 @@ impl From<raftbare::NodeId> for NodeId {
 
 impl From<NodeId> for raftbare::NodeId {
     fn from(value: NodeId) -> Self {
+        value.0
+    }
+}
+
+/// `mio` Token.
+///
+/// This struct is the same as [`mio::NodeId`], except that it is serializable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(into = "usize", from = "usize")]
+pub struct Token(mio::Token);
+
+impl Token {
+    pub(crate) const CLIENT_MIN: Self = Self(mio::Token(0));
+    pub(crate) const CLIENT_MAX: Self = Self(mio::Token(1_000_000 - 1));
+
+    pub(crate) const SERVER_MIN: Self = Self(mio::Token(Self::CLIENT_MAX.0 .0 + 1));
+    pub(crate) const SERVER_MAX: Self = Self(mio::Token(usize::MAX));
+
+    pub(crate) fn next_client_token(&mut self) -> Self {
+        let token = *self;
+        self.0 .0 += 1;
+        if *self == Self::CLIENT_MAX {
+            *self = Self::CLIENT_MIN;
+        }
+        token
+    }
+}
+
+impl From<usize> for Token {
+    fn from(value: usize) -> Self {
+        Self(mio::Token(value))
+    }
+}
+
+impl From<Token> for usize {
+    fn from(value: Token) -> Self {
+        value.0 .0
+    }
+}
+
+impl From<mio::Token> for Token {
+    fn from(value: mio::Token) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Token> for mio::Token {
+    fn from(value: Token) -> Self {
         value.0
     }
 }

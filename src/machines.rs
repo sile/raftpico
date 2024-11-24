@@ -4,9 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::Command,
-    constants::{CLIENT_TOKEN_MAX, CLIENT_TOKEN_MIN},
     rpc::{ClusterSettings, CreateClusterOutput, ErrorKind},
-    types::NodeId,
+    types::{NodeId, Token},
     Context, Machine,
 };
 
@@ -40,14 +39,14 @@ impl<M: Machine> Machine for Machines<M> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Member {
     pub addr: SocketAddr,
-    pub token: usize, // TODO: Token
+    pub token: Token,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemMachine {
     pub(crate) settings: ClusterSettings,
     pub(crate) members: BTreeMap<NodeId, Member>,
-    next_token: usize, // TOOD: token
+    next_token: Token,
 }
 
 impl Default for SystemMachine {
@@ -55,7 +54,7 @@ impl Default for SystemMachine {
         Self {
             settings: ClusterSettings::default(),
             members: BTreeMap::new(),
-            next_token: CLIENT_TOKEN_MIN.0,
+            next_token: Token::CLIENT_MIN,
         }
     }
 }
@@ -72,10 +71,9 @@ impl SystemMachine {
             NodeId::SEED,
             Member {
                 addr: seed_server_addr,
-                token: self.next_token,
+                token: self.next_token.next_client_token(),
             },
         );
-        self.next_token += 1; // TODO: max handling
         ctx.output(&CreateClusterOutput {
             members: self.members.values().cloned().collect(),
         });
@@ -88,9 +86,7 @@ impl SystemMachine {
         }
 
         let node_id = NodeId::from(ctx.commit_index.get());
-        let token = self.next_token;
-        self.next_token += 1; // TODO: max handling
-        assert!(self.next_token <= CLIENT_TOKEN_MAX.0); // TODO
+        let token = self.next_token.next_client_token();
 
         self.members.insert(
             node_id,
