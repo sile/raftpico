@@ -1002,23 +1002,6 @@ impl<M: Machine> Server<M> {
         self.node.role().is_leader()
     }
 
-    // TODO:
-    pub fn propose_user_command(&mut self, input: &M::Input) -> std::io::Result<CommitPromise> {
-        if !self.is_initialized() {
-            todo!();
-        }
-        if !self.is_leader() {
-            todo!();
-        }
-
-        let command = Command::ApplyCommand {
-            input: serde_json::to_value(input)?,
-            proposer: None,
-        };
-        let promise = self.propose_command_leader(command);
-        Ok(promise)
-    }
-
     fn propose_command(&mut self, command: Command) -> std::io::Result<()> {
         assert!(self.is_initialized());
 
