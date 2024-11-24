@@ -119,8 +119,9 @@ fn re_election() {
         for addr in [server_addr1, server_addr2] {
             let _: AddServerOutput = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(200));
         }
+        std::thread::sleep(Duration::from_millis(200));
     });
     servers.push(server1);
     servers.push(server2);
