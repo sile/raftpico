@@ -8,7 +8,7 @@ use jsonlrpc::{ErrorObject, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll, Token};
 use raftbare::{
-    Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, LogPosition, Node, Role, Term,
+    Action, ClusterConfig, CommitStatus, LogEntries, LogIndex, LogPosition, Node, Role, Term,
 };
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -37,14 +37,14 @@ pub type ServerInstanceId = Uuid;
 
 #[derive(Debug)]
 pub struct PendingQuery {
-    pub promise: CommitPromise,
+    pub commit_position: LogPosition,
     pub input: serde_json::Value,
     pub caller: Caller,
 }
 
 impl PartialEq for PendingQuery {
     fn eq(&self, other: &Self) -> bool {
-        self.promise.log_position() == other.promise.log_position()
+        self.commit_position == other.commit_position
     }
 }
 
@@ -58,9 +58,7 @@ impl PartialOrd for PendingQuery {
 
 impl Ord for PendingQuery {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let p0 = self.promise.log_position();
-        let p1 = other.promise.log_position();
-        (p0.term, p0.index).cmp(&(p1.term, p1.index)).reverse()
+        self.commit_position.cmp(&other.commit_position).reverse()
     }
 }
 
@@ -246,14 +244,14 @@ impl<M: Machine> Server<M> {
 
     fn handle_pending_queries(&mut self) -> std::io::Result<()> {
         while let Some(query) = self.queries.peek() {
-            match query.promise.clone().poll(&self.node) {
-                CommitPromise::Pending(_) => {
+            match self.node.get_commit_status(query.commit_position) {
+                CommitStatus::InProgress => {
                     break;
                 }
-                CommitPromise::Rejected(_) => {
+                CommitStatus::Rejected | CommitStatus::Unknown => {
                     todo!("error response");
                 }
-                CommitPromise::Accepted(_) => {
+                CommitStatus::Committed => {
                     let query = self.queries.pop().expect("unreachable");
                     let input =
                         serde_json::from_value(query.input).expect("TODO: reply error response");
@@ -743,15 +741,15 @@ impl<M: Machine> Server<M> {
             todo!("redirect if possible");
         }
 
-        let promise = self.propose_command_leader(Command::ApplyQuery);
+        let position = self.propose_command_leader(Command::ApplyQuery);
         let node_id = params.origin_node_id.into();
         self.send_to(
             node_id,
             &Request::NotifyQueryPromise {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
                 params: NotifyQueryPromiseParams {
-                    promise_term: promise.log_position().term.get(),
-                    promise_log_index: promise.log_position().index.get(),
+                    promise_term: position.term.get(),
+                    promise_log_index: position.index.get(),
                     input: params.input,
                     caller: params.caller,
                 },
@@ -784,12 +782,12 @@ impl<M: Machine> Server<M> {
         &mut self,
         params: NotifyQueryPromiseParams,
     ) -> std::io::Result<()> {
-        let promise = CommitPromise::Pending(LogPosition {
+        let commit_position = LogPosition {
             term: Term::new(params.promise_term),
             index: LogIndex::new(params.promise_log_index),
-        });
+        };
         self.queries.push(PendingQuery {
-            promise,
+            commit_position,
             input: params.input,
             caller: params.caller,
         });
@@ -882,7 +880,7 @@ impl<M: Machine> Server<M> {
             let command = Command::ApplyQuery;
             let promise = self.propose_command_leader(command);
             self.queries.push(PendingQuery {
-                promise,
+                commit_position: promise,
                 input,
                 caller,
             });
@@ -1025,7 +1023,7 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn propose_command_leader(&mut self, command: Command) -> CommitPromise {
+    fn propose_command_leader(&mut self, command: Command) -> LogPosition {
         if let Some(promise) = matches!(command, Command::ApplyQuery)
             .then_some(())
             .and_then(|()| self.node.actions().append_log_entries.as_ref())
@@ -1033,7 +1031,7 @@ impl<M: Machine> Server<M> {
                 if entries.is_empty() {
                     None
                 } else {
-                    Some(CommitPromise::Pending(entries.last_position()))
+                    Some(entries.last_position())
                 }
             })
         {
@@ -1041,11 +1039,10 @@ impl<M: Machine> Server<M> {
             return promise;
         }
 
-        let promise = self.node.propose_command(); // Always succeeds
-        self.local_commands
-            .insert(promise.log_position().index, command);
+        let position = self.node.propose_command(); // Always succeeds
+        self.local_commands.insert(position.index, command);
 
-        promise
+        position
     }
 
     fn reply_ok<T: Serialize>(&mut self, caller: Caller, value: T) -> std::io::Result<()> {

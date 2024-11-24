@@ -219,9 +219,9 @@ dependencies = [
 
 [[package]]
 name = "raftbare"
-version = "0.1.4"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e35afa161a3b10a32382c38d2141eaea995d66a5d44a0d848a646333c85f214f"
+checksum = "19dc501694b82beb9dbb06f31579ac4f53e26cf77dadf257856facbf13ea4366"
 
 [[package]]
 name = "raftpico"
