@@ -291,7 +291,7 @@ impl<M: Machine> Server<M> {
 
     fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
         let command = self.local_commands.get(&index).expect("bug");
-        if matches!(command, Command::ApplyQuery) {
+        if matches!(command, Command::Query) {
             return Ok(());
         }
 
@@ -740,7 +740,7 @@ impl<M: Machine> Server<M> {
             todo!("redirect if possible");
         }
 
-        let position = self.propose_command_leader(Command::ApplyQuery);
+        let position = self.propose_command_leader(Command::Query);
         self.send_to(
             params.origin_node_id,
             &Request::NotifyQueryPromise {
@@ -839,7 +839,7 @@ impl<M: Machine> Server<M> {
         }
         match params.kind {
             ApplyKind::Command => {
-                let command = Command::ApplyCommand {
+                let command = Command::Apply {
                     input: params.input,
                     proposer: Proposer {
                         server: self.instance_id,
@@ -864,7 +864,7 @@ impl<M: Machine> Server<M> {
         input: serde_json::Value,
     ) -> std::io::Result<()> {
         if self.is_leader() {
-            let command = Command::ApplyQuery;
+            let command = Command::Query;
             let promise = self.propose_command_leader(command);
             self.queries.push(PendingQuery {
                 commit_position: promise,
@@ -1011,7 +1011,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn propose_command_leader(&mut self, command: Command) -> LogPosition {
-        if let Some(promise) = matches!(command, Command::ApplyQuery)
+        if let Some(promise) = matches!(command, Command::Query)
             .then_some(())
             .and_then(|()| self.node.actions().append_log_entries.as_ref())
             .and_then(|entries| {

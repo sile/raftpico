@@ -29,11 +29,11 @@ impl<M: Machine> Machine for Machines<M> {
             | Command::RemoveServer { .. } => {
                 self.system.apply(ctx, input);
             }
-            Command::ApplyCommand { input, .. } => {
+            Command::Apply { input, .. } => {
                 let input = serde_json::from_value(input.clone()).expect("TODO: error response");
                 self.user.apply(ctx, &input)
             }
-            Command::TakeSnapshot { .. } | Command::ApplyQuery => {
+            Command::TakeSnapshot { .. } | Command::Query => {
                 unreachable!();
             }
         }
@@ -136,13 +136,13 @@ impl Machine for SystemMachine {
             Command::RemoveServer { server_addr, .. } => {
                 self.apply_remove_server_command(ctx, *server_addr)
             }
-            Command::ApplyCommand { .. } => {
+            Command::Apply { .. } => {
                 unreachable!();
             }
             Command::TakeSnapshot { .. } => {
                 unreachable!();
             }
-            Command::ApplyQuery => {
+            Command::Query => {
                 unreachable!();
             }
         }

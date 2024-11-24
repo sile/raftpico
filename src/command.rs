@@ -10,8 +10,10 @@ use crate::{
     server::Commands,
 };
 
+// TODO: default type
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Command {
+#[serde(rename_all = "camelCase")]
+pub enum Command<INPUT = serde_json::Value> {
     CreateCluster {
         seed_server_addr: SocketAddr,
         settings: ClusterSettings,
@@ -28,15 +30,11 @@ pub enum Command {
     TakeSnapshot {
         proposer: Proposer,
     },
-    #[allow(clippy::enum_variant_names)]
-    ApplyCommand {
-        // [NOTE] Cannot use RawValue here: https://github.com/serde-rs/json/issues/545
-        // TODO: consider workaround
-        // input: Box<RawValue>,
-        input: serde_json::Value,
+    Apply {
+        input: INPUT,
         proposer: Proposer,
     },
-    ApplyQuery,
+    Query,
 }
 
 impl Command {
@@ -46,8 +44,8 @@ impl Command {
             Command::AddServer { proposer, .. } => Some(proposer),
             Command::RemoveServer { proposer, .. } => Some(proposer),
             Command::TakeSnapshot { proposer, .. } => Some(proposer),
-            Command::ApplyCommand { proposer, .. } => Some(proposer),
-            Command::ApplyQuery => None,
+            Command::Apply { proposer, .. } => Some(proposer),
+            Command::Query => None,
         }
     }
 }
@@ -134,10 +132,8 @@ impl LogEntry {
                         proposer,
                     },
 
-                    Command::ApplyCommand { input, proposer } => {
-                        Self::ApplyCommand { input, proposer }
-                    }
-                    Command::ApplyQuery => Self::ApplyQuery,
+                    Command::Apply { input, proposer } => Self::ApplyCommand { input, proposer },
+                    Command::Query => Self::ApplyQuery,
                 })
             }
         }

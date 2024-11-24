@@ -314,11 +314,11 @@ impl AppendEntriesParams {
                     raftbare::LogEntry::Command
                 }
                 LogEntry::ApplyCommand { input, proposer } => {
-                    commands.insert(i, Command::ApplyCommand { input, proposer });
+                    commands.insert(i, Command::Apply { input, proposer });
                     raftbare::LogEntry::Command
                 }
                 LogEntry::ApplyQuery => {
-                    commands.insert(i, Command::ApplyQuery);
+                    commands.insert(i, Command::Query);
                     raftbare::LogEntry::Command
                 }
             });
