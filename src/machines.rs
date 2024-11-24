@@ -1,12 +1,12 @@
 use std::{collections::BTreeMap, net::SocketAddr};
 
-use raftbare::NodeId;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     command::Command,
-    constants::{CLIENT_TOKEN_MAX, CLIENT_TOKEN_MIN, SEED_NODE_ID},
+    constants::{CLIENT_TOKEN_MAX, CLIENT_TOKEN_MIN},
     rpc::{ClusterSettings, CreateClusterOutput, ErrorKind},
+    types::NodeId,
     Context, Machine,
 };
 
@@ -46,8 +46,8 @@ pub struct Member {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemMachine {
     pub(crate) settings: ClusterSettings,
-    pub(crate) members: BTreeMap<u64, Member>, // TODO: key type
-    next_token: usize,                         // TOOD: token
+    pub(crate) members: BTreeMap<NodeId, Member>,
+    next_token: usize, // TOOD: token
 }
 
 impl Default for SystemMachine {
@@ -69,7 +69,7 @@ impl SystemMachine {
     ) {
         self.settings = settings.clone();
         self.members.insert(
-            SEED_NODE_ID.get(),
+            NodeId::SEED,
             Member {
                 addr: seed_server_addr,
                 token: self.next_token,
@@ -87,13 +87,13 @@ impl SystemMachine {
             return;
         }
 
-        let node_id = NodeId::new(ctx.commit_index.get());
+        let node_id = NodeId::from(ctx.commit_index.get());
         let token = self.next_token;
         self.next_token += 1; // TODO: max handling
         assert!(self.next_token <= CLIENT_TOKEN_MAX.0); // TODO
 
         self.members.insert(
-            node_id.get(),
+            node_id,
             Member {
                 addr: server_addr,
                 token,
@@ -111,8 +111,7 @@ impl SystemMachine {
             return;
         };
 
-        let node_id = NodeId::new(node_id);
-        self.members.remove(&node_id.get());
+        self.members.remove(&node_id);
         ctx.output(&CreateClusterOutput {
             members: self.members.values().cloned().collect(),
         });

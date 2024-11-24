@@ -8,8 +8,7 @@ use jsonlrpc::{ErrorObject, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll, Token};
 use raftbare::{
-    Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, LogPosition, Node, NodeId, Role,
-    Term,
+    Action, ClusterConfig, CommitPromise, LogEntries, LogIndex, LogPosition, Node, Role, Term,
 };
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -18,9 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     command::{Caller, Command},
-    constants::{
-        EVENTS_CAPACITY, SEED_NODE_ID, SERVER_TOKEN_MAX, SERVER_TOKEN_MIN, UNINIT_NODE_ID,
-    },
+    constants::{EVENTS_CAPACITY, SERVER_TOKEN_MAX, SERVER_TOKEN_MIN},
     machine::{Context, Machine},
     rpc::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
@@ -29,6 +26,7 @@ use crate::{
         RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,
     },
     storage::FileStorage,
+    types::NodeId,
     InputKind, Machines,
 };
 
@@ -97,7 +95,7 @@ impl<M: Machine> Server<M> {
             events,
             rpc_server,
             rpc_clients: HashMap::new(),
-            node: Node::start(UNINIT_NODE_ID),
+            node: Node::start(NodeId::UNINIT.into()),
             storage,
             local_commands: Commands::new(),
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
@@ -114,7 +112,7 @@ impl<M: Machine> Server<M> {
     }
 
     pub fn node(&self) -> Option<&Node> {
-        (self.node.id() != UNINIT_NODE_ID).then(|| &self.node)
+        (self.node.id() != NodeId::UNINIT.into()).then(|| &self.node)
     }
 
     pub fn machine(&self) -> &M {
@@ -197,7 +195,7 @@ impl<M: Machine> Server<M> {
                     jsonrpc: jsonlrpc::JsonRpcVersion::V2,
                     params: InitNodeParams { node_id, snapshot },
                 };
-                self.send_to(NodeId::new(node_id), &request)?;
+                self.send_to(node_id, &request)?;
             }
             ResponseObject::Err { error, .. } if error.code == ErrorKind::UnknownServer.code() => {
                 let data = error.data.ok_or(std::io::ErrorKind::Other)?;
@@ -409,17 +407,16 @@ impl<M: Machine> Server<M> {
 
         let mut adding = Vec::new();
         let mut removing = Vec::new();
-        for (id, _m) in &self.machines.system.members {
-            let id = NodeId::new(*id);
+        for (&id, _m) in &self.machines.system.members {
             // TODO: if !m.evicting && !self.node.config().voters.contains(id) {
-            if !self.node.config().voters.contains(&id) {
-                adding.push(id);
+            if !self.node.config().voters.contains(&id.into()) {
+                adding.push(id.into());
             }
         }
         for &id in &self.node.config().voters {
             // TODO: if self.members.get(id).map_or(true, |m| m.evicting) {
-            if !self.machines.system.members.contains_key(&id.get()) {
-                removing.push(id);
+            if !self.machines.system.members.contains_key(&id.into()) {
+                removing.push(id.into());
             }
         }
         if adding.is_empty() && removing.is_empty() {
@@ -461,8 +458,10 @@ impl<M: Machine> Server<M> {
             Action::SaveVotedFor => self.handle_save_voted_for_action()?,
             Action::AppendLogEntries(entries) => self.handle_append_log_entries_action(entries)?,
             Action::BroadcastMessage(message) => self.handle_broadcast_message_action(message)?,
-            Action::SendMessage(dst, message) => self.handle_send_message_action(dst, message)?,
-            Action::InstallSnapshot(dst) => self.handle_install_snapshot_action(dst)?,
+            Action::SendMessage(dst, message) => {
+                self.handle_send_message_action(dst.into(), message)?
+            }
+            Action::InstallSnapshot(dst) => self.handle_install_snapshot_action(dst.into())?,
         }
         Ok(())
     }
@@ -595,8 +594,8 @@ impl<M: Machine> Server<M> {
             index: params.last_included_index.into(),
         };
         let config = ClusterConfig {
-            voters: params.voters.iter().copied().map(NodeId::new).collect(),
-            new_voters: params.new_voters.iter().copied().map(NodeId::new).collect(),
+            voters: params.voters.iter().copied().map(From::from).collect(),
+            new_voters: params.new_voters.iter().copied().map(From::from).collect(),
             ..Default::default()
         };
         self.last_applied_index = last_included.index;
@@ -724,8 +723,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let node_id = NodeId::new(params.node_id);
-        self.node = Node::start(node_id);
+        self.node = Node::start(params.node_id.into());
         self.handle_snapshot_request(params.snapshot)?;
 
         Ok(())
@@ -746,7 +744,7 @@ impl<M: Machine> Server<M> {
         }
 
         let promise = self.propose_command_leader(Command::ApplyQuery);
-        let node_id = NodeId::new(params.origin_node_id);
+        let node_id = params.origin_node_id.into();
         self.send_to(
             node_id,
             &Request::NotifyQueryPromise {
@@ -767,7 +765,7 @@ impl<M: Machine> Server<M> {
             .machines
             .system
             .members
-            .get(&node_id.get())
+            .get(&node_id)
             .map(|m| Token(m.token))
         else {
             return Ok(());
@@ -891,13 +889,13 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let Some(maybe_leader) = self.node.voted_for() else {
+        let Some(maybe_leader) = self.node.voted_for().map(NodeId::from) else {
             todo!("error response");
         };
         let request = Request::ProposeQuery {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             params: ProposeQueryParams {
-                origin_node_id: self.node.id().get(),
+                origin_node_id: self.node.id().into(),
                 input,
                 caller,
             },
@@ -909,7 +907,7 @@ impl<M: Machine> Server<M> {
             .system
             .members
             .iter()
-            .find(|x| *x.0 == maybe_leader.get())
+            .find(|x| *x.0 == maybe_leader)
             .map(|x| x.1.addr)
         else {
             todo!();
@@ -980,7 +978,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        self.node = Node::start(SEED_NODE_ID);
+        self.node = Node::start(NodeId::SEED.into());
         if let Some(storage) = &mut self.storage {
             storage.save_node_id(self.node.id())?;
         }
@@ -1025,10 +1023,10 @@ impl<M: Machine> Server<M> {
         assert!(self.is_initialized());
 
         if !self.is_leader() {
-            let Some(maybe_leader) = self.node.voted_for() else {
+            let Some(maybe_leader) = self.node.voted_for().map(NodeId::from) else {
                 todo!("notify this error to the origin node");
             };
-            if maybe_leader == self.node.id() {
+            if maybe_leader == self.node.id().into() {
                 todo!("notify this error to the origin node");
             }
 

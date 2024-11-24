@@ -5,6 +5,7 @@ mod machines;
 pub mod rpc;
 mod server;
 mod storage;
+pub mod types;
 
 pub use machine::{Context, InputKind, Machine};
 pub use machines::{Machines, SystemMachine};

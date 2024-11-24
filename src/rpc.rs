@@ -2,7 +2,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
 use raftbare::{
-    ClusterConfig, LogEntries, LogIndex, LogPosition, MessageHeader, MessageSeqNo, NodeId, Term,
+    ClusterConfig, LogEntries, LogIndex, LogPosition, MessageHeader, MessageSeqNo, Term,
 };
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +10,7 @@ use crate::{
     command::{Caller, Command, LogEntry},
     machines::Member,
     server::{Commands, ServerInstanceId},
+    types::NodeId,
     InputKind,
 };
 
@@ -137,7 +138,7 @@ impl Request {
                 jsonrpc: JsonRpcVersion::V2,
                 id: RequestId::Number(header.seqno.get() as i64),
                 params: AppendEntriesResultParams {
-                    from: header.from.get(),
+                    from: header.from.into(),
                     term: header.term.get(),
                     last_log_term: last_position.term.get(),
                     last_log_index: last_position.index.get(),
@@ -149,7 +150,7 @@ impl Request {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppendEntriesResultParams {
-    pub from: u64,
+    pub from: NodeId,
     pub term: u64,
     pub last_log_term: u64,
     pub last_log_index: u64,
@@ -163,7 +164,7 @@ impl AppendEntriesResultParams {
 
         raftbare::Message::AppendEntriesReply {
             header: MessageHeader {
-                from: NodeId::new(self.from),
+                from: self.from.into(),
                 term: Term::new(self.term),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
@@ -191,7 +192,7 @@ impl RequestVoteParams {
 
         raftbare::Message::RequestVoteCall {
             header: MessageHeader {
-                from: NodeId::new(self.from),
+                from: self.from.into(),
                 term: Term::new(self.term),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
@@ -218,7 +219,7 @@ impl RequestVoteResultParams {
 
         raftbare::Message::RequestVoteReply {
             header: MessageHeader {
-                from: NodeId::new(self.from),
+                from: self.from.into(),
                 term: Term::new(self.term),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
@@ -229,7 +230,7 @@ impl RequestVoteResultParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppendEntriesParams {
-    pub from: u64,
+    pub from: NodeId,
     pub term: u64,
     pub commit_index: u64,
     pub prev_term: u64,
@@ -245,7 +246,7 @@ impl AppendEntriesParams {
         commands: &Commands,
     ) -> Option<Self> {
         Some(Self {
-            from: header.from.get(),
+            from: header.from.into(),
             term: header.term.get(),
             commit_index: commit_index.get(),
             prev_term: entries.prev_position().term.get(),
@@ -277,8 +278,8 @@ impl AppendEntriesParams {
                 LogEntry::Term(v) => raftbare::LogEntry::Term(Term::new(v)),
                 LogEntry::ClusterConfig { voters, new_voters } => {
                     raftbare::LogEntry::ClusterConfig(ClusterConfig {
-                        voters: voters.into_iter().map(NodeId::new).collect(),
-                        new_voters: new_voters.into_iter().map(NodeId::new).collect(),
+                        voters: voters.into_iter().map(From::from).collect(),
+                        new_voters: new_voters.into_iter().map(From::from).collect(),
                         ..ClusterConfig::default()
                     })
                 }
@@ -340,7 +341,7 @@ impl AppendEntriesParams {
 
         Some(raftbare::Message::AppendEntriesCall {
             header: MessageHeader {
-                from: NodeId::new(self.from),
+                from: self.from.into(),
                 term: Term::new(self.term),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
@@ -380,7 +381,7 @@ pub struct ProposeParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeQueryParams {
-    pub origin_node_id: u64,
+    pub origin_node_id: NodeId,
     pub input: serde_json::Value, // TODO: remove
     pub caller: Caller,
 }
@@ -395,7 +396,7 @@ pub struct NotifyQueryPromiseParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InitNodeParams {
-    pub node_id: u64,
+    pub node_id: NodeId,
     pub snapshot: SnapshotParams, // TODO
 }
 
