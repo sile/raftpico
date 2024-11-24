@@ -84,3 +84,34 @@ impl From<Token> for mio::Token {
         value.0
     }
 }
+
+/// Raft term.
+///
+/// This struct is the same as [`raftbare::Term`], except that it is serializable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(into = "u64", from = "u64")]
+pub struct Term(raftbare::Term);
+
+impl From<u64> for Term {
+    fn from(value: u64) -> Self {
+        Self(raftbare::Term::new(value))
+    }
+}
+
+impl From<Term> for u64 {
+    fn from(value: Term) -> Self {
+        value.0.get()
+    }
+}
+
+impl From<raftbare::Term> for Term {
+    fn from(value: raftbare::Term) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Term> for raftbare::Term {
+    fn from(value: Term) -> Self {
+        value.0
+    }
+}

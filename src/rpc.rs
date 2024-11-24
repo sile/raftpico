@@ -1,16 +1,14 @@
 use std::{net::SocketAddr, time::Duration};
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
-use raftbare::{
-    ClusterConfig, LogEntries, LogIndex, LogPosition, MessageHeader, MessageSeqNo, Term,
-};
+use raftbare::{ClusterConfig, LogEntries, LogIndex, LogPosition, MessageHeader, MessageSeqNo};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{Caller, Command, LogEntry},
     machines::Member,
     server::{Commands, ServerInstanceId},
-    types::NodeId,
+    types::{NodeId, Term},
     InputKind,
 };
 
@@ -101,9 +99,9 @@ impl Request {
                 jsonrpc: JsonRpcVersion::V2,
                 id: RequestId::Number(header.seqno.get() as i64),
                 params: RequestVoteParams {
-                    from: header.from.get(),
-                    term: header.term.get(),
-                    last_log_term: last_position.term.get(),
+                    from: header.from.into(),
+                    term: header.term.into(),
+                    last_log_term: last_position.term.into(),
                     last_log_index: last_position.index.get(),
                 },
             },
@@ -126,8 +124,8 @@ impl Request {
                 jsonrpc: JsonRpcVersion::V2,
                 id: RequestId::Number(header.seqno.get() as i64),
                 params: RequestVoteResultParams {
-                    from: header.from.get(),
-                    term: header.term.get(),
+                    from: header.from.into(),
+                    term: header.term.into(),
                     vote_granted,
                 },
             },
@@ -139,8 +137,8 @@ impl Request {
                 id: RequestId::Number(header.seqno.get() as i64),
                 params: AppendEntriesResultParams {
                     from: header.from.into(),
-                    term: header.term.get(),
-                    last_log_term: last_position.term.get(),
+                    term: header.term.into(),
+                    last_log_term: last_position.term.into(),
                     last_log_index: last_position.index.get(),
                 },
             },
@@ -151,8 +149,8 @@ impl Request {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppendEntriesResultParams {
     pub from: NodeId,
-    pub term: u64,
-    pub last_log_term: u64,
+    pub term: Term,
+    pub last_log_term: Term,
     pub last_log_index: u64,
 }
 
@@ -165,11 +163,11 @@ impl AppendEntriesResultParams {
         raftbare::Message::AppendEntriesReply {
             header: MessageHeader {
                 from: self.from.into(),
-                term: Term::new(self.term),
+                term: self.term.into(),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
             last_position: LogPosition {
-                term: Term::new(self.last_log_term),
+                term: self.last_log_term.into(),
                 index: LogIndex::new(self.last_log_index),
             },
         }
@@ -178,9 +176,9 @@ impl AppendEntriesResultParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RequestVoteParams {
-    pub from: u64,
-    pub term: u64,
-    pub last_log_term: u64,
+    pub from: NodeId,
+    pub term: Term,
+    pub last_log_term: Term,
     pub last_log_index: u64,
 }
 
@@ -193,11 +191,11 @@ impl RequestVoteParams {
         raftbare::Message::RequestVoteCall {
             header: MessageHeader {
                 from: self.from.into(),
-                term: Term::new(self.term),
+                term: self.term.into(),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
             last_position: LogPosition {
-                term: Term::new(self.last_log_term),
+                term: self.last_log_term.into(),
                 index: LogIndex::new(self.last_log_index),
             },
         }
@@ -206,8 +204,8 @@ impl RequestVoteParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RequestVoteResultParams {
-    pub from: u64,
-    pub term: u64,
+    pub from: NodeId,
+    pub term: Term,
     pub vote_granted: bool,
 }
 
@@ -220,7 +218,7 @@ impl RequestVoteResultParams {
         raftbare::Message::RequestVoteReply {
             header: MessageHeader {
                 from: self.from.into(),
-                term: Term::new(self.term),
+                term: self.term.into(),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
             vote_granted: self.vote_granted,
@@ -231,9 +229,9 @@ impl RequestVoteResultParams {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppendEntriesParams {
     pub from: NodeId,
-    pub term: u64,
+    pub term: Term,
     pub commit_index: u64,
-    pub prev_term: u64,
+    pub prev_term: Term,
     pub prev_log_index: u64,
     pub entries: Vec<LogEntry>,
 }
@@ -247,9 +245,9 @@ impl AppendEntriesParams {
     ) -> Option<Self> {
         Some(Self {
             from: header.from.into(),
-            term: header.term.get(),
+            term: header.term.into(),
             commit_index: commit_index.get(),
-            prev_term: entries.prev_position().term.get(),
+            prev_term: entries.prev_position().term.into(),
             prev_log_index: entries.prev_position().index.get(),
             entries: entries
                 .iter_with_positions()
@@ -268,14 +266,14 @@ impl AppendEntriesParams {
         };
 
         let prev_position = LogPosition {
-            term: Term::new(self.prev_term),
+            term: self.prev_term.into(),
             index: LogIndex::new(self.prev_log_index),
         };
         let entries = (1..)
             .map(|i| prev_position.index + LogIndex::new(i))
             .zip(self.entries.into_iter())
             .map(|(i, x)| match x {
-                LogEntry::Term(v) => raftbare::LogEntry::Term(Term::new(v)),
+                LogEntry::Term(v) => raftbare::LogEntry::Term(v.into()),
                 LogEntry::ClusterConfig { voters, new_voters } => {
                     raftbare::LogEntry::ClusterConfig(ClusterConfig {
                         voters: voters.into_iter().map(From::from).collect(),
@@ -342,7 +340,7 @@ impl AppendEntriesParams {
         Some(raftbare::Message::AppendEntriesCall {
             header: MessageHeader {
                 from: self.from.into(),
-                term: Term::new(self.term),
+                term: self.term.into(),
                 seqno: MessageSeqNo::new(request_id as u64),
             },
             commit_index: LogIndex::new(self.commit_index),
@@ -388,7 +386,8 @@ pub struct ProposeQueryParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NotifyQueryPromiseParams {
-    pub promise_term: u64,
+    // TODO: rename
+    pub promise_term: Term,
     pub promise_log_index: u64,
     pub input: serde_json::Value, // TODO: remove
     pub caller: Caller,
@@ -430,7 +429,7 @@ pub struct TakeSnapshotOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotParams<M = serde_json::Value> {
     // position and config
-    pub last_included_term: u64,
+    pub last_included_term: Term,
     pub last_included_index: u64,
     pub voters: Vec<u64>,
     pub new_voters: Vec<u64>,

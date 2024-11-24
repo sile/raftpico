@@ -519,7 +519,7 @@ impl<M: Machine> Server<M> {
     fn handle_save_current_term_action(&mut self) -> std::io::Result<()> {
         // TODO: stats
         if let Some(storage) = &mut self.storage {
-            storage.save_current_term(self.node.current_term())?;
+            storage.save_current_term(self.node.current_term().into())?;
         }
         Ok(())
     }
@@ -608,7 +608,7 @@ impl<M: Machine> Server<M> {
         if let Some(storage) = &mut self.storage {
             storage.install_snapshot(params)?;
             storage.save_node_id(self.node.id())?;
-            storage.save_current_term(self.node.current_term())?;
+            storage.save_current_term(self.node.current_term().into())?;
             storage.save_voted_for(self.node.voted_for())?;
             storage.append_entries(self.node.log().entries(), &self.local_commands)?;
         }
@@ -626,7 +626,7 @@ impl<M: Machine> Server<M> {
             .get_position_and_config(index)
             .expect("unreachable");
         let snapshot = SnapshotParams {
-            last_included_term: last_included.term.get(),
+            last_included_term: last_included.term.into(),
             last_included_index: last_included.index.get(),
             voters: config.voters.iter().map(|n| n.get()).collect(),
             new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
@@ -655,7 +655,7 @@ impl<M: Machine> Server<M> {
             if let Some(storage) = &mut self.storage {
                 storage.install_snapshot(snapshot)?;
                 storage.save_node_id(self.node.id())?;
-                storage.save_current_term(self.node.current_term())?;
+                storage.save_current_term(self.node.current_term().into())?;
                 storage.save_voted_for(self.node.voted_for())?;
                 storage.append_entries(self.node.log().entries(), &self.local_commands)?;
             }
@@ -752,7 +752,7 @@ impl<M: Machine> Server<M> {
             &Request::NotifyQueryPromise {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
                 params: NotifyQueryPromiseParams {
-                    promise_term: position.term.get(),
+                    promise_term: position.term.into(),
                     promise_log_index: position.index.get(),
                     input: params.input,
                     caller: params.caller,
@@ -781,7 +781,7 @@ impl<M: Machine> Server<M> {
         params: NotifyQueryPromiseParams,
     ) -> std::io::Result<()> {
         let commit_position = LogPosition {
-            term: Term::new(params.promise_term),
+            term: params.promise_term.into(),
             index: LogIndex::new(params.promise_log_index),
         };
         self.queries.push(PendingQuery {
