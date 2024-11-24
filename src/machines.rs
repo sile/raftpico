@@ -1,18 +1,15 @@
 use std::{collections::BTreeMap, net::SocketAddr};
 
-use mio::Token;
 use raftbare::NodeId;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    command::Command, message::CreateClusterOutput, server::ClusterSettings, Context, ErrorKind,
-    Machine,
+    command::Command,
+    constants::{CLIENT_TOKEN_MAX, CLIENT_TOKEN_MIN, SEED_NODE_ID},
+    message::CreateClusterOutput,
+    server::ClusterSettings,
+    Context, ErrorKind, Machine,
 };
-
-const SEED_NODE_ID: NodeId = NodeId::new(0);
-
-const CLIENT_TOKEN_MIN: Token = Token(0);
-const CLIENT_TOKEN_MAX: Token = Token(1000_000);
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Machines<M> {

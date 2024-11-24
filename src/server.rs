@@ -18,6 +18,9 @@ use uuid::Uuid;
 
 use crate::{
     command::{Caller, Command},
+    constants::{
+        EVENTS_CAPACITY, SEED_NODE_ID, SERVER_TOKEN_MAX, SERVER_TOKEN_MIN, UNINIT_NODE_ID,
+    },
     machine::{Context, Machine},
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
@@ -28,16 +31,6 @@ use crate::{
     storage::FileStorage,
     ErrorKind, InputKind, Machines,
 };
-
-const SERVER_TOKEN_MIN: Token = Token(CLIENT_TOKEN_MAX.0 + 1);
-const SERVER_TOKEN_MAX: Token = Token(usize::MAX);
-
-const CLIENT_TOKEN_MAX: Token = Token(1000_000);
-
-const EVENTS_CAPACITY: usize = 1024;
-
-const SEED_NODE_ID: NodeId = NodeId::new(0);
-const UNINIT_NODE_ID: NodeId = NodeId::new(u64::MAX);
 
 // TODO: move or remove?
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

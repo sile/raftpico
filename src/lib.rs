@@ -1,4 +1,5 @@
 pub mod command;
+mod constants;
 mod error;
 mod machine;
 mod machines;
