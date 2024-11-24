@@ -7,8 +7,9 @@ use raftbare::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    command::{Caller, Command2, LogEntry},
-    server::{ClusterSettings, Commands, Member, ServerInstanceId},
+    command::{Caller, Command, LogEntry},
+    machines::Member,
+    server::{ClusterSettings, Commands, ServerInstanceId},
     InputKind,
 };
 
@@ -288,7 +289,7 @@ impl AppendEntriesParams {
                 } => {
                     commands.insert(
                         i,
-                        Command2::CreateCluster {
+                        Command::CreateCluster {
                             seed_server_addr,
                             settings,
                             proposer,
@@ -302,7 +303,7 @@ impl AppendEntriesParams {
                 } => {
                     commands.insert(
                         i,
-                        Command2::AddServer {
+                        Command::AddServer {
                             server_addr,
                             proposer,
                         },
@@ -315,7 +316,7 @@ impl AppendEntriesParams {
                 } => {
                     commands.insert(
                         i,
-                        Command2::RemoveServer {
+                        Command::RemoveServer {
                             server_addr,
                             proposer,
                         },
@@ -323,15 +324,15 @@ impl AppendEntriesParams {
                     raftbare::LogEntry::Command
                 }
                 LogEntry::TakeSnapshot { proposer } => {
-                    commands.insert(i, Command2::TakeSnapshot { proposer });
+                    commands.insert(i, Command::TakeSnapshot { proposer });
                     raftbare::LogEntry::Command
                 }
                 LogEntry::ApplyCommand { input, proposer } => {
-                    commands.insert(i, Command2::ApplyCommand { input, proposer });
+                    commands.insert(i, Command::ApplyCommand { input, proposer });
                     raftbare::LogEntry::Command
                 }
                 LogEntry::ApplyQuery => {
-                    commands.insert(i, Command2::ApplyQuery);
+                    commands.insert(i, Command::ApplyQuery);
                     raftbare::LogEntry::Command
                 }
             });
@@ -374,7 +375,7 @@ pub struct ApplyParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeParams {
-    pub command: Command2,
+    pub command: Command,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -17,22 +17,21 @@ use serde_json::value::RawValue;
 use uuid::Uuid;
 
 use crate::{
-    command::{Caller, Command2},
+    command::{Caller, Command},
     machine::{Context, Machine},
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
-        CreateClusterOutput, InitNodeParams, NotifyQueryPromiseParams, ProposeParams,
-        ProposeQueryParams, Proposer, RemoveServerParams, Request, RequestVoteParams,
-        RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,
+        InitNodeParams, NotifyQueryPromiseParams, ProposeParams, ProposeQueryParams, Proposer,
+        RemoveServerParams, Request, RequestVoteParams, RequestVoteResultParams, SnapshotParams,
+        TakeSnapshotOutput,
     },
     storage::FileStorage,
-    ErrorKind, InputKind,
+    ErrorKind, InputKind, Machines,
 };
 
 const SERVER_TOKEN_MIN: Token = Token(CLIENT_TOKEN_MAX.0 + 1);
 const SERVER_TOKEN_MAX: Token = Token(usize::MAX);
 
-const CLIENT_TOKEN_MIN: Token = Token(0);
 const CLIENT_TOKEN_MAX: Token = Token(1000_000);
 
 const EVENTS_CAPACITY: usize = 1024;
@@ -89,124 +88,7 @@ impl TryFrom<serde_json::Value> for ClusterSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Member {
-    pub addr: SocketAddr,
-    pub token: usize, // TODO: Token
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SystemMachine<M> {
-    settings: ClusterSettings,
-    members: BTreeMap<u64, Member>, // TODO: key type
-    next_token: usize,              // TOOD: token
-    user_machine: M,
-}
-
-//
-impl<M: Machine> Default for SystemMachine<M> {
-    fn default() -> Self {
-        Self {
-            settings: ClusterSettings::default(),
-            members: BTreeMap::new(),
-            next_token: CLIENT_TOKEN_MIN.0,
-            user_machine: M::default(),
-        }
-    }
-}
-
-impl<M: Machine> SystemMachine<M> {
-    fn apply_create_cluster_command(
-        &mut self,
-        ctx: &mut Context,
-        seed_server_addr: SocketAddr,
-        settings: &ClusterSettings,
-    ) {
-        self.settings = settings.clone();
-        self.members.insert(
-            SEED_NODE_ID.get(),
-            Member {
-                addr: seed_server_addr,
-                token: self.next_token,
-            },
-        );
-        self.next_token += 1; // TODO: max handling
-        ctx.output(&CreateClusterOutput {
-            members: self.members.values().cloned().collect(),
-        });
-    }
-
-    fn apply_add_server_command(&mut self, ctx: &mut Context, server_addr: SocketAddr) {
-        if self.members.values().any(|m| m.addr == server_addr) {
-            ctx.error(ErrorKind::ServerAlreadyAdded.object());
-            return;
-        }
-
-        let node_id = NodeId::new(ctx.commit_index.get());
-        let token = self.next_token;
-        self.next_token += 1; // TODO: max handling
-        assert!(self.next_token <= CLIENT_TOKEN_MAX.0); // TODO
-
-        self.members.insert(
-            node_id.get(),
-            Member {
-                addr: server_addr,
-                token,
-            },
-        );
-        ctx.output(&CreateClusterOutput {
-            members: self.members.values().cloned().collect(),
-        });
-    }
-
-    fn apply_remove_server_command(&mut self, ctx: &mut Context, server_addr: SocketAddr) {
-        let Some((&node_id, _member)) = self.members.iter().find(|(_, m)| m.addr == server_addr)
-        else {
-            ctx.error(ErrorKind::NotClusterMember.object());
-            return;
-        };
-
-        let node_id = NodeId::new(node_id);
-        self.members.remove(&node_id.get());
-        ctx.output(&CreateClusterOutput {
-            members: self.members.values().cloned().collect(),
-        });
-
-        // TODO: reset self.node for removed server
-    }
-}
-
-impl<M: Machine> Machine for SystemMachine<M> {
-    type Input = Command2;
-
-    fn apply(&mut self, ctx: &mut Context, input: &Self::Input) {
-        match input {
-            Command2::CreateCluster {
-                seed_server_addr,
-                settings,
-                ..
-            } => self.apply_create_cluster_command(ctx, *seed_server_addr, settings),
-            Command2::AddServer { server_addr, .. } => {
-                self.apply_add_server_command(ctx, *server_addr)
-            }
-            Command2::RemoveServer { server_addr, .. } => {
-                self.apply_remove_server_command(ctx, *server_addr)
-            }
-            Command2::ApplyCommand { input, .. } => {
-                let input = serde_json::from_value(input.clone()).expect("TODO: error response");
-                self.user_machine.apply(ctx, &input)
-            }
-            Command2::TakeSnapshot { .. } => {
-                unreachable!();
-            }
-            Command2::ApplyQuery => {
-                // No action is required here.
-            }
-        }
-    }
-}
-
-pub type Commands = BTreeMap<LogIndex, Command2>;
+pub type Commands = BTreeMap<LogIndex, Command>;
 
 // TODO: struct
 pub type ServerInstanceId = Uuid;
@@ -254,7 +136,7 @@ pub struct Server<M> {
     storage: Option<FileStorage>, // TODO: local_storage
     dirty_cluster_config: bool,
     queries: BinaryHeap<PendingQuery>,
-    machine: SystemMachine<M>,
+    machines: Machines<M>,
 }
 
 impl<M: Machine> Server<M> {
@@ -278,7 +160,7 @@ impl<M: Machine> Server<M> {
             last_applied_index: LogIndex::ZERO,
             dirty_cluster_config: false,
             queries: BinaryHeap::new(),
-            machine: SystemMachine::default(),
+            machines: Machines::default(),
         })
     }
 
@@ -292,11 +174,11 @@ impl<M: Machine> Server<M> {
     }
 
     pub fn machine(&self) -> &M {
-        &self.machine.user_machine
+        &self.machines.user
     }
 
     pub fn machine_mut(&mut self) -> &mut M {
-        &mut self.machine.user_machine
+        &mut self.machines.user
     }
 
     pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
@@ -356,7 +238,12 @@ impl<M: Machine> Server<M> {
                 }
                 let Data { addr } = serde_json::from_value(data)?;
 
-                let Some((&node_id, _)) = self.machine.members.iter().find(|(_, m)| m.addr == addr)
+                let Some((&node_id, _)) = self
+                    .machines
+                    .system
+                    .members
+                    .iter()
+                    .find(|(_, m)| m.addr == addr)
                 else {
                     return Ok(());
                 };
@@ -437,7 +324,7 @@ impl<M: Machine> Server<M> {
                         caller: Some(query.caller),
                     };
 
-                    self.machine.user_machine.apply(&mut ctx, &input);
+                    self.machines.user.apply(&mut ctx, &input);
                     let caller = ctx.caller.expect("unreachale");
                     self.reply_output(caller, ctx.output)?;
                 }
@@ -462,18 +349,18 @@ impl<M: Machine> Server<M> {
 
     fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
         let command = self.local_commands.get(&index).expect("bug");
-        if matches!(command, Command2::ApplyQuery) {
+        if matches!(command, Command::ApplyQuery) {
             return Ok(());
         }
 
-        let member_change = matches!(command, Command2::AddServer { .. });
+        let member_change = matches!(command, Command::AddServer { .. });
 
         // TODO: remove clone
         let caller = command
             .proposer()
             .filter(|p| p.server == self.instance_id)
             .map(|p| p.client.clone());
-        if matches!(command, Command2::TakeSnapshot { .. }) {
+        if matches!(command, Command::TakeSnapshot { .. }) {
             self.take_snapshot(index)?;
 
             if let Some(caller) = caller {
@@ -495,7 +382,7 @@ impl<M: Machine> Server<M> {
             output: None,
             caller,
         };
-        self.machine.apply(&mut ctx, command);
+        self.machines.apply(&mut ctx, command);
 
         if let Some(caller) = ctx.caller {
             self.reply_output(caller, ctx.output)?;
@@ -515,7 +402,8 @@ impl<M: Machine> Server<M> {
     fn update_rpc_clients(&mut self) {
         // Removed server handling.
         let addrs = self
-            .machine
+            .machines
+            .system
             .members
             .values()
             .map(|m| m.addr)
@@ -525,7 +413,7 @@ impl<M: Machine> Server<M> {
         // TODO: Remove from node_id_to_token too (or don't remove rpc_clients at all)
 
         // Added server handling.
-        for member in self.machine.members.values() {
+        for member in self.machines.system.members.values() {
             if member.addr == self.listen_addr() {
                 continue;
             }
@@ -577,7 +465,7 @@ impl<M: Machine> Server<M> {
 
         let mut adding = Vec::new();
         let mut removing = Vec::new();
-        for (id, _m) in &self.machine.members {
+        for (id, _m) in &self.machines.system.members {
             let id = NodeId::new(*id);
             // TODO: if !m.evicting && !self.node.config().voters.contains(id) {
             if !self.node.config().voters.contains(&id) {
@@ -586,7 +474,7 @@ impl<M: Machine> Server<M> {
         }
         for &id in &self.node.config().voters {
             // TODO: if self.members.get(id).map_or(true, |m| m.evicting) {
-            if !self.machine.members.contains_key(&id.get()) {
+            if !self.machines.system.members.contains_key(&id.get()) {
                 removing.push(id);
             }
         }
@@ -701,8 +589,8 @@ impl<M: Machine> Server<M> {
 
     fn handle_set_election_timeout_action(&mut self) {
         // TODO: self.stats.election_timeout_set_count += 1;
-        let min = self.machine.settings.min_election_timeout;
-        let max = self.machine.settings.max_election_timeout;
+        let min = self.machines.system.settings.min_election_timeout;
+        let max = self.machines.system.settings.max_election_timeout;
         let timeout = match self.node.role() {
             Role::Follower => max,
             Role::Candidate => rand::thread_rng().gen_range(min..=max),
@@ -756,7 +644,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        self.machine = serde_json::from_value(params.machine.clone())?; // TODO: remove clone
+        self.machines = serde_json::from_value(params.machine.clone())?; // TODO: remove clone
 
         let last_included = LogPosition {
             term: params.last_included_term.into(),
@@ -799,7 +687,7 @@ impl<M: Machine> Server<M> {
             new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
 
             // TODO: impl Clone for Machine ?
-            machine: serde_json::to_value(&self.machine)?,
+            machine: serde_json::to_value(&self.machines)?,
         };
         Ok(snapshot)
     }
@@ -832,7 +720,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_take_snapshot_request(&mut self, caller: Caller) -> std::io::Result<()> {
-        let command = Command2::TakeSnapshot {
+        let command = Command::TakeSnapshot {
             proposer: Proposer {
                 server: self.instance_id,
                 client: caller,
@@ -913,7 +801,7 @@ impl<M: Machine> Server<M> {
             todo!("redirect if possible");
         }
 
-        let promise = self.propose_command_leader(Command2::ApplyQuery);
+        let promise = self.propose_command_leader(Command::ApplyQuery);
         let node_id = NodeId::new(params.origin_node_id);
         self.send_to(
             node_id,
@@ -932,7 +820,8 @@ impl<M: Machine> Server<M> {
 
     fn send_to<T: Serialize>(&mut self, node_id: NodeId, message: &T) -> std::io::Result<()> {
         let Some(token) = self
-            .machine
+            .machines
+            .system
             .members
             .get(&node_id.get())
             .map(|m| Token(m.token))
@@ -978,7 +867,7 @@ impl<M: Machine> Server<M> {
             )?;
             return Ok(());
         }
-        if !self.machine.members.contains_key(&params.from) {
+        if !self.machines.system.members.contains_key(&params.from) {
             self.reply_error(
                 caller,
                 ErrorKind::UnknownServer
@@ -1004,7 +893,7 @@ impl<M: Machine> Server<M> {
             self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
         }
-        let command = Command2::AddServer {
+        let command = Command::AddServer {
             server_addr: params.server_addr,
             proposer: Proposer {
                 server: self.instance_id,
@@ -1023,7 +912,7 @@ impl<M: Machine> Server<M> {
         }
         match params.kind {
             InputKind::Command => {
-                let command = Command2::ApplyCommand {
+                let command = Command::ApplyCommand {
                     input: params.input,
                     proposer: Some(Proposer {
                         server: self.instance_id,
@@ -1048,7 +937,7 @@ impl<M: Machine> Server<M> {
         input: serde_json::Value,
     ) -> std::io::Result<()> {
         if self.is_leader() {
-            let command = Command2::ApplyQuery;
+            let command = Command::ApplyQuery;
             let promise = self.propose_command_leader(command);
             self.queries.push(PendingQuery {
                 promise,
@@ -1072,7 +961,8 @@ impl<M: Machine> Server<M> {
 
         // TODO: optimize
         let Some(addr) = self
-            .machine
+            .machines
+            .system
             .members
             .iter()
             .find(|x| *x.0 == maybe_leader.get())
@@ -1107,7 +997,7 @@ impl<M: Machine> Server<M> {
             caller: Some(caller),
         };
 
-        self.machine.user_machine.apply(&mut ctx, &input);
+        self.machines.user.apply(&mut ctx, &input);
         let caller = ctx.caller.expect("unreachale");
         self.reply_output(caller, ctx.output)?;
 
@@ -1124,7 +1014,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let command = Command2::RemoveServer {
+        let command = Command::RemoveServer {
             server_addr: params.server_addr,
             proposer: Proposer {
                 server: self.instance_id,
@@ -1153,7 +1043,7 @@ impl<M: Machine> Server<M> {
 
         self.node.create_cluster(&[self.node.id()]); // Always succeeds
 
-        let command = Command2::CreateCluster {
+        let command = Command::CreateCluster {
             seed_server_addr: self.listen_addr(),
             settings,
             proposer: Proposer {
@@ -1179,7 +1069,7 @@ impl<M: Machine> Server<M> {
             todo!();
         }
 
-        let command = Command2::ApplyCommand {
+        let command = Command::ApplyCommand {
             input: serde_json::to_value(input)?,
             proposer: None,
         };
@@ -1187,7 +1077,7 @@ impl<M: Machine> Server<M> {
         Ok(promise)
     }
 
-    fn propose_command(&mut self, command: Command2) -> std::io::Result<()> {
+    fn propose_command(&mut self, command: Command) -> std::io::Result<()> {
         assert!(self.is_initialized());
 
         if !self.is_leader() {
@@ -1210,8 +1100,8 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn propose_command_leader(&mut self, command: Command2) -> CommitPromise {
-        if let Some(promise) = matches!(command, Command2::ApplyQuery)
+    fn propose_command_leader(&mut self, command: Command) -> CommitPromise {
+        if let Some(promise) = matches!(command, Command::ApplyQuery)
             .then_some(())
             .and_then(|()| self.node.actions().append_log_entries.as_ref())
             .and_then(|entries| {

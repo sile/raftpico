@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Command2 {
+pub enum Command {
     CreateCluster {
         seed_server_addr: SocketAddr,
         settings: ClusterSettings,
@@ -38,15 +38,15 @@ pub enum Command2 {
     ApplyQuery,
 }
 
-impl Command2 {
+impl Command {
     pub fn proposer(&self) -> Option<&Proposer> {
         match self {
-            Command2::CreateCluster { proposer, .. } => Some(proposer),
-            Command2::AddServer { proposer, .. } => Some(proposer),
-            Command2::RemoveServer { proposer, .. } => Some(proposer),
-            Command2::TakeSnapshot { proposer, .. } => Some(proposer),
-            Command2::ApplyCommand { proposer, .. } => proposer.as_ref(),
-            Command2::ApplyQuery => None,
+            Command::CreateCluster { proposer, .. } => Some(proposer),
+            Command::AddServer { proposer, .. } => Some(proposer),
+            Command::RemoveServer { proposer, .. } => Some(proposer),
+            Command::TakeSnapshot { proposer, .. } => Some(proposer),
+            Command::ApplyCommand { proposer, .. } => proposer.as_ref(),
+            Command::ApplyQuery => None,
         }
     }
 }
@@ -108,7 +108,7 @@ impl LogEntry {
             raftbare::LogEntry::Command => {
                 let command = commands.get(&index).cloned()?;
                 Some(match command {
-                    Command2::CreateCluster {
+                    Command::CreateCluster {
                         seed_server_addr,
                         settings,
                         proposer,
@@ -117,15 +117,15 @@ impl LogEntry {
                         settings,
                         proposer,
                     },
-                    Command2::AddServer {
+                    Command::AddServer {
                         server_addr,
                         proposer,
                     } => Self::AddServer {
                         server_addr,
                         proposer,
                     },
-                    Command2::TakeSnapshot { proposer } => Self::TakeSnapshot { proposer },
-                    Command2::RemoveServer {
+                    Command::TakeSnapshot { proposer } => Self::TakeSnapshot { proposer },
+                    Command::RemoveServer {
                         server_addr,
                         proposer,
                     } => Self::RemoveServer {
@@ -133,10 +133,10 @@ impl LogEntry {
                         proposer,
                     },
 
-                    Command2::ApplyCommand { input, proposer } => {
+                    Command::ApplyCommand { input, proposer } => {
                         Self::ApplyCommand { input, proposer }
                     }
-                    Command2::ApplyQuery => Self::ApplyQuery,
+                    Command::ApplyQuery => Self::ApplyQuery,
                 })
             }
         }

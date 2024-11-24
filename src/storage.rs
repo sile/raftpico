@@ -4,7 +4,7 @@ use jsonlrpc::JsonlStream;
 use raftbare::{NodeId, Term};
 use serde::{Deserialize, Serialize};
 
-use crate::{command::Command2, message::SnapshotParams};
+use crate::{command::Command, message::SnapshotParams};
 
 #[derive(Debug)]
 pub struct FileStorage {
@@ -183,5 +183,5 @@ pub enum LogEntry {
         new_voters: Vec<u64>,
     },
     // TODO: flatten
-    Command2(Command2), // TODO
+    Command2(Command), // TODO
 }
