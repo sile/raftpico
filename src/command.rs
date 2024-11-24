@@ -33,7 +33,7 @@ pub enum Command {
         // TODO: consider workaround
         // input: Box<RawValue>,
         input: serde_json::Value,
-        proposer: Option<Proposer>, // TODO: command_id: Uuid (?)
+        proposer: Proposer,
     },
     ApplyQuery,
 }
@@ -45,7 +45,7 @@ impl Command {
             Command::AddServer { proposer, .. } => Some(proposer),
             Command::RemoveServer { proposer, .. } => Some(proposer),
             Command::TakeSnapshot { proposer, .. } => Some(proposer),
-            Command::ApplyCommand { proposer, .. } => proposer.as_ref(),
+            Command::ApplyCommand { proposer, .. } => Some(proposer),
             Command::ApplyQuery => None,
         }
     }
@@ -92,7 +92,7 @@ pub enum LogEntry {
         // TODO: Cow? or Rc
         // TODO: input: Box<RawValue>,
         input: serde_json::Value,
-        proposer: Option<Proposer>,
+        proposer: Proposer,
     },
     ApplyQuery,
 }

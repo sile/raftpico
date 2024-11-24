@@ -856,10 +856,10 @@ impl<M: Machine> Server<M> {
             InputKind::Command => {
                 let command = Command::ApplyCommand {
                     input: params.input,
-                    proposer: Some(Proposer {
+                    proposer: Proposer {
                         server: self.instance_id,
                         client: caller,
-                    }),
+                    },
                 };
                 self.propose_command(command)?;
             }
