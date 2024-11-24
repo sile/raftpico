@@ -6,7 +6,7 @@ mod server;
 mod storage;
 pub mod types;
 
-pub use machine::{ApplyKind, Context, Machine};
+pub use machine::{ApplyContext, ApplyKind, Machine};
 pub use machines::{Machines, SystemMachine};
 pub use server::Server;
 pub use storage::FileStorage;

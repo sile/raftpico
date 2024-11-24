@@ -9,7 +9,7 @@ use raftpico::{
         AddServerOutput, AddServerParams, ApplyParams, ClusterSettings, CreateClusterOutput,
         ErrorKind, RemoveServerOutput, RemoveServerParams, Request, TakeSnapshotOutput,
     },
-    ApplyKind, Context, Machine, Server,
+    ApplyContext, ApplyKind, Machine, Server,
 };
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +22,7 @@ struct Counter(usize);
 impl Machine for Counter {
     type Input = usize;
 
-    fn apply(&mut self, ctx: &mut Context, input: &Self::Input) {
+    fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input) {
         if ctx.kind.is_command() {
             self.0 += *input;
         }

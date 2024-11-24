@@ -11,15 +11,15 @@ pub trait Machine: Default + Serialize + for<'de> Deserialize<'de> {
     type Input: Serialize + for<'de> Deserialize<'de>;
 
     /// Applies the given input to the machine within the provided context,
-    /// potentially altering its state if [`Context:kind()`] is [`ApplyKind::Command`].
+    /// potentially altering its state if [`ApplyContext::kind()`] is [`ApplyKind::Command`].
     ///
     /// It is important to note that during the execution of this method,
-    /// [`Context::output()`] or [`Context::error()`] must be called to return the output to the caller.
-    fn apply(&mut self, ctx: &mut Context, input: &Self::Input);
+    /// [`ApplyContext::output()`] or [`ApplyContext::error()`] must be called to return the output to the caller.
+    fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input);
 }
 
 #[derive(Debug)]
-pub struct Context<'a> {
+pub struct ApplyContext<'a> {
     pub kind: ApplyKind, // TODO: private
     pub node: &'a Node,
     pub commit_index: LogIndex,
@@ -28,7 +28,7 @@ pub struct Context<'a> {
     pub(crate) caller: Option<Caller>,
 }
 
-impl<'a> Context<'a> {
+impl<'a> ApplyContext<'a> {
     pub fn output<T: Serialize>(&mut self, output: &T) {
         if self.caller.is_some() {
             match serde_json::value::to_raw_value(output) {

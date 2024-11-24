@@ -6,7 +6,7 @@ use crate::{
     command::Command,
     rpc::{ClusterSettings, CreateClusterOutput, ErrorKind},
     types::{NodeId, Token},
-    Context, Machine,
+    ApplyContext, Machine,
 };
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -18,7 +18,7 @@ pub struct Machines<M> {
 impl<M: Machine> Machine for Machines<M> {
     type Input = Command;
 
-    fn apply(&mut self, ctx: &mut Context, input: &Self::Input) {
+    fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input) {
         match input {
             Command::CreateCluster { .. }
             | Command::AddServer { .. }
@@ -62,7 +62,7 @@ impl Default for SystemMachine {
 impl SystemMachine {
     fn apply_create_cluster_command(
         &mut self,
-        ctx: &mut Context,
+        ctx: &mut ApplyContext,
         seed_server_addr: SocketAddr,
         settings: &ClusterSettings,
     ) {
@@ -79,7 +79,7 @@ impl SystemMachine {
         });
     }
 
-    fn apply_add_server_command(&mut self, ctx: &mut Context, server_addr: SocketAddr) {
+    fn apply_add_server_command(&mut self, ctx: &mut ApplyContext, server_addr: SocketAddr) {
         if self.members.values().any(|m| m.addr == server_addr) {
             ctx.error(ErrorKind::ServerAlreadyAdded.object());
             return;
@@ -100,7 +100,7 @@ impl SystemMachine {
         });
     }
 
-    fn apply_remove_server_command(&mut self, ctx: &mut Context, server_addr: SocketAddr) {
+    fn apply_remove_server_command(&mut self, ctx: &mut ApplyContext, server_addr: SocketAddr) {
         let Some((&node_id, _member)) = self.members.iter().find(|(_, m)| m.addr == server_addr)
         else {
             ctx.error(ErrorKind::NotClusterMember.object());
@@ -119,7 +119,7 @@ impl SystemMachine {
 impl Machine for SystemMachine {
     type Input = Command;
 
-    fn apply(&mut self, ctx: &mut Context, input: &Self::Input) {
+    fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input) {
         match input {
             Command::CreateCluster {
                 seed_server_addr,

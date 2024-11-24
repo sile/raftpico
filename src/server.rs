@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     command::{Caller, Command},
-    machine::{Context, Machine},
+    machine::{ApplyContext, Machine},
     rpc::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
         ClusterSettings, ErrorKind, InitNodeParams, NotifyQueryPromiseParams, ProposeParams,
@@ -259,7 +259,7 @@ impl<M: Machine> Server<M> {
                     let input =
                         serde_json::from_value(query.input).expect("TODO: reply error response");
 
-                    let mut ctx = Context {
+                    let mut ctx = ApplyContext {
                         kind: ApplyKind::Query,
                         node: &self.node,
                         commit_index: self.last_applied_index,
@@ -318,7 +318,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let mut ctx = Context {
+        let mut ctx = ApplyContext {
             kind: ApplyKind::Command,
             node: &self.node,
             commit_index: index,
@@ -917,7 +917,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         let input = serde_json::from_value(input).expect("TODO: reply error response");
 
-        let mut ctx = Context {
+        let mut ctx = ApplyContext {
             kind: ApplyKind::LocalQuery,
             node: &self.node,
             commit_index: self.last_applied_index,
