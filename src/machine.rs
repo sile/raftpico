@@ -5,9 +5,16 @@ use serde_json::value::RawValue;
 
 use crate::{command::Caller, rpc::ErrorKind, types::LogIndex};
 
+/// This trait represents a replicated state machine.
 pub trait Machine: Default + Serialize + for<'de> Deserialize<'de> {
+    /// Type of input that the machine can process.
     type Input: Serialize + for<'de> Deserialize<'de>;
 
+    /// Applies the given input to the machine within the provided context,
+    /// potentially altering its state if [`Context:kind()`] is [`ApplyKind::Command`].
+    ///
+    /// It is important to note that during the execution of this method,
+    /// [`Context::output()`] or [`Context::error()`] must be called to return the output to the caller.
     fn apply(&mut self, ctx: &mut Context, input: &Self::Input);
 }
 
