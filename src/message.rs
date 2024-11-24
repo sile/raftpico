@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 
 use jsonlrpc::{JsonRpcVersion, RequestId};
 use raftbare::{
@@ -433,21 +433,6 @@ pub struct SnapshotParams<M = serde_json::Value> {
     pub voters: Vec<u64>,
     pub new_voters: Vec<u64>,
 
-    // system.
-    pub min_election_timeout: Duration,
-    pub max_election_timeout: Duration,
-    pub max_log_entries_hint: usize,
-    pub next_node_id: u64,
-    pub members: Vec<MemberJson>,
-
-    // user.
+    // TODO: doc
     pub machine: M,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemberJson {
-    pub node_id: u64,
-    pub server_addr: SocketAddr,
-    pub inviting: bool,
-    pub evicting: bool,
 }

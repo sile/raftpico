@@ -21,7 +21,7 @@ use crate::{
     machine::{Context, Machine},
     message::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
-        CreateClusterOutput, InitNodeParams, MemberJson, NotifyQueryPromiseParams, ProposeParams,
+        CreateClusterOutput, InitNodeParams, NotifyQueryPromiseParams, ProposeParams,
         ProposeQueryParams, Proposer, RemoveServerParams, Request, RequestVoteParams,
         RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,
     },
@@ -29,11 +29,11 @@ use crate::{
     ErrorKind, InputKind,
 };
 
-const SERVER_TOKEN_MIN: Token = Token(usize::MAX / 2);
+const SERVER_TOKEN_MIN: Token = Token(CLIENT_TOKEN_MAX.0 + 1);
 const SERVER_TOKEN_MAX: Token = Token(usize::MAX);
 
 const CLIENT_TOKEN_MIN: Token = Token(0);
-const CLIENT_TOKEN_MAX: Token = Token(SERVER_TOKEN_MIN.0 - 1);
+const CLIENT_TOKEN_MAX: Token = Token(1000_000);
 
 const EVENTS_CAPACITY: usize = 1024;
 
@@ -787,17 +787,6 @@ impl<M: Machine> Server<M> {
 
     // TODO
     fn snapshot(&self, index: LogIndex) -> std::io::Result<SnapshotParams> {
-        let members = self
-            .machine
-            .members
-            .iter()
-            .map(|(&node_id, m)| MemberJson {
-                node_id,
-                server_addr: m.addr,
-                inviting: false, // TODO: remove
-                evicting: false, // TODO: remove
-            })
-            .collect();
         let (last_included, config) = self
             .node
             .log()
@@ -808,11 +797,6 @@ impl<M: Machine> Server<M> {
             last_included_index: last_included.index.get(),
             voters: config.voters.iter().map(|n| n.get()).collect(),
             new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
-            min_election_timeout: Duration::default(), // TODO: remove
-            max_election_timeout: Duration::default(),
-            max_log_entries_hint: 0, // TODO: remove
-            next_node_id: 0,         // TODO: remove
-            members,
 
             // TODO: impl Clone for Machine ?
             machine: serde_json::to_value(&self.machine)?,
