@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::{
     command::{Caller, Command},
     machine::{ApplyContext, Machine},
+    machines::Machines,
     rpc::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
         ClusterSettings, ErrorKind, InitNodeParams, NotifyQueryPromiseParams, ProposeParams,
@@ -23,7 +24,7 @@ use crate::{
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, Token},
-    ApplyKind, Machines,
+    ApplyKind,
 };
 
 pub const EVENTS_CAPACITY: usize = 1024;

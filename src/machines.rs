@@ -1,3 +1,4 @@
+//! Predefined replicated state machines.
 use std::{collections::BTreeMap, net::SocketAddr};
 
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,7 @@ pub struct Machines<M> {
     /// System state machine.
     pub system: SystemMachine,
 
-    /// User state mavhine.
+    /// User state machine.
     pub user: M,
 }
 
@@ -44,11 +45,12 @@ impl<M: Machine> Machine for Machines<M> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Member {
+pub(crate) struct Member {
     pub addr: SocketAddr,
     pub token: Token,
 }
 
+/// Replicated state machine responsible for handling system commands.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemMachine {
     pub(crate) settings: ClusterSettings,
@@ -82,7 +84,7 @@ impl SystemMachine {
             },
         );
         ctx.output(&CreateClusterOutput {
-            members: self.members.values().cloned().collect(),
+            members: self.members.values().map(|m| m.addr).collect(),
         });
     }
 
@@ -95,28 +97,21 @@ impl SystemMachine {
         let node_id = NodeId::from(u64::from(ctx.commit_index));
         let token = self.next_token.next_client_token();
 
-        self.members.insert(
-            node_id,
-            Member {
-                addr: addr,
-                token,
-            },
-        );
+        self.members.insert(node_id, Member { addr, token });
         ctx.output(&CreateClusterOutput {
-            members: self.members.values().cloned().collect(),
+            members: self.members.values().map(|m| m.addr).collect(),
         });
     }
 
     fn apply_remove_server_command(&mut self, ctx: &mut ApplyContext, addr: SocketAddr) {
-        let Some((&node_id, _member)) = self.members.iter().find(|(_, m)| m.addr == addr)
-        else {
+        let Some((&node_id, _member)) = self.members.iter().find(|(_, m)| m.addr == addr) else {
             ctx.error(ErrorKind::NotClusterMember.object());
             return;
         };
 
         self.members.remove(&node_id);
         ctx.output(&CreateClusterOutput {
-            members: self.members.values().cloned().collect(),
+            members: self.members.values().map(|m| m.addr).collect(),
         });
 
         // TODO: reset self.node for removed server
@@ -133,12 +128,8 @@ impl Machine for SystemMachine {
                 settings,
                 ..
             } => self.apply_create_cluster_command(ctx, *seed_addr, settings),
-            Command::AddServer { addr, .. } => {
-                self.apply_add_server_command(ctx, *addr)
-            }
-            Command::RemoveServer { addr, .. } => {
-                self.apply_remove_server_command(ctx, *addr)
-            }
+            Command::AddServer { addr, .. } => self.apply_add_server_command(ctx, *addr),
+            Command::RemoveServer { addr, .. } => self.apply_remove_server_command(ctx, *addr),
             Command::Apply { .. } => {
                 unreachable!();
             }

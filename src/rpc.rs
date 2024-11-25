@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{Caller, Command},
-    machines::Member,
     server::{Commands, ServerInstanceId},
     types::{LogIndex, LogPosition, NodeId, Term},
     ApplyKind,
@@ -344,17 +343,17 @@ pub struct Proposer {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateClusterOutput {
-    pub members: Vec<Member>,
+    pub members: Vec<SocketAddr>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AddServerOutput {
-    pub members: Vec<Member>,
+    pub members: Vec<SocketAddr>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RemoveServerOutput {
-    pub members: Vec<Member>,
+    pub members: Vec<SocketAddr>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
