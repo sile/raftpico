@@ -524,7 +524,7 @@ impl<M: Machine> Server<M> {
     fn handle_save_voted_for_action(&mut self) -> std::io::Result<()> {
         // TODO: stats
         if let Some(storage) = &mut self.storage {
-            storage.save_voted_for(self.node.voted_for())?;
+            storage.save_voted_for(self.node.voted_for().map(From::from))?;
         }
         Ok(())
     }
@@ -601,9 +601,9 @@ impl<M: Machine> Server<M> {
 
         if let Some(storage) = &mut self.storage {
             storage.install_snapshot(params)?;
-            storage.save_node_id(self.node.id())?;
+            storage.save_node_id(self.node.id().into())?;
             storage.save_current_term(self.node.current_term().into())?;
-            storage.save_voted_for(self.node.voted_for())?;
+            storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
             storage.append_entries(self.node.log().entries(), &self.local_commands)?;
         }
 
@@ -649,9 +649,9 @@ impl<M: Machine> Server<M> {
             let snapshot = self.snapshot(index)?;
             if let Some(storage) = &mut self.storage {
                 storage.install_snapshot(snapshot)?;
-                storage.save_node_id(self.node.id())?;
+                storage.save_node_id(self.node.id().into())?;
                 storage.save_current_term(self.node.current_term().into())?;
-                storage.save_voted_for(self.node.voted_for())?;
+                storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
                 storage.append_entries(self.node.log().entries(), &self.local_commands)?;
             }
         }
@@ -965,7 +965,7 @@ impl<M: Machine> Server<M> {
 
         self.node = Node::start(NodeId::SEED.into());
         if let Some(storage) = &mut self.storage {
-            storage.save_node_id(self.node.id())?;
+            storage.save_node_id(self.node.id().into())?;
         }
 
         self.node.create_cluster(&[self.node.id()]); // Always succeeds

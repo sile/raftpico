@@ -5,7 +5,7 @@ use raftbare::{ClusterConfig, LogEntries, MessageHeader, MessageSeqNo};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    command::{Caller, Command, LogEntry},
+    command::{Caller, Command},
     machines::Member,
     server::{Commands, ServerInstanceId},
     types::{LogIndex, LogPosition, NodeId, Term},
@@ -223,7 +223,7 @@ pub struct AppendEntriesParams {
     pub term: Term,
     pub commit_index: LogIndex,
     pub prev_position: LogPosition,
-    pub entries: Vec<LogEntry>,
+    pub entries: Vec<Command>,
 }
 
 impl AppendEntriesParams {
@@ -240,7 +240,7 @@ impl AppendEntriesParams {
             prev_position: entries.prev_position().into(),
             entries: entries
                 .iter_with_positions()
-                .map(|(p, x)| LogEntry::new(p.index, &x, commands))
+                .map(|(p, x)| Command::new(p.index, &x, commands))
                 .collect::<Option<Vec<_>>>()?,
         })
     }
@@ -260,65 +260,16 @@ impl AppendEntriesParams {
             .map(|i| LogIndex::from(prev_index + i))
             .zip(self.entries)
             .map(|(i, x)| match x {
-                LogEntry::Term(v) => raftbare::LogEntry::Term(v.into()),
-                LogEntry::ClusterConfig { voters, new_voters } => {
+                Command::StartLeaderTerm { term: v } => raftbare::LogEntry::Term(v.into()),
+                Command::UpdateClusterConfig { voters, new_voters } => {
                     raftbare::LogEntry::ClusterConfig(ClusterConfig {
                         voters: voters.into_iter().map(From::from).collect(),
                         new_voters: new_voters.into_iter().map(From::from).collect(),
                         ..ClusterConfig::default()
                     })
                 }
-                LogEntry::CreateCluster {
-                    seed_server_addr,
-                    settings,
-                    proposer,
-                } => {
-                    commands.insert(
-                        i,
-                        Command::CreateCluster {
-                            seed_server_addr,
-                            settings,
-                            proposer,
-                        },
-                    );
-                    raftbare::LogEntry::Command
-                }
-                LogEntry::AddServer {
-                    server_addr,
-                    proposer,
-                } => {
-                    commands.insert(
-                        i,
-                        Command::AddServer {
-                            server_addr,
-                            proposer,
-                        },
-                    );
-                    raftbare::LogEntry::Command
-                }
-                LogEntry::RemoveServer {
-                    server_addr,
-                    proposer,
-                } => {
-                    commands.insert(
-                        i,
-                        Command::RemoveServer {
-                            server_addr,
-                            proposer,
-                        },
-                    );
-                    raftbare::LogEntry::Command
-                }
-                LogEntry::TakeSnapshot { proposer } => {
-                    commands.insert(i, Command::TakeSnapshot { proposer });
-                    raftbare::LogEntry::Command
-                }
-                LogEntry::ApplyCommand { input, proposer } => {
-                    commands.insert(i, Command::Apply { input, proposer });
-                    raftbare::LogEntry::Command
-                }
-                LogEntry::ApplyQuery => {
-                    commands.insert(i, Command::Query);
+                command => {
+                    commands.insert(i, command);
                     raftbare::LogEntry::Command
                 }
             });

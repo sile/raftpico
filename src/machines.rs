@@ -33,7 +33,10 @@ impl<M: Machine> Machine for Machines<M> {
                 let input = serde_json::from_value(input.clone()).expect("TODO: error response");
                 self.user.apply(ctx, &input)
             }
-            Command::TakeSnapshot { .. } | Command::Query => {
+            Command::TakeSnapshot { .. }
+            | Command::Query
+            | Command::StartLeaderTerm { .. }
+            | Command::UpdateClusterConfig { .. } => {
                 unreachable!();
             }
         }
@@ -139,10 +142,10 @@ impl Machine for SystemMachine {
             Command::Apply { .. } => {
                 unreachable!();
             }
-            Command::TakeSnapshot { .. } => {
-                unreachable!();
-            }
-            Command::Query => {
+            Command::TakeSnapshot { .. }
+            | Command::Query
+            | Command::StartLeaderTerm { .. }
+            | Command::UpdateClusterConfig { .. } => {
                 unreachable!();
             }
         }

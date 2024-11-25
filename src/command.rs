@@ -8,9 +8,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     rpc::{ClusterSettings, Proposer},
     server::Commands,
+    types::{NodeId, Term},
 };
 
-// TODO: default type
+// TODO: Remove default type value
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Command<INPUT = serde_json::Value> {
@@ -35,6 +36,15 @@ pub enum Command<INPUT = serde_json::Value> {
         proposer: Proposer,
     },
     Query,
+
+    // TODO: doc
+    StartLeaderTerm {
+        term: Term,
+    },
+    UpdateClusterConfig {
+        voters: Vec<NodeId>,
+        new_voters: Vec<NodeId>,
+    },
 }
 
 impl Command {
@@ -45,7 +55,33 @@ impl Command {
             Command::RemoveServer { proposer, .. } => Some(proposer),
             Command::TakeSnapshot { proposer, .. } => Some(proposer),
             Command::Apply { proposer, .. } => Some(proposer),
-            Command::Query => None,
+            Command::Query
+            | Command::StartLeaderTerm { .. }
+            | Command::UpdateClusterConfig { .. } => None,
+        }
+    }
+
+    // TODO
+    pub fn new(index: LogIndex, entry: &raftbare::LogEntry, commands: &Commands) -> Option<Self> {
+        match entry {
+            raftbare::LogEntry::Term(term) => Some(Self::StartLeaderTerm {
+                term: Term::from(*term),
+            }),
+            raftbare::LogEntry::ClusterConfig(cluster_config) => Some(Self::UpdateClusterConfig {
+                voters: cluster_config
+                    .voters
+                    .iter()
+                    .copied()
+                    .map(NodeId::from)
+                    .collect(),
+                new_voters: cluster_config
+                    .new_voters
+                    .iter()
+                    .copied()
+                    .map(NodeId::from)
+                    .collect(),
+            }),
+            raftbare::LogEntry::Command => commands.get(&index.into()).cloned(),
         }
     }
 }
@@ -60,82 +96,5 @@ pub struct Caller {
 impl Caller {
     pub fn new(from: ClientId, request_id: RequestId) -> Self {
         Self { from, request_id }
-    }
-}
-
-// TODO: move and rename
-#[derive(Debug, Serialize, Deserialize)]
-pub enum LogEntry {
-    Term(u64),
-    ClusterConfig {
-        voters: Vec<u64>,
-        new_voters: Vec<u64>,
-    },
-    CreateCluster {
-        seed_server_addr: SocketAddr,
-        settings: ClusterSettings,
-        proposer: Proposer,
-    },
-    AddServer {
-        server_addr: SocketAddr,
-        proposer: Proposer,
-    },
-    RemoveServer {
-        server_addr: SocketAddr,
-        proposer: Proposer,
-    },
-    TakeSnapshot {
-        proposer: Proposer,
-    },
-    ApplyCommand {
-        // TODO: Cow? or Rc
-        // TODO: input: Box<RawValue>,
-        input: serde_json::Value,
-        proposer: Proposer,
-    },
-    ApplyQuery,
-}
-
-impl LogEntry {
-    pub fn new(index: LogIndex, entry: &raftbare::LogEntry, commands: &Commands) -> Option<Self> {
-        match entry {
-            raftbare::LogEntry::Term(term) => Some(Self::Term(term.get())),
-            raftbare::LogEntry::ClusterConfig(cluster_config) => Some(Self::ClusterConfig {
-                voters: cluster_config.voters.iter().map(|x| x.get()).collect(),
-                new_voters: cluster_config.new_voters.iter().map(|x| x.get()).collect(),
-            }),
-            raftbare::LogEntry::Command => {
-                let command = commands.get(&index.into()).cloned()?;
-                Some(match command {
-                    Command::CreateCluster {
-                        seed_server_addr,
-                        settings,
-                        proposer,
-                    } => Self::CreateCluster {
-                        seed_server_addr,
-                        settings,
-                        proposer,
-                    },
-                    Command::AddServer {
-                        server_addr,
-                        proposer,
-                    } => Self::AddServer {
-                        server_addr,
-                        proposer,
-                    },
-                    Command::TakeSnapshot { proposer } => Self::TakeSnapshot { proposer },
-                    Command::RemoveServer {
-                        server_addr,
-                        proposer,
-                    } => Self::RemoveServer {
-                        server_addr,
-                        proposer,
-                    },
-
-                    Command::Apply { input, proposer } => Self::ApplyCommand { input, proposer },
-                    Command::Query => Self::ApplyQuery,
-                })
-            }
-        }
     }
 }
