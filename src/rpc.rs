@@ -290,13 +290,13 @@ impl AppendEntriesParams {
 #[derive(Debug, Serialize, Deserialize)]
 // TODO: #[serde(rename_all = "camelCase")]
 pub struct AddServerParams {
-    pub server_addr: SocketAddr,
+    pub addr: SocketAddr,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 // TODO: #[serde(rename_all = "camelCase")]
 pub struct RemoveServerParams {
-    pub server_addr: SocketAddr,
+    pub addr: SocketAddr,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

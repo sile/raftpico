@@ -15,16 +15,16 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 pub enum Command {
     CreateCluster {
-        seed_server_addr: SocketAddr,
+        seed_addr: SocketAddr,
         settings: ClusterSettings,
         proposer: Proposer,
     },
     AddServer {
-        server_addr: SocketAddr,
+        addr: SocketAddr,
         proposer: Proposer,
     },
     RemoveServer {
-        server_addr: SocketAddr,
+        addr: SocketAddr,
         proposer: Proposer,
     },
     TakeSnapshot {

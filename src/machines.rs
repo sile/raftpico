@@ -70,14 +70,14 @@ impl SystemMachine {
     fn apply_create_cluster_command(
         &mut self,
         ctx: &mut ApplyContext,
-        seed_server_addr: SocketAddr,
+        seed_addr: SocketAddr,
         settings: &ClusterSettings,
     ) {
         self.settings = settings.clone();
         self.members.insert(
             NodeId::SEED,
             Member {
-                addr: seed_server_addr,
+                addr: seed_addr,
                 token: self.next_token.next_client_token(),
             },
         );
@@ -86,8 +86,8 @@ impl SystemMachine {
         });
     }
 
-    fn apply_add_server_command(&mut self, ctx: &mut ApplyContext, server_addr: SocketAddr) {
-        if self.members.values().any(|m| m.addr == server_addr) {
+    fn apply_add_server_command(&mut self, ctx: &mut ApplyContext, addr: SocketAddr) {
+        if self.members.values().any(|m| m.addr == addr) {
             ctx.error(ErrorKind::ServerAlreadyAdded.object());
             return;
         }
@@ -98,7 +98,7 @@ impl SystemMachine {
         self.members.insert(
             node_id,
             Member {
-                addr: server_addr,
+                addr: addr,
                 token,
             },
         );
@@ -107,8 +107,8 @@ impl SystemMachine {
         });
     }
 
-    fn apply_remove_server_command(&mut self, ctx: &mut ApplyContext, server_addr: SocketAddr) {
-        let Some((&node_id, _member)) = self.members.iter().find(|(_, m)| m.addr == server_addr)
+    fn apply_remove_server_command(&mut self, ctx: &mut ApplyContext, addr: SocketAddr) {
+        let Some((&node_id, _member)) = self.members.iter().find(|(_, m)| m.addr == addr)
         else {
             ctx.error(ErrorKind::NotClusterMember.object());
             return;
@@ -129,15 +129,15 @@ impl Machine for SystemMachine {
     fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input) {
         match input {
             Command::CreateCluster {
-                seed_server_addr,
+                seed_addr,
                 settings,
                 ..
-            } => self.apply_create_cluster_command(ctx, *seed_server_addr, settings),
-            Command::AddServer { server_addr, .. } => {
-                self.apply_add_server_command(ctx, *server_addr)
+            } => self.apply_create_cluster_command(ctx, *seed_addr, settings),
+            Command::AddServer { addr, .. } => {
+                self.apply_add_server_command(ctx, *addr)
             }
-            Command::RemoveServer { server_addr, .. } => {
-                self.apply_remove_server_command(ctx, *server_addr)
+            Command::RemoveServer { addr, .. } => {
+                self.apply_remove_server_command(ctx, *addr)
             }
             Command::Apply { .. } => {
                 unreachable!();

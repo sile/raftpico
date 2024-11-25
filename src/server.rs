@@ -106,8 +106,7 @@ impl<M: Machine> Server<M> {
         })
     }
 
-    // TODO: rename (server_addr for naming consistency)
-    pub fn listen_addr(&self) -> SocketAddr {
+    pub fn addr(&self) -> SocketAddr {
         self.rpc_server.listen_addr()
     }
 
@@ -356,7 +355,7 @@ impl<M: Machine> Server<M> {
 
         // Added server handling.
         for member in self.machines.system.members.values() {
-            if member.addr == self.listen_addr() {
+            if member.addr == self.addr() {
                 continue;
             }
 
@@ -790,7 +789,7 @@ impl<M: Machine> Server<M> {
             self.reply_error(
                 caller,
                 ErrorKind::NotClusterMember
-                    .object_with_data(serde_json::json!({"addr": self.listen_addr()})),
+                    .object_with_data(serde_json::json!({"addr": self.addr()})),
             )?;
             return Ok(());
         }
@@ -821,7 +820,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
         let command = Command::AddServer {
-            server_addr: params.server_addr,
+            addr: params.addr,
             proposer: Proposer {
                 server: self.instance_id,
                 client: caller,
@@ -942,7 +941,7 @@ impl<M: Machine> Server<M> {
         }
 
         let command = Command::RemoveServer {
-            server_addr: params.server_addr,
+            addr: params.addr,
             proposer: Proposer {
                 server: self.instance_id,
                 client: caller,
@@ -971,7 +970,7 @@ impl<M: Machine> Server<M> {
         self.node.create_cluster(&[self.node.id()]); // Always succeeds
 
         let command = Command::CreateCluster {
-            seed_server_addr: self.listen_addr(),
+            seed_addr: self.addr(),
             settings,
             proposer: Proposer {
                 server: self.instance_id,
