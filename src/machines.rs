@@ -30,10 +30,14 @@ impl<M: Machine> Machine for Machines<M> {
             | Command::RemoveServer { .. } => {
                 self.system.apply(ctx, input);
             }
-            Command::Apply { input, .. } => {
-                let input = serde_json::from_value(input.clone()).expect("TODO: error response");
-                self.user.apply(ctx, &input)
-            }
+            Command::Apply { input, .. } => match serde_json::from_value(input.clone()) {
+                Ok(input) => {
+                    self.user.apply(ctx, &input);
+                }
+                Err(e) => {
+                    ctx.error(ErrorKind::InvalidMachineInput.object_with_reason(e));
+                }
+            },
             Command::TakeSnapshot { .. }
             | Command::Query
             | Command::StartLeaderTerm { .. }
@@ -130,10 +134,8 @@ impl Machine for SystemMachine {
             } => self.apply_create_cluster_command(ctx, *seed_addr, settings),
             Command::AddServer { addr, .. } => self.apply_add_server_command(ctx, *addr),
             Command::RemoveServer { addr, .. } => self.apply_remove_server_command(ctx, *addr),
-            Command::Apply { .. } => {
-                unreachable!();
-            }
-            Command::TakeSnapshot { .. }
+            Command::Apply { .. }
+            | Command::TakeSnapshot { .. }
             | Command::Query
             | Command::StartLeaderTerm { .. }
             | Command::UpdateClusterConfig { .. } => {

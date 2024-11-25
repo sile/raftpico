@@ -424,8 +424,9 @@ impl TryFrom<serde_json::Value> for ClusterSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ErrorKind {
     ClusterAlreadyCreated = 1,
+    InvalidMachineInput,
+    InvalidMachineOutput,
     NoMachineOutput,
-    MalformedMachineOutput,
     ServerAlreadyAdded,
     NotClusterMember,
     UnknownServer,
@@ -440,7 +441,8 @@ impl ErrorKind {
         match self {
             ErrorKind::ClusterAlreadyCreated => "Cluster already created",
             ErrorKind::NoMachineOutput => "No machine output",
-            ErrorKind::MalformedMachineOutput => "Malformed machin",
+            ErrorKind::InvalidMachineInput => "Invalid machine input",
+            ErrorKind::InvalidMachineOutput => "Invalid machine output",
             ErrorKind::ServerAlreadyAdded => "Server already added",
             ErrorKind::NotClusterMember => "Not a cluster member",
             ErrorKind::UnknownServer => "Unknown server",
@@ -455,7 +457,7 @@ impl ErrorKind {
         }
     }
 
-    pub fn object_with_reason<T: std::fmt::Display>(self, reason: T) -> ErrorObject {
+    pub fn object_with_reason<E: std::fmt::Display>(self, reason: E) -> ErrorObject {
         self.object_with_data(serde_json::json!({"reason": reason.to_string()}))
     }
 

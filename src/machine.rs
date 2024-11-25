@@ -48,7 +48,7 @@ impl<'a> ApplyContext<'a> {
         if self.caller.is_some() {
             self.output = Some(
                 serde_json::to_value(output)
-                    .map_err(|e| ErrorKind::MalformedMachineOutput.object_with_reason(e)),
+                    .map_err(|e| ErrorKind::InvalidMachineOutput.object_with_reason(e)),
             )
         }
     }
