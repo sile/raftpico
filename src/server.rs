@@ -13,11 +13,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    command::{Caller, Command},
+    command::Command,
     machine::{ApplyContext, Machine},
     machines::Machines,
     rpc::{
-        AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams,
+        AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams, Caller,
         ClusterSettings, ErrorKind, InitNodeParams, NotifyQueryPromiseParams, ProposeParams,
         ProposeQueryParams, Proposer, RemoveServerParams, Request, RequestVoteParams,
         RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,

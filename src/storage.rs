@@ -136,7 +136,7 @@ impl LogEntries {
             entries: entries
                 .iter_with_positions()
                 .map(|(position, entry)| match entry {
-                    raftbare::LogEntry::Term(t) => Ok(Command::StartLeaderTerm { term: t.into() }),
+                    raftbare::LogEntry::Term(t) => Ok(Command::StartTerm { term: t.into() }),
                     raftbare::LogEntry::ClusterConfig(c) => Ok(Command::UpdateClusterConfig {
                         voters: c.voters.iter().copied().map(NodeId::from).collect(),
                         new_voters: c.new_voters.iter().copied().map(NodeId::from).collect(),

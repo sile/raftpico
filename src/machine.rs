@@ -2,7 +2,10 @@ use jsonlrpc::ErrorObject;
 use raftbare::{Node, Role};
 use serde::{Deserialize, Serialize};
 
-use crate::{command::Caller, rpc::ErrorKind, types::LogIndex};
+use crate::{
+    rpc::{Caller, ErrorKind},
+    types::LogIndex,
+};
 
 /// This trait represents a replicated state machine.
 pub trait Machine: Default + Serialize + for<'de> Deserialize<'de> {

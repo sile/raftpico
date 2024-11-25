@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::Command,
-    rpc::{ClusterSettings, CreateClusterOutput, ErrorKind},
+    rpc::{AddServerOutput, ClusterSettings, CreateClusterOutput, ErrorKind, RemoveServerOutput},
     types::{NodeId, Token},
     ApplyContext, Machine,
 };
@@ -40,7 +40,7 @@ impl<M: Machine> Machine for Machines<M> {
             },
             Command::TakeSnapshot { .. }
             | Command::Query
-            | Command::StartLeaderTerm { .. }
+            | Command::StartTerm { .. }
             | Command::UpdateClusterConfig { .. } => {
                 unreachable!();
             }
@@ -100,9 +100,8 @@ impl SystemMachine {
 
         let node_id = NodeId::from(u64::from(ctx.commit_index));
         let token = self.next_token.next_client_token();
-
         self.members.insert(node_id, Member { addr, token });
-        ctx.output(&CreateClusterOutput {
+        ctx.output(&AddServerOutput {
             members: self.members.values().map(|m| m.addr).collect(),
         });
     }
@@ -114,7 +113,7 @@ impl SystemMachine {
         };
 
         self.members.remove(&node_id);
-        ctx.output(&CreateClusterOutput {
+        ctx.output(&RemoveServerOutput {
             members: self.members.values().map(|m| m.addr).collect(),
         });
 
@@ -137,7 +136,7 @@ impl Machine for SystemMachine {
             Command::Apply { .. }
             | Command::TakeSnapshot { .. }
             | Command::Query
-            | Command::StartLeaderTerm { .. }
+            | Command::StartTerm { .. }
             | Command::UpdateClusterConfig { .. } => {
                 unreachable!();
             }

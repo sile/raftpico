@@ -1,4 +1,4 @@
-mod command;
+pub mod command;
 mod machine;
 pub mod machines;
 pub mod rpc;

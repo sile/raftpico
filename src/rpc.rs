@@ -1,11 +1,12 @@
 use std::{net::SocketAddr, time::Duration};
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
+use jsonlrpc_mio::ClientId;
 use raftbare::{ClusterConfig, LogEntries, MessageHeader, MessageSeqNo};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    command::{Caller, Command},
+    command::Command,
     server::{Commands, ServerInstanceId},
     types::{LogIndex, LogPosition, NodeId, Term},
     ApplyKind,
@@ -259,7 +260,7 @@ impl AppendEntriesParams {
             .map(|i| LogIndex::from(prev_index + i))
             .zip(self.entries)
             .map(|(i, x)| match x {
-                Command::StartLeaderTerm { term: v } => raftbare::LogEntry::Term(v.into()),
+                Command::StartTerm { term: v } => raftbare::LogEntry::Term(v.into()),
                 Command::UpdateClusterConfig { voters, new_voters } => {
                     raftbare::LogEntry::ClusterConfig(ClusterConfig {
                         voters: voters.into_iter().map(From::from).collect(),
@@ -338,7 +339,19 @@ pub struct InitNodeParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Proposer {
     pub server: ServerInstanceId,
-    pub client: Caller, // TODO: rename
+    pub(crate) client: Caller, // TODO: rename
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Caller {
+    pub from: ClientId,
+    pub request_id: RequestId,
+}
+
+impl Caller {
+    pub fn new(from: ClientId, request_id: RequestId) -> Self {
+        Self { from, request_id }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
