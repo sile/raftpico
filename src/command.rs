@@ -11,10 +11,9 @@ use crate::{
     types::{NodeId, Term},
 };
 
-// TODO: Remove default type value
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum Command<INPUT = serde_json::Value> {
+pub enum Command {
     CreateCluster {
         seed_server_addr: SocketAddr,
         settings: ClusterSettings,
@@ -32,7 +31,7 @@ pub enum Command<INPUT = serde_json::Value> {
         proposer: Proposer,
     },
     Apply {
-        input: INPUT,
+        input: serde_json::Value,
         proposer: Proposer,
     },
     Query,
