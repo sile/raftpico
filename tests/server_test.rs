@@ -6,8 +6,8 @@ use std::{
 use jsonlrpc::{ErrorCode, RequestId, ResponseObject, RpcClient};
 use raftpico::{
     rpc::{
-        AddServerOutput, AddServerParams, ApplyParams, CreateClusterOutput, CreateClusterParams,
-        ErrorKind, RemoveServerOutput, RemoveServerParams, Request, TakeSnapshotOutput,
+        AddServerParams, AddServerResult, ApplyParams, CreateClusterParams, CreateClusterResult,
+        ErrorKind, RemoveServerParams, RemoveServerResult, Request, TakeSnapshotOutput,
     },
     ApplyContext, ApplyKind, Machine, Server,
 };
@@ -38,7 +38,7 @@ fn create_cluster() {
     let addr = server.addr();
     let handle = std::thread::spawn(move || {
         // First call: OK
-        let output: CreateClusterOutput = rpc(addr, create_cluster_req());
+        let output: CreateClusterResult = rpc(addr, create_cluster_req());
         assert_eq!(output.members.len(), 1);
 
         // Second call: NG
@@ -61,7 +61,7 @@ fn add_and_remove_server() {
     // Create a cluster.
     let addr0 = server0.addr();
     let handle =
-        std::thread::spawn(move || rpc::<CreateClusterOutput>(addr0, create_cluster_req()));
+        std::thread::spawn(move || rpc::<CreateClusterResult>(addr0, create_cluster_req()));
     while !handle.is_finished() {
         server0.poll(POLL_TIMEOUT).expect("poll() failed");
     }
@@ -71,7 +71,7 @@ fn add_and_remove_server() {
     let mut server1 = Server::<Counter>::start(auto_addr(), None).expect("start() failed");
     let addr1 = server1.addr();
     let handle = std::thread::spawn(move || {
-        let output: AddServerOutput = rpc(addr0, add_server_req(addr1));
+        let output: AddServerResult = rpc(addr0, add_server_req(addr1));
         assert_eq!(output.members.len(), 2);
         std::thread::sleep(Duration::from_millis(100));
     });
@@ -83,7 +83,7 @@ fn add_and_remove_server() {
 
     // Remove server0 from the cluster.
     let handle = std::thread::spawn(move || {
-        let output: RemoveServerOutput = rpc(addr0, remove_server_req(addr0));
+        let output: RemoveServerResult = rpc(addr0, remove_server_req(addr0));
         assert_eq!(output.members.len(), 1);
         std::thread::sleep(Duration::from_millis(100));
     });
@@ -103,7 +103,7 @@ fn re_election() {
     // Create a cluster.
     let addr0 = server0.addr();
     let handle =
-        std::thread::spawn(move || rpc::<CreateClusterOutput>(addr0, create_cluster_req()));
+        std::thread::spawn(move || rpc::<CreateClusterResult>(addr0, create_cluster_req()));
     while !handle.is_finished() {
         server0.poll(POLL_TIMEOUT).expect("poll() failed");
     }
@@ -117,7 +117,7 @@ fn re_election() {
     let handle = std::thread::spawn(move || {
         let mut contact_addr = addr0;
         for addr in [addr1, addr2] {
-            let _: AddServerOutput = rpc(contact_addr, add_server_req(addr));
+            let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
             std::thread::sleep(Duration::from_millis(200));
         }
@@ -166,7 +166,7 @@ fn command() {
     // Create a cluster.
     let addr0 = server0.addr();
     let handle =
-        std::thread::spawn(move || rpc::<CreateClusterOutput>(addr0, create_cluster_req()));
+        std::thread::spawn(move || rpc::<CreateClusterResult>(addr0, create_cluster_req()));
     while !handle.is_finished() {
         server0.poll(POLL_TIMEOUT).expect("poll() failed");
     }
@@ -180,7 +180,7 @@ fn command() {
     let handle = std::thread::spawn(move || {
         let mut contact_addr = addr0;
         for addr in [addr1, addr2] {
-            let _: AddServerOutput = rpc(contact_addr, add_server_req(addr));
+            let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
             std::thread::sleep(Duration::from_millis(200));
         }
@@ -224,7 +224,7 @@ fn query() {
     // Create a cluster.
     let addr0 = server0.addr();
     let handle =
-        std::thread::spawn(move || rpc::<CreateClusterOutput>(addr0, create_cluster_req()));
+        std::thread::spawn(move || rpc::<CreateClusterResult>(addr0, create_cluster_req()));
     while !handle.is_finished() {
         server0.poll(POLL_TIMEOUT).expect("poll() failed");
     }
@@ -238,7 +238,7 @@ fn query() {
     let handle = std::thread::spawn(move || {
         let mut contact_addr = addr0;
         for addr in [addr1, addr2] {
-            let _: AddServerOutput = rpc(contact_addr, add_server_req(addr));
+            let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -283,7 +283,7 @@ fn local_query() {
     // Create a cluster.
     let addr0 = server0.addr();
     let handle =
-        std::thread::spawn(move || rpc::<CreateClusterOutput>(addr0, create_cluster_req()));
+        std::thread::spawn(move || rpc::<CreateClusterResult>(addr0, create_cluster_req()));
     while !handle.is_finished() {
         server0.poll(POLL_TIMEOUT).expect("poll() failed");
     }
@@ -297,7 +297,7 @@ fn local_query() {
     let handle = std::thread::spawn(move || {
         let mut contact_addr = addr0;
         for addr in [addr1, addr2] {
-            let _: AddServerOutput = rpc(contact_addr, add_server_req(addr));
+            let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -343,7 +343,7 @@ fn snapshot() {
     // Create a cluster with a small max log size.
     let addr0 = server0.addr();
     let handle =
-        std::thread::spawn(move || rpc::<CreateClusterOutput>(addr0, create_cluster_req()));
+        std::thread::spawn(move || rpc::<CreateClusterResult>(addr0, create_cluster_req()));
     while !handle.is_finished() {
         server0.poll(POLL_TIMEOUT).expect("poll() failed");
     }
@@ -380,7 +380,7 @@ fn snapshot() {
     let handle = std::thread::spawn(move || {
         let mut contact_addr = addr0;
         for addr in [addr1, addr2] {
-            let _: AddServerOutput = rpc(contact_addr, add_server_req(addr));
+            let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
             std::thread::sleep(Duration::from_millis(100));
         }

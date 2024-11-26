@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::Command,
-    rpc::{AddServerOutput, CreateClusterOutput, ErrorKind, RemoveServerOutput},
+    rpc::{AddServerResult, CreateClusterResult, ErrorKind, RemoveServerResult},
     types::{NodeId, Token},
     ApplyContext, Machine,
 };
@@ -80,7 +80,7 @@ impl SystemMachine {
                 token: self.next_token.next_client_token(),
             },
         );
-        ctx.output(&CreateClusterOutput {
+        ctx.output(&CreateClusterResult {
             members: self.members.values().map(|m| m.addr).collect(),
         });
     }
@@ -94,7 +94,7 @@ impl SystemMachine {
         let node_id = NodeId::from(u64::from(ctx.commit_index));
         let token = self.next_token.next_client_token();
         self.members.insert(node_id, Member { addr, token });
-        ctx.output(&AddServerOutput {
+        ctx.output(&AddServerResult {
             members: self.members.values().map(|m| m.addr).collect(),
         });
     }
@@ -106,7 +106,7 @@ impl SystemMachine {
         };
 
         self.members.remove(&node_id);
-        ctx.output(&RemoveServerOutput {
+        ctx.output(&RemoveServerResult {
             members: self.members.values().map(|m| m.addr).collect(),
         });
 

@@ -296,15 +296,63 @@ impl AppendEntriesParams {
     }
 }
 
+/// Parameters of [`Request::CreateCluster`].
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateClusterParams {
+    /// Minimum value for the Raft election timeout (default: `100` milliseconds).
+    ///
+    /// See also: [`raftbare::Action::SetElectionTimeout`]
+    pub min_election_timeout_ms: u32,
+
+    /// Maximum value for the Raft election timeout (default: `1000` milliseconds).
+    ///
+    /// See also: [`raftbare::Action::SetElectionTimeout`]
+    pub max_election_timeout_ms: u32,
+}
+
+impl Default for CreateClusterParams {
+    fn default() -> Self {
+        Self {
+            min_election_timeout_ms: 100,
+            max_election_timeout_ms: 1000,
+        }
+    }
+}
+
+/// Successful result of [`Request::CreateCluster`].
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateClusterResult {
+    /// Latest cluster members.
+    pub members: Vec<SocketAddr>,
+}
+
+/// Parameters of [`Request::AddServer`].
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AddServerParams {
+    /// Address of the server to be added.
     pub addr: SocketAddr,
 }
 
+/// Successful result of [`Request::AddServer`].
 #[derive(Debug, Serialize, Deserialize)]
-// TODO: #[serde(rename_all = "camelCase")]
+pub struct AddServerResult {
+    /// Latest cluster members.
+    pub members: Vec<SocketAddr>,
+}
+
+/// Parameters of [`Request::RemoveServer`].
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RemoveServerParams {
+    /// Address of the server to be removed.
     pub addr: SocketAddr,
+}
+
+/// Successful result of [`Request::RemoveServer`].
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RemoveServerResult {
+    /// Latest cluster members.
+    pub members: Vec<SocketAddr>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -363,21 +411,6 @@ impl Caller {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CreateClusterOutput {
-    pub members: Vec<SocketAddr>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AddServerOutput {
-    pub members: Vec<SocketAddr>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RemoveServerOutput {
-    pub members: Vec<SocketAddr>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct TakeSnapshotOutput {
     pub snapshot_index: u64,
 }
@@ -391,30 +424,6 @@ pub struct SnapshotParams<M = serde_json::Value> {
 
     // TODO: doc
     pub machine: M,
-}
-
-/// Parameters of [`Request::CreateCluster`].
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateClusterParams {
-    /// Minimum value for the Raft election timeout (default: `100` milliseconds).
-    ///
-    /// See also: [`raftbare::Action::SetElectionTimeout`]
-    pub min_election_timeout_ms: u32,
-
-    /// Maximum value for the Raft election timeout (default: `1000` milliseconds).
-    ///
-    /// See also: [`raftbare::Action::SetElectionTimeout`]
-    pub max_election_timeout_ms: u32,
-}
-
-impl Default for CreateClusterParams {
-    fn default() -> Self {
-        Self {
-            min_election_timeout_ms: 100,
-            max_election_timeout_ms: 1000,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
