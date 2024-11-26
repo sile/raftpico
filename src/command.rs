@@ -1,5 +1,5 @@
 //! Raft command.
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use raftbare::LogIndex;
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(doc)]
 use crate::rpc::Request;
 use crate::{
-    rpc::{CreateClusterParams, Proposer},
+    rpc::Proposer,
     server::Commands,
     types::{NodeId, Term},
 };
@@ -20,7 +20,8 @@ pub enum Command {
     /// A command proposed via [`Request::CreateCluster`] API.
     CreateCluster {
         seed_addr: SocketAddr,
-        settings: CreateClusterParams,
+        min_election_timeout: Duration,
+        max_election_timeout: Duration,
         proposer: Proposer,
     },
 

@@ -955,7 +955,7 @@ impl<M: Machine> Server<M> {
     fn handle_create_cluster_request(
         &mut self,
         caller: Caller,
-        settings: CreateClusterParams,
+        params: CreateClusterParams,
     ) -> std::io::Result<()> {
         if self.is_initialized() {
             self.reply_error(caller, ErrorKind::ClusterAlreadyCreated.object())?;
@@ -971,7 +971,8 @@ impl<M: Machine> Server<M> {
 
         let command = Command::CreateCluster {
             seed_addr: self.addr(),
-            settings,
+            min_election_timeout: Duration::from_millis(params.min_election_timeout_ms as u64),
+            max_election_timeout: Duration::from_millis(params.max_election_timeout_ms as u64),
             proposer: Proposer {
                 server: self.instance_id,
                 client: caller,

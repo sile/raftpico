@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::Command,
-    rpc::{
-        AddServerOutput, CreateClusterOutput, CreateClusterParams, ErrorKind, RemoveServerOutput,
-    },
+    rpc::{AddServerOutput, CreateClusterOutput, ErrorKind, RemoveServerOutput},
     types::{NodeId, Token},
     ApplyContext, Machine,
 };
@@ -70,10 +68,11 @@ impl SystemMachine {
         &mut self,
         ctx: &mut ApplyContext,
         seed_addr: SocketAddr,
-        params: &CreateClusterParams,
+        min_election_timeout: Duration,
+        max_election_timeout: Duration,
     ) {
-        self.min_election_timeout = Duration::from_millis(params.min_election_timeout_ms as u64);
-        self.max_election_timeout = Duration::from_millis(params.max_election_timeout_ms as u64);
+        self.min_election_timeout = min_election_timeout;
+        self.max_election_timeout = max_election_timeout;
         self.members.insert(
             NodeId::SEED,
             Member {
@@ -122,9 +121,15 @@ impl Machine for SystemMachine {
         match input {
             Command::CreateCluster {
                 seed_addr,
-                settings,
+                min_election_timeout,
+                max_election_timeout,
                 ..
-            } => self.apply_create_cluster_command(ctx, *seed_addr, settings),
+            } => self.apply_create_cluster_command(
+                ctx,
+                *seed_addr,
+                *min_election_timeout,
+                *max_election_timeout,
+            ),
             Command::AddServer { addr, .. } => self.apply_add_server_command(ctx, *addr),
             Command::RemoveServer { addr, .. } => self.apply_remove_server_command(ctx, *addr),
             Command::Apply { .. }

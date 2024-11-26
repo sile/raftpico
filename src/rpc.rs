@@ -25,25 +25,31 @@ pub enum Request {
         #[serde(default)]
         params: CreateClusterParams,
     },
+
+    /// **\[EXTERNAL (API)\]** Add a server to a cluster.
     AddServer {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         params: AddServerParams,
     },
+
+    /// **\[EXTERNAL (API)\]** Remove a server from a cluster.
     RemoveServer {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         params: RemoveServerParams,
-    },
-    TakeSnapshot {
-        jsonrpc: JsonRpcVersion,
-        id: RequestId,
     },
     Apply {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         params: ApplyParams,
     },
+    TakeSnapshot {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+    },
+    // TODO: GetServerState
+
     // Internal APIs
     Propose {
         // TODO: ProposeCommand (?)
@@ -291,7 +297,6 @@ impl AppendEntriesParams {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-// TODO: #[serde(rename_all = "camelCase")]
 pub struct AddServerParams {
     pub addr: SocketAddr,
 }
@@ -389,7 +394,7 @@ pub struct SnapshotParams<M = serde_json::Value> {
 }
 
 /// Parameters of [`Request::CreateCluster`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateClusterParams {
     /// Minimum value for the Raft election timeout (default: `100` milliseconds).
