@@ -6,7 +6,7 @@ use std::{
 use jsonlrpc::{ErrorCode, RequestId, ResponseObject, RpcClient};
 use raftpico::{
     rpc::{
-        AddServerOutput, AddServerParams, ApplyParams, ClusterSettings, CreateClusterOutput,
+        AddServerOutput, AddServerParams, ApplyParams, CreateClusterOutput, CreateClusterParams,
         ErrorKind, RemoveServerOutput, RemoveServerParams, Request, TakeSnapshotOutput,
     },
     ApplyContext, ApplyKind, Machine, Server,
@@ -446,9 +446,9 @@ fn req<T: Serialize>(method: &str, params: T) -> serde_json::Value {
 fn create_cluster_req() -> serde_json::Value {
     req(
         "CreateCluster",
-        ClusterSettings {
-            min_election_timeout: Duration::from_millis(50),
-            max_election_timeout: Duration::from_millis(200),
+        CreateClusterParams {
+            min_election_timeout_ms: 50,
+            max_election_timeout_ms: 200,
         },
     )
 }

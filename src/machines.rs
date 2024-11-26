@@ -1,11 +1,13 @@
 //! Predefined replicated state machines.
-use std::{collections::BTreeMap, net::SocketAddr};
+use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
     command::Command,
-    rpc::{AddServerOutput, ClusterSettings, CreateClusterOutput, ErrorKind, RemoveServerOutput},
+    rpc::{
+        AddServerOutput, CreateClusterOutput, CreateClusterParams, ErrorKind, RemoveServerOutput,
+    },
     types::{NodeId, Token},
     ApplyContext, Machine,
 };
@@ -55,21 +57,12 @@ pub(crate) struct Member {
 }
 
 /// Replicated state machine responsible for handling system commands.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SystemMachine {
-    pub(crate) settings: ClusterSettings,
+    pub(crate) min_election_timeout: Duration,
+    pub(crate) max_election_timeout: Duration,
     pub(crate) members: BTreeMap<NodeId, Member>,
     next_token: Token,
-}
-
-impl Default for SystemMachine {
-    fn default() -> Self {
-        Self {
-            settings: ClusterSettings::default(),
-            members: BTreeMap::new(),
-            next_token: Token::CLIENT_MIN,
-        }
-    }
 }
 
 impl SystemMachine {
@@ -77,9 +70,10 @@ impl SystemMachine {
         &mut self,
         ctx: &mut ApplyContext,
         seed_addr: SocketAddr,
-        settings: &ClusterSettings,
+        params: &CreateClusterParams,
     ) {
-        self.settings = settings.clone();
+        self.min_election_timeout = Duration::from_millis(params.min_election_timeout_ms as u64);
+        self.max_election_timeout = Duration::from_millis(params.max_election_timeout_ms as u64);
         self.members.insert(
             NodeId::SEED,
             Member {

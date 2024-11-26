@@ -1,4 +1,5 @@
-use std::{net::SocketAddr, time::Duration};
+//! RPC messages.
+use std::net::SocketAddr;
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
 use jsonlrpc_mio::ClientId;
@@ -12,15 +13,17 @@ use crate::{
     ApplyKind,
 };
 
+/// RPC request.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "method")]
+#[allow(missing_docs)]
 pub enum Request {
-    // External APIs
+    /// **\[EXTERNAL (API)\]** Create a cluster.
     CreateCluster {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         #[serde(default)]
-        params: ClusterSettings,
+        params: CreateClusterParams,
     },
     AddServer {
         jsonrpc: JsonRpcVersion,
@@ -317,7 +320,7 @@ pub struct ProposeParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeQueryParams {
-    pub origin_node_id: NodeId,
+    pub origin: NodeId,
     pub input: serde_json::Value, // TODO: remove
     pub caller: Caller,
 }
@@ -385,52 +388,27 @@ pub struct SnapshotParams<M = serde_json::Value> {
     pub machine: M,
 }
 
-// TODO: move or remove?
+/// Parameters of [`Request::CreateCluster`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(into = "serde_json::Value", try_from = "serde_json::Value")]
-pub struct ClusterSettings {
-    pub min_election_timeout: Duration,
-    pub max_election_timeout: Duration,
+#[serde(rename_all = "camelCase")]
+pub struct CreateClusterParams {
+    /// Minimum value for the Raft election timeout (default: `100` milliseconds).
+    ///
+    /// See also: [`raftbare::Action::SetElectionTimeout`]
+    pub min_election_timeout_ms: u32,
+
+    /// Maximum value for the Raft election timeout (default: `1000` milliseconds).
+    ///
+    /// See also: [`raftbare::Action::SetElectionTimeout`]
+    pub max_election_timeout_ms: u32,
 }
 
-impl Default for ClusterSettings {
+impl Default for CreateClusterParams {
     fn default() -> Self {
         Self {
-            min_election_timeout: Duration::from_millis(100),
-            max_election_timeout: Duration::from_millis(1000),
+            min_election_timeout_ms: 100,
+            max_election_timeout_ms: 1000,
         }
-    }
-}
-
-impl From<ClusterSettings> for serde_json::Value {
-    fn from(value: ClusterSettings) -> Self {
-        serde_json::json!({
-            "minElectionTimeoutMs": value.min_election_timeout.as_millis() as usize,
-            "maxElectionTimeoutMs": value.max_election_timeout.as_millis() as usize,
-        })
-    }
-}
-
-impl TryFrom<serde_json::Value> for ClusterSettings {
-    type Error = String;
-
-    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Object {
-            min_election_timeout_ms: usize,
-            max_election_timeout_ms: usize,
-        }
-
-        let object: Object = serde_json::from_value(value).map_err(|e| e.to_string())?;
-        if object.min_election_timeout_ms >= object.max_election_timeout_ms {
-            return Err("Empty election timeout range".to_owned());
-        }
-
-        Ok(Self {
-            min_election_timeout: Duration::from_millis(object.min_election_timeout_ms as u64),
-            max_election_timeout: Duration::from_millis(object.max_election_timeout_ms as u64),
-        })
     }
 }
 

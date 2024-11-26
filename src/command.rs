@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(doc)]
 use crate::rpc::Request;
 use crate::{
-    rpc::{ClusterSettings, Proposer},
+    rpc::{CreateClusterParams, Proposer},
     server::Commands,
     types::{NodeId, Term},
 };
@@ -17,19 +17,10 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub enum Command {
-    /// A command proposed via [`Request::Apply`] API.
-    Apply {
-        input: serde_json::Value,
-        proposer: Proposer,
-    },
-
-    /// A command proposed via [`Request::Apply`] API.
-    Query,
-
     /// A command proposed via [`Request::CreateCluster`] API.
     CreateCluster {
         seed_addr: SocketAddr,
-        settings: ClusterSettings,
+        settings: CreateClusterParams,
         proposer: Proposer,
     },
 
@@ -47,6 +38,15 @@ pub enum Command {
 
     /// A command proposed via [`Request::TakeSnapshot`] API.
     TakeSnapshot { proposer: Proposer },
+
+    /// A command proposed via [`Request::Apply`] API.
+    Apply {
+        input: serde_json::Value,
+        proposer: Proposer,
+    },
+
+    /// A command proposed via [`Request::Apply`] API.
+    Query,
 
     /// A command proposed by `raftbare` (see: [`raftbare::LogEntry::Term`])
     StartTerm { term: Term },

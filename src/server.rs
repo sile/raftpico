@@ -18,7 +18,7 @@ use crate::{
     machines::Machines,
     rpc::{
         AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams, Caller,
-        ClusterSettings, ErrorKind, InitNodeParams, NotifyQueryPromiseParams, ProposeParams,
+        CreateClusterParams, ErrorKind, InitNodeParams, NotifyQueryPromiseParams, ProposeParams,
         ProposeQueryParams, Proposer, RemoveServerParams, Request, RequestVoteParams,
         RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,
     },
@@ -530,9 +530,8 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_set_election_timeout_action(&mut self) {
-        // TODO: self.stats.election_timeout_set_count += 1;
-        let min = self.machines.system.settings.min_election_timeout;
-        let max = self.machines.system.settings.max_election_timeout;
+        let min = self.machines.system.min_election_timeout;
+        let max = self.machines.system.max_election_timeout.max(min);
         let timeout = match self.node.role() {
             Role::Follower => max,
             Role::Candidate => rand::thread_rng().gen_range(min..=max),
@@ -742,7 +741,7 @@ impl<M: Machine> Server<M> {
 
         let position = self.propose_command_leader(Command::Query);
         self.send_to(
-            params.origin_node_id,
+            params.origin,
             &Request::NotifyQueryPromise {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
                 params: NotifyQueryPromiseParams {
@@ -880,7 +879,7 @@ impl<M: Machine> Server<M> {
         let request = Request::ProposeQuery {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             params: ProposeQueryParams {
-                origin_node_id: self.node.id().into(),
+                origin: self.node.id().into(),
                 input,
                 caller,
             },
@@ -956,7 +955,7 @@ impl<M: Machine> Server<M> {
     fn handle_create_cluster_request(
         &mut self,
         caller: Caller,
-        settings: ClusterSettings,
+        settings: CreateClusterParams,
     ) -> std::io::Result<()> {
         if self.is_initialized() {
             self.reply_error(caller, ErrorKind::ClusterAlreadyCreated.object())?;

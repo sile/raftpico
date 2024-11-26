@@ -61,6 +61,12 @@ impl Token {
     }
 }
 
+impl Default for Token {
+    fn default() -> Self {
+        Self::CLIENT_MIN
+    }
+}
+
 impl From<usize> for Token {
     fn from(value: usize) -> Self {
         Self(mio::Token(value))
