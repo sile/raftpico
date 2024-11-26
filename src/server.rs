@@ -17,10 +17,10 @@ use crate::{
     machine::{ApplyContext, Machine},
     machines::Machines,
     rpc::{
-        AddServerParams, AppendEntriesParams, AppendEntriesResultParams, ApplyParams, Caller,
+        AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
         CreateClusterParams, ErrorKind, InitNodeParams, NotifyQueryPromiseParams, ProposeParams,
-        ProposeQueryParams, Proposer, RemoveServerParams, Request, RequestVoteParams,
-        RequestVoteResultParams, SnapshotParams, TakeSnapshotOutput,
+        ProposeQueryParams, Proposer, RemoveServerParams, Request, RequestVoteCallParams,
+        RequestVoteReplyParams, SnapshotParams, TakeSnapshotOutput,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, Token},
@@ -564,16 +564,16 @@ impl<M: Machine> Server<M> {
             }
             Request::Snapshot { params, .. } => self.handle_snapshot_request(params),
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
-            Request::AppendEntries { id, params, .. } => {
+            Request::AppendEntriesCall { id, params, .. } => {
                 self.handle_append_entries_request(Caller::new(from, id), params)
             }
-            Request::AppendEntriesResult { id, params, .. } => {
+            Request::AppendEntriesReply { id, params, .. } => {
                 self.handle_append_entries_result_request(Caller::new(from, id), params)
             }
-            Request::RequestVote { id, params, .. } => {
+            Request::RequestVoteCall { id, params, .. } => {
                 self.handle_request_vote_request(Caller::new(from, id), params)
             }
-            Request::RequestVoteResult { id, params, .. } => {
+            Request::RequestVoteReply { id, params, .. } => {
                 self.handle_request_vote_result_request(Caller::new(from, id), params)
             }
         }
@@ -672,7 +672,7 @@ impl<M: Machine> Server<M> {
     fn handle_append_entries_result_request(
         &mut self,
         caller: Caller,
-        params: AppendEntriesResultParams,
+        params: AppendEntriesReplyParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
             // TODO: stats
@@ -687,7 +687,7 @@ impl<M: Machine> Server<M> {
     fn handle_request_vote_request(
         &mut self,
         caller: Caller,
-        params: RequestVoteParams,
+        params: RequestVoteCallParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
             // TODO: stats
@@ -702,7 +702,7 @@ impl<M: Machine> Server<M> {
     fn handle_request_vote_result_request(
         &mut self,
         caller: Caller,
-        params: RequestVoteResultParams,
+        params: RequestVoteReplyParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
             // TODO: stats
@@ -783,7 +783,7 @@ impl<M: Machine> Server<M> {
     fn handle_append_entries_request(
         &mut self,
         caller: Caller,
-        params: AppendEntriesParams,
+        params: AppendEntriesCallParams,
     ) -> std::io::Result<()> {
         if self.node().is_none() {
             self.reply_error(

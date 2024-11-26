@@ -13,12 +13,12 @@ use crate::{
     ApplyKind,
 };
 
-/// RPC request.
+/// JSON-RPC request message.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "method")]
 #[allow(missing_docs)]
 pub enum Request {
-    /// **\[EXTERNAL (API)\]** Create a cluster.
+    /// **\[API\]** Create a cluster.
     CreateCluster {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
@@ -26,24 +26,28 @@ pub enum Request {
         params: CreateClusterParams,
     },
 
-    /// **\[EXTERNAL (API)\]** Add a server to a cluster.
+    /// **\[API\]** Add a server to a cluster.
     AddServer {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         params: AddServerParams,
     },
 
-    /// **\[EXTERNAL (API)\]** Remove a server from a cluster.
+    /// **\[API\]** Remove a server from a cluster.
     RemoveServer {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         params: RemoveServerParams,
     },
+
+    /// **\[API\]** Call [`Machine::apply()`][crate::Machine::apply()].
     Apply {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
         params: ApplyParams,
     },
+
+    /// **\[API\]** Take a snapshot and remove old log entries preceding the snapshot.
     TakeSnapshot {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
@@ -72,26 +76,33 @@ pub enum Request {
         jsonrpc: JsonRpcVersion,
         params: SnapshotParams,
     },
-    // Raft messages
-    AppendEntries {
+
+    /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::AppendEntriesCall`].
+    AppendEntriesCall {
         jsonrpc: JsonRpcVersion,
         id: RequestId, // TODO: remove
-        params: AppendEntriesParams,
+        params: AppendEntriesCallParams,
     },
-    AppendEntriesResult {
+
+    /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::AppendEntriesReply`].
+    AppendEntriesReply {
         jsonrpc: JsonRpcVersion,
         id: RequestId, // TODO: remove
-        params: AppendEntriesResultParams,
+        params: AppendEntriesReplyParams,
     },
-    RequestVote {
+
+    /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::RequestVoteCall`].
+    RequestVoteCall {
         jsonrpc: JsonRpcVersion,
         id: RequestId, // TODO: remove
-        params: RequestVoteParams,
+        params: RequestVoteCallParams,
     },
-    RequestVoteResult {
+
+    /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::RequestVoteReply`].
+    RequestVoteReply {
         jsonrpc: JsonRpcVersion,
         id: RequestId, // TODO: remove
-        params: RequestVoteResultParams,
+        params: RequestVoteReplyParams,
     },
 }
 
@@ -104,10 +115,10 @@ impl Request {
             raftbare::Message::RequestVoteCall {
                 header,
                 last_position,
-            } => Self::RequestVote {
+            } => Self::RequestVoteCall {
                 jsonrpc: JsonRpcVersion::V2,
                 id: RequestId::Number(header.seqno.get() as i64),
-                params: RequestVoteParams {
+                params: RequestVoteCallParams {
                     from: header.from.into(),
                     term: header.term.into(),
                     last_log_position: last_position.into(),
@@ -119,8 +130,8 @@ impl Request {
                 entries,
             } => {
                 let params =
-                    AppendEntriesParams::new(header, commit_index.into(), entries, commands)?;
-                Self::AppendEntries {
+                    AppendEntriesCallParams::new(header, commit_index.into(), entries, commands)?;
+                Self::AppendEntriesCall {
                     jsonrpc: JsonRpcVersion::V2,
                     id: RequestId::Number(header.seqno.get() as i64),
                     params,
@@ -129,10 +140,10 @@ impl Request {
             raftbare::Message::RequestVoteReply {
                 header,
                 vote_granted,
-            } => Self::RequestVoteResult {
+            } => Self::RequestVoteReply {
                 jsonrpc: JsonRpcVersion::V2,
                 id: RequestId::Number(header.seqno.get() as i64),
-                params: RequestVoteResultParams {
+                params: RequestVoteReplyParams {
                     from: header.from.into(),
                     term: header.term.into(),
                     vote_granted,
@@ -141,10 +152,10 @@ impl Request {
             raftbare::Message::AppendEntriesReply {
                 header,
                 last_position,
-            } => Self::AppendEntriesResult {
+            } => Self::AppendEntriesReply {
                 jsonrpc: JsonRpcVersion::V2,
                 id: RequestId::Number(header.seqno.get() as i64),
-                params: AppendEntriesResultParams {
+                params: AppendEntriesReplyParams {
                     from: header.from.into(),
                     term: header.term.into(),
                     last_log_position: last_position.into(),
@@ -155,13 +166,13 @@ impl Request {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AppendEntriesResultParams {
+pub struct AppendEntriesReplyParams {
     pub from: NodeId,
     pub term: Term,
     pub last_log_position: LogPosition,
 }
 
-impl AppendEntriesResultParams {
+impl AppendEntriesReplyParams {
     pub fn into_raft_message(self, caller: &Caller) -> raftbare::Message {
         let RequestId::Number(request_id) = caller.request_id else {
             todo!("make this branch unreachable");
@@ -179,13 +190,13 @@ impl AppendEntriesResultParams {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct RequestVoteParams {
+pub struct RequestVoteCallParams {
     pub from: NodeId,
     pub term: Term,
     pub last_log_position: LogPosition,
 }
 
-impl RequestVoteParams {
+impl RequestVoteCallParams {
     pub fn into_raft_message(self, caller: &Caller) -> raftbare::Message {
         let RequestId::Number(request_id) = caller.request_id else {
             todo!("make this branch unreachable");
@@ -203,13 +214,13 @@ impl RequestVoteParams {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct RequestVoteResultParams {
+pub struct RequestVoteReplyParams {
     pub from: NodeId,
     pub term: Term,
     pub vote_granted: bool,
 }
 
-impl RequestVoteResultParams {
+impl RequestVoteReplyParams {
     pub fn into_raft_message(self, caller: &Caller) -> raftbare::Message {
         let RequestId::Number(request_id) = caller.request_id else {
             todo!("make this branch unreachable");
@@ -227,7 +238,7 @@ impl RequestVoteResultParams {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AppendEntriesParams {
+pub struct AppendEntriesCallParams {
     pub from: NodeId,
     pub term: Term,
     pub commit_index: LogIndex,
@@ -235,7 +246,7 @@ pub struct AppendEntriesParams {
     pub entries: Vec<Command>,
 }
 
-impl AppendEntriesParams {
+impl AppendEntriesCallParams {
     fn new(
         header: MessageHeader,
         commit_index: LogIndex,
@@ -355,15 +366,17 @@ pub struct RemoveServerResult {
     pub members: Vec<SocketAddr>,
 }
 
+/// Parameters of [`Request::Apply`].
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApplyParams {
+    /// The value of [ApplyContext::kind()][crate::ApplyContext::kind()].
     pub kind: ApplyKind,
+
+    // [Note]
+    // Considered using `serde_json::value::RawValue` here
+    // but were unable to do so due to issue https://github.com/serde-rs/json/issues/545.
+    /// The value of the `input` parameter in [Machine::apply()][crate::Machine::apply()].
     pub input: serde_json::Value,
-    // [NOTE] Cannot use RawValue here: https://github.com/serde-rs/json/issues/545
-    //
-    // TODO: struct { jsonrpc, method, id, params: RawValue } then serde_json::from_str(RawValue.get())
-    //       (use RawValue in jsonlrpc_mio(?))
-    // pub input: Box<RawValue>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
