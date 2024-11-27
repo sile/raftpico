@@ -18,9 +18,9 @@ use crate::{
     machines::Machines,
     rpc::{
         AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorKind, InitNodeParams, InstallSnapshotParams,
-        NotifyQueryPromiseParams, ProposeParams, ProposeQueryParams, Proposer, RemoveServerParams,
-        Request, RequestVoteCallParams, RequestVoteReplyParams, TakeSnapshotResult,
+        CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyQueryPromiseParams,
+        ProposeParams, ProposeQueryParams, Proposer, RemoveServerParams, Request,
+        RequestVoteCallParams, RequestVoteReplyParams, TakeSnapshotResult,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, Token},
@@ -81,7 +81,6 @@ pub struct Server<M> {
 impl<M: Machine> Server<M> {
     pub fn start(listen_addr: SocketAddr, storage: Option<FileStorage>) -> std::io::Result<Self> {
         // TODO: storage.load
-
         let mut poller = Poll::new()?;
         let events = Events::with_capacity(EVENTS_CAPACITY);
         let rpc_server = RpcServer::start(
@@ -190,12 +189,8 @@ impl<M: Machine> Server<M> {
                     return Ok(());
                 };
 
-                let snapshot = self.snapshot(self.last_applied_index)?;
-                let request = Request::InitNode {
-                    jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                    params: InitNodeParams { node_id, snapshot },
-                };
-                self.send_to(node_id, &request)?;
+                // TODO: note doc
+                self.handle_install_snapshot_action(node_id)?;
             }
             ResponseObject::Err { error, .. } if error.code == ErrorKind::UnknownServer.code() => {
                 let data = error.data.ok_or(std::io::ErrorKind::Other)?;
@@ -466,7 +461,8 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_install_snapshot_action(&mut self, dst: NodeId) -> std::io::Result<()> {
-        let snapshot = self.snapshot(self.node.commit_index().into())?;
+        let mut snapshot = self.snapshot(self.node.commit_index().into())?;
+        snapshot.node_id = dst;
         let request = Request::InstallSnapshot {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             params: snapshot,
@@ -562,8 +558,7 @@ impl<M: Machine> Server<M> {
             Request::NotifyQueryPromise { params, .. } => {
                 self.handle_notify_query_promise_request(params)
             }
-            Request::InstallSnapshot { params, .. } => self.handle_snapshot_request(params),
-            Request::InitNode { params, .. } => self.handle_init_node_request(params),
+            Request::InstallSnapshot { params, .. } => self.handle_install_snapshot_request(params),
             Request::AppendEntriesCall { params, .. } => {
                 let caller = Caller::new(from, jsonlrpc::RequestId::Number(0)); // TODO: remove dummy id
                 self.handle_append_entries_request(caller, params)
@@ -578,7 +573,17 @@ impl<M: Machine> Server<M> {
         }
     }
 
-    fn handle_snapshot_request(&mut self, params: InstallSnapshotParams) -> std::io::Result<()> {
+    fn handle_install_snapshot_request(
+        &mut self,
+        params: InstallSnapshotParams,
+    ) -> std::io::Result<()> {
+        if !self.is_initialized() {
+            self.node = Node::start(params.node_id.into());
+        }
+        if self.node.id() != params.node_id.into() {
+            return Ok(());
+        }
+
         if params.last_included_position.index <= self.node.commit_index().into() {
             // TODO: stats
             return Ok(());
@@ -599,7 +604,7 @@ impl<M: Machine> Server<M> {
 
         if let Some(storage) = &mut self.storage {
             storage.install_snapshot(params)?;
-            storage.save_node_id(self.node.id().into())?;
+            storage.save_node_id(self.node.id().into())?; // TODO: remove
             storage.save_current_term(self.node.current_term().into())?;
             storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
             storage.append_entries(self.node.log().entries(), &self.local_commands)?;
@@ -618,6 +623,7 @@ impl<M: Machine> Server<M> {
             .get_position_and_config(index.into())
             .expect("unreachable");
         let snapshot = InstallSnapshotParams {
+            node_id: self.node.id().into(),
             last_included_position: last_included.into(),
             voters: config.voters.iter().copied().map(|n| n.into()).collect(),
             new_voters: config
@@ -712,17 +718,6 @@ impl<M: Machine> Server<M> {
 
         let message = params.into_raft_message();
         self.node.handle_message(message);
-        Ok(())
-    }
-
-    fn handle_init_node_request(&mut self, params: InitNodeParams) -> std::io::Result<()> {
-        if self.is_initialized() {
-            return Ok(());
-        }
-
-        self.node = Node::start(params.node_id.into());
-        self.handle_snapshot_request(params.snapshot)?;
-
         Ok(())
     }
 
@@ -970,7 +965,8 @@ impl<M: Machine> Server<M> {
 
         self.node = Node::start(NodeId::SEED.into());
         if let Some(storage) = &mut self.storage {
-            storage.save_node_id(self.node.id().into())?;
+            storage.save_node_id(self.node.id().into())?; // TOOD: remove
+                                                          // TODO: take the initial snapshot here
         }
 
         self.node.create_cluster(&[self.node.id()]); // Always succeeds

@@ -68,10 +68,6 @@ pub enum Request {
         jsonrpc: JsonRpcVersion,
         params: NotifyQueryPromiseParams,
     },
-    InitNode {
-        jsonrpc: JsonRpcVersion,
-        params: InitNodeParams,
-    },
 
     /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::AppendEntriesCall`].
     AppendEntriesCall {
@@ -298,6 +294,9 @@ impl RequestVoteReplyParams {
 #[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct InstallSnapshotParams {
+    // [NOTE] Unlike the other fields, this information is specific to a node.
+    pub node_id: NodeId,
+
     pub last_included_position: LogPosition,
     pub voters: Vec<NodeId>,
     pub new_voters: Vec<NodeId>,
