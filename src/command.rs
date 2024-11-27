@@ -1,7 +1,6 @@
 //! Raft command.
 use std::{net::SocketAddr, time::Duration};
 
-use raftbare::LogIndex;
 use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
@@ -9,7 +8,7 @@ use crate::rpc::Request;
 use crate::{
     rpc::Proposer,
     server::Commands,
-    types::{NodeId, Term},
+    types::{LogIndex, NodeId, Term},
 };
 
 /// List of commands that can be proposed to [`Server`][crate::Server].
@@ -73,8 +72,7 @@ impl Command {
         }
     }
 
-    // TODO: rename
-    pub(crate) fn new(
+    pub(crate) fn from_log_entry(
         index: LogIndex,
         entry: &raftbare::LogEntry,
         commands: &Commands,
@@ -98,6 +96,27 @@ impl Command {
                     .collect(),
             }),
             raftbare::LogEntry::Command => commands.get(&index.into()).cloned(),
+        }
+    }
+
+    pub(crate) fn into_log_entry(
+        self,
+        index: LogIndex,
+        commands: &mut Commands,
+    ) -> raftbare::LogEntry {
+        match self {
+            Command::StartTerm { term } => raftbare::LogEntry::Term(term.into()),
+            Command::UpdateClusterConfig { voters, new_voters } => {
+                raftbare::LogEntry::ClusterConfig(raftbare::ClusterConfig {
+                    voters: voters.into_iter().map(From::from).collect(),
+                    new_voters: new_voters.into_iter().map(From::from).collect(),
+                    ..Default::default()
+                })
+            }
+            command => {
+                commands.insert(index, command);
+                raftbare::LogEntry::Command
+            }
         }
     }
 }

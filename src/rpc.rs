@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
 use jsonlrpc_mio::ClientId;
-use raftbare::{ClusterConfig, LogEntries};
+use raftbare::LogEntries;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -124,7 +124,7 @@ impl Request {
                 entries,
             } => Self::AppendEntriesCall {
                 jsonrpc: JsonRpcVersion::V2,
-                params: AppendEntriesCallParams::new(
+                params: AppendEntriesCallParams::from_raft_message(
                     header,
                     commit_index.into(),
                     entries,
@@ -227,7 +227,11 @@ impl MessageHeader {
     }
 }
 
+/// Parameters of [`Request::AppendEntriesCall`].
+///
+/// See also: [`raftbare::Message::AppendEntriesCall`]
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub struct AppendEntriesCallParams {
     pub header: MessageHeader,
     pub commit_index: LogIndex,
@@ -236,7 +240,7 @@ pub struct AppendEntriesCallParams {
 }
 
 impl AppendEntriesCallParams {
-    fn new(
+    fn from_raft_message(
         header: raftbare::MessageHeader,
         commit_index: LogIndex,
         entries: LogEntries,
@@ -248,31 +252,17 @@ impl AppendEntriesCallParams {
             prev_position: entries.prev_position().into(),
             entries: entries
                 .iter_with_positions()
-                .map(|(p, x)| Command::new(p.index, &x, commands))
+                .map(|(p, x)| Command::from_log_entry(p.index.into(), &x, commands))
                 .collect::<Option<Vec<_>>>()?,
         })
     }
 
     pub fn into_raft_message(self, commands: &mut Commands) -> Option<raftbare::Message> {
         let prev_position = raftbare::LogPosition::from(self.prev_position);
-        let prev_index = u64::from(self.prev_position.index);
-        let entries = (1..)
-            .map(|i| LogIndex::from(prev_index + i))
+        let entries = (u64::from(self.prev_position.index) + 1..)
+            .map(|i| LogIndex::from(i))
             .zip(self.entries)
-            .map(|(i, x)| match x {
-                Command::StartTerm { term: v } => raftbare::LogEntry::Term(v.into()),
-                Command::UpdateClusterConfig { voters, new_voters } => {
-                    raftbare::LogEntry::ClusterConfig(ClusterConfig {
-                        voters: voters.into_iter().map(From::from).collect(),
-                        new_voters: new_voters.into_iter().map(From::from).collect(),
-                        ..ClusterConfig::default()
-                    })
-                }
-                command => {
-                    commands.insert(i, command);
-                    raftbare::LogEntry::Command
-                }
-            });
+            .map(|(i, x)| x.into_log_entry(i, commands));
         let entries = LogEntries::from_iter(prev_position, entries);
 
         Some(raftbare::Message::AppendEntriesCall {
