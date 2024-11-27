@@ -72,10 +72,6 @@ pub enum Request {
         jsonrpc: JsonRpcVersion,
         params: InitNodeParams,
     },
-    Snapshot {
-        jsonrpc: JsonRpcVersion,
-        params: SnapshotParams,
-    },
 
     /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::AppendEntriesCall`].
     AppendEntriesCall {
@@ -99,6 +95,12 @@ pub enum Request {
     RequestVoteReply {
         jsonrpc: JsonRpcVersion,
         params: RequestVoteReplyParams,
+    },
+
+    /// **\[INTERNAL:raftbare\]** See: [`raftbare::Action::InstallSnapshot`].
+    InstallSnapshot {
+        jsonrpc: JsonRpcVersion,
+        params: InstallSnapshotParams,
     },
 }
 
@@ -289,6 +291,19 @@ impl RequestVoteReplyParams {
     }
 }
 
+/// Parameters of [`Request::InstallSnapshotParams`].
+///
+/// See also: [`raftbare::Action::InstallSnapshot`]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub struct InstallSnapshotParams {
+    pub last_included_position: LogPosition,
+    pub voters: Vec<NodeId>,
+    pub new_voters: Vec<NodeId>,
+    pub machine: serde_json::Value,
+}
+
 /// Parameters of [`Request::CreateCluster`].
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -361,6 +376,13 @@ pub struct ApplyParams {
     pub input: serde_json::Value,
 }
 
+/// Successful result of [`Request::TakeSnapshot`].
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TakeSnapshotResult {
+    pub snapshot_index: LogIndex,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeParams {
     pub command: Command,
@@ -383,7 +405,7 @@ pub struct NotifyQueryPromiseParams {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InitNodeParams {
     pub node_id: NodeId,
-    pub snapshot: SnapshotParams, // TODO
+    pub snapshot: InstallSnapshotParams, // TODO
 }
 
 // TODO: move
@@ -403,22 +425,6 @@ impl Caller {
     pub fn new(from: ClientId, request_id: RequestId) -> Self {
         Self { from, request_id }
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TakeSnapshotOutput {
-    pub snapshot_index: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotParams<M = serde_json::Value> {
-    // position and config
-    pub last_included_position: LogPosition,
-    pub voters: Vec<u64>,
-    pub new_voters: Vec<u64>,
-
-    // TODO: doc
-    pub machine: M,
 }
 
 /// RPC error kind.

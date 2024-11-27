@@ -18,9 +18,9 @@ use crate::{
     machines::Machines,
     rpc::{
         AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorKind, InitNodeParams, NotifyQueryPromiseParams, ProposeParams,
-        ProposeQueryParams, Proposer, RemoveServerParams, Request, RequestVoteCallParams,
-        RequestVoteReplyParams, SnapshotParams, TakeSnapshotOutput,
+        CreateClusterParams, ErrorKind, InitNodeParams, InstallSnapshotParams,
+        NotifyQueryPromiseParams, ProposeParams, ProposeQueryParams, Proposer, RemoveServerParams,
+        Request, RequestVoteCallParams, RequestVoteReplyParams, TakeSnapshotResult,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, Token},
@@ -308,8 +308,8 @@ impl<M: Machine> Server<M> {
             if let Some(caller) = caller {
                 self.reply_ok(
                     caller,
-                    &TakeSnapshotOutput {
-                        snapshot_index: index.into(),
+                    &TakeSnapshotResult {
+                        snapshot_index: index,
                     },
                 )?;
             }
@@ -467,7 +467,7 @@ impl<M: Machine> Server<M> {
 
     fn handle_install_snapshot_action(&mut self, dst: NodeId) -> std::io::Result<()> {
         let snapshot = self.snapshot(self.node.commit_index().into())?;
-        let request = Request::Snapshot {
+        let request = Request::InstallSnapshot {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             params: snapshot,
         };
@@ -562,7 +562,7 @@ impl<M: Machine> Server<M> {
             Request::NotifyQueryPromise { params, .. } => {
                 self.handle_notify_query_promise_request(params)
             }
-            Request::Snapshot { params, .. } => self.handle_snapshot_request(params),
+            Request::InstallSnapshot { params, .. } => self.handle_snapshot_request(params),
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
             Request::AppendEntriesCall { params, .. } => {
                 let caller = Caller::new(from, jsonlrpc::RequestId::Number(0)); // TODO: remove dummy id
@@ -578,7 +578,7 @@ impl<M: Machine> Server<M> {
         }
     }
 
-    fn handle_snapshot_request(&mut self, params: SnapshotParams) -> std::io::Result<()> {
+    fn handle_snapshot_request(&mut self, params: InstallSnapshotParams) -> std::io::Result<()> {
         if params.last_included_position.index <= self.node.commit_index().into() {
             // TODO: stats
             return Ok(());
@@ -611,16 +611,21 @@ impl<M: Machine> Server<M> {
     }
 
     // TODO
-    fn snapshot(&self, index: LogIndex) -> std::io::Result<SnapshotParams> {
+    fn snapshot(&self, index: LogIndex) -> std::io::Result<InstallSnapshotParams> {
         let (last_included, config) = self
             .node
             .log()
             .get_position_and_config(index.into())
             .expect("unreachable");
-        let snapshot = SnapshotParams {
+        let snapshot = InstallSnapshotParams {
             last_included_position: last_included.into(),
-            voters: config.voters.iter().map(|n| n.get()).collect(),
-            new_voters: config.new_voters.iter().map(|n| n.get()).collect(),
+            voters: config.voters.iter().copied().map(|n| n.into()).collect(),
+            new_voters: config
+                .new_voters
+                .iter()
+                .copied()
+                .map(|n| n.into())
+                .collect(),
 
             // TODO: impl Clone for Machine ?
             machine: serde_json::to_value(&self.machines)?,

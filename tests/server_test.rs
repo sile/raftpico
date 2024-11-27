@@ -7,7 +7,7 @@ use jsonlrpc::{ErrorCode, RequestId, ResponseObject, RpcClient};
 use raftpico::{
     rpc::{
         AddServerParams, AddServerResult, ApplyParams, CreateClusterParams, CreateClusterResult,
-        ErrorKind, RemoveServerParams, RemoveServerResult, Request, TakeSnapshotOutput,
+        ErrorKind, RemoveServerParams, RemoveServerResult, Request, TakeSnapshotResult,
     },
     ApplyContext, ApplyKind, Machine, Server,
 };
@@ -355,7 +355,7 @@ fn snapshot() {
             let _: serde_json::Value = rpc(addr0, apply_command_req(i));
         }
 
-        let _: TakeSnapshotOutput = rpc(
+        let _: TakeSnapshotResult = rpc(
             addr0,
             Request::TakeSnapshot {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,

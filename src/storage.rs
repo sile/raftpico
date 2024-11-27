@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::Command,
-    rpc::SnapshotParams,
+    rpc::InstallSnapshotParams,
     types::{LogPosition, NodeId, Term},
 };
 
@@ -30,14 +30,11 @@ impl FileStorage {
         })
     }
 
-    pub fn install_snapshot<M: Serialize>(
-        &mut self,
-        snapshot: SnapshotParams<M>,
-    ) -> std::io::Result<()> {
+    pub fn install_snapshot(&mut self, snapshot: InstallSnapshotParams) -> std::io::Result<()> {
         // TODO: temorary file and move (and writing the temporary file on a worker thread)
         self.file.inner().set_len(0)?;
         self.file
-            .write_value(&Record::<LogEntries, _>::Snapshot(snapshot))?;
+            .write_value(&Record::<LogEntries>::Snapshot(snapshot))?;
         self.maybe_fsync()?;
         Ok(())
     }
@@ -54,10 +51,8 @@ impl FileStorage {
         raft_log_entries: &raftbare::LogEntries,
         commands: &crate::server::Commands,
     ) -> std::io::Result<()> {
-        let entries = Record::<_, SnapshotParams>::LogEntries(LogEntries::from_raftbare(
-            raft_log_entries,
-            commands,
-        )?);
+        let entries =
+            Record::<_>::LogEntries(LogEntries::from_raftbare(raft_log_entries, commands)?);
         self.file.write_value(&entries)?;
         self.maybe_fsync()?;
         Ok(())
@@ -65,25 +60,21 @@ impl FileStorage {
 
     pub fn save_node_id(&mut self, node_id: NodeId) -> std::io::Result<()> {
         self.file
-            .write_value(&Record::<LogEntries, SnapshotParams>::NodeId(
-                node_id.into(),
-            ))?;
+            .write_value(&Record::<LogEntries>::NodeId(node_id.into()))?;
         self.maybe_fsync()?;
         Ok(())
     }
 
     pub fn save_current_term(&mut self, term: Term) -> std::io::Result<()> {
         self.file
-            .write_value(&Record::<LogEntries, SnapshotParams>::Term(term.into()))?;
+            .write_value(&Record::<LogEntries>::Term(term.into()))?;
         self.maybe_fsync()?;
         Ok(())
     }
 
     pub fn save_voted_for(&mut self, voted_for: Option<NodeId>) -> std::io::Result<()> {
         self.file
-            .write_value(&Record::<LogEntries, SnapshotParams>::VotedFor(
-                voted_for.map(|n| n.into()),
-            ))?;
+            .write_value(&Record::<LogEntries>::VotedFor(voted_for.map(|n| n.into())))?;
         self.maybe_fsync()?;
         Ok(())
     }
@@ -110,12 +101,12 @@ impl FileStorage {
 
 // TODO: remove parameter
 #[derive(Debug, Serialize, Deserialize)]
-enum Record<T, M> {
+enum Record<T> {
     NodeId(u64),
     Term(u64),
     VotedFor(Option<u64>),
     LogEntries(T),
-    Snapshot(SnapshotParams<M>),
+    Snapshot(InstallSnapshotParams),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
