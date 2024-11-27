@@ -421,7 +421,9 @@ pub struct SnapshotParams<M = serde_json::Value> {
     pub machine: M,
 }
 
+/// RPC error kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(missing_docs)]
 pub enum ErrorKind {
     ClusterAlreadyCreated = 1,
     InvalidMachineInput,
@@ -433,10 +435,12 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
+    /// Returns JSON-RPC error code.
     pub const fn code(self) -> ErrorCode {
         ErrorCode::new(self as i32)
     }
 
+    /// Returns JSON-RPC error message.
     pub const fn message(&self) -> &'static str {
         match self {
             ErrorKind::ClusterAlreadyCreated => "Cluster already created",
@@ -449,7 +453,7 @@ impl ErrorKind {
         }
     }
 
-    pub fn object(self) -> ErrorObject {
+    pub(crate) fn object(self) -> ErrorObject {
         ErrorObject {
             code: self.code(),
             message: self.message().to_owned(),
@@ -457,11 +461,11 @@ impl ErrorKind {
         }
     }
 
-    pub fn object_with_reason<E: std::fmt::Display>(self, reason: E) -> ErrorObject {
+    pub(crate) fn object_with_reason<E: std::fmt::Display>(self, reason: E) -> ErrorObject {
         self.object_with_data(serde_json::json!({"reason": reason.to_string()}))
     }
 
-    pub fn object_with_data(self, data: serde_json::Value) -> ErrorObject {
+    pub(crate) fn object_with_data(self, data: serde_json::Value) -> ErrorObject {
         ErrorObject {
             code: self.code(),
             message: self.message().to_owned(),
