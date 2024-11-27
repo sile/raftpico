@@ -155,51 +155,6 @@ impl Request {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AppendEntriesReplyParams {
-    pub header: MessageHeader,
-    pub last_log_position: LogPosition,
-}
-
-impl AppendEntriesReplyParams {
-    pub fn into_raft_message(self) -> raftbare::Message {
-        raftbare::Message::AppendEntriesReply {
-            header: self.header.to_raftbare_header(),
-            last_position: self.last_log_position.into(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RequestVoteCallParams {
-    pub header: MessageHeader,
-    pub last_log_position: LogPosition,
-}
-
-impl RequestVoteCallParams {
-    pub fn into_raft_message(self) -> raftbare::Message {
-        raftbare::Message::RequestVoteCall {
-            header: self.header.to_raftbare_header(),
-            last_position: self.last_log_position.into(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RequestVoteReplyParams {
-    pub header: MessageHeader,
-    pub vote_granted: bool,
-}
-
-impl RequestVoteReplyParams {
-    pub fn into_raft_message(self) -> raftbare::Message {
-        raftbare::Message::RequestVoteReply {
-            header: self.header.to_raftbare_header(),
-            vote_granted: self.vote_granted,
-        }
-    }
-}
-
 /// Serializable version of [`raftbare::MessageHeader`].
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(missing_docs)]
@@ -231,6 +186,7 @@ impl MessageHeader {
 ///
 /// See also: [`raftbare::Message::AppendEntriesCall`]
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct AppendEntriesCallParams {
     pub header: MessageHeader,
@@ -257,7 +213,7 @@ impl AppendEntriesCallParams {
         })
     }
 
-    pub fn into_raft_message(self, commands: &mut Commands) -> Option<raftbare::Message> {
+    pub(crate) fn into_raft_message(self, commands: &mut Commands) -> Option<raftbare::Message> {
         let prev_position = raftbare::LogPosition::from(self.prev_position);
         let entries = (u64::from(self.prev_position.index) + 1..)
             .map(|i| LogIndex::from(i))
@@ -270,6 +226,66 @@ impl AppendEntriesCallParams {
             commit_index: self.commit_index.into(),
             entries,
         })
+    }
+}
+
+/// Parameters of [`Request::AppendEntriesReply`].
+///
+/// See also: [`raftbare::Message::AppendEntriesReply`]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub struct AppendEntriesReplyParams {
+    pub header: MessageHeader,
+    pub last_log_position: LogPosition,
+}
+
+impl AppendEntriesReplyParams {
+    pub(crate) fn into_raft_message(self) -> raftbare::Message {
+        raftbare::Message::AppendEntriesReply {
+            header: self.header.to_raftbare_header(),
+            last_position: self.last_log_position.into(),
+        }
+    }
+}
+
+/// Parameters of [`Request::RequestVoteCall`].
+///
+/// See also: [`raftbare::Message::RequestVoteCall`]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub struct RequestVoteCallParams {
+    pub header: MessageHeader,
+    pub last_log_position: LogPosition,
+}
+
+impl RequestVoteCallParams {
+    pub(crate) fn into_raft_message(self) -> raftbare::Message {
+        raftbare::Message::RequestVoteCall {
+            header: self.header.to_raftbare_header(),
+            last_position: self.last_log_position.into(),
+        }
+    }
+}
+
+/// Parameters of [`Request::RequestVoteReply`].
+///
+/// See also: [`raftbare::Message::RequestVoteReply`]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub struct RequestVoteReplyParams {
+    pub header: MessageHeader,
+    pub vote_granted: bool,
+}
+
+impl RequestVoteReplyParams {
+    pub(crate) fn into_raft_message(self) -> raftbare::Message {
+        raftbare::Message::RequestVoteReply {
+            header: self.header.to_raftbare_header(),
+            vote_granted: self.vote_granted,
+        }
     }
 }
 
