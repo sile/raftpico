@@ -114,7 +114,7 @@ impl Request {
             } => Self::RequestVoteCall {
                 jsonrpc: JsonRpcVersion::V2,
                 params: RequestVoteCallParams {
-                    header: RaftMessageHeader::from_raftbare_header(header),
+                    header: MessageHeader::from_raftbare_header(header),
                     last_log_position: last_position.into(),
                 },
             },
@@ -137,7 +137,7 @@ impl Request {
             } => Self::RequestVoteReply {
                 jsonrpc: JsonRpcVersion::V2,
                 params: RequestVoteReplyParams {
-                    header: RaftMessageHeader::from_raftbare_header(header),
+                    header: MessageHeader::from_raftbare_header(header),
                     vote_granted,
                 },
             },
@@ -147,7 +147,7 @@ impl Request {
             } => Self::AppendEntriesReply {
                 jsonrpc: JsonRpcVersion::V2,
                 params: AppendEntriesReplyParams {
-                    header: RaftMessageHeader::from_raftbare_header(header),
+                    header: MessageHeader::from_raftbare_header(header),
                     last_log_position: last_position.into(),
                 },
             },
@@ -157,7 +157,7 @@ impl Request {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppendEntriesReplyParams {
-    pub header: RaftMessageHeader,
+    pub header: MessageHeader,
     pub last_log_position: LogPosition,
 }
 
@@ -172,7 +172,7 @@ impl AppendEntriesReplyParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RequestVoteCallParams {
-    pub header: RaftMessageHeader,
+    pub header: MessageHeader,
     pub last_log_position: LogPosition,
 }
 
@@ -187,7 +187,7 @@ impl RequestVoteCallParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RequestVoteReplyParams {
-    pub header: RaftMessageHeader,
+    pub header: MessageHeader,
     pub vote_granted: bool,
 }
 
@@ -200,14 +200,16 @@ impl RequestVoteReplyParams {
     }
 }
 
+/// Serializable version of [`raftbare::MessageHeader`].
 #[derive(Debug, Serialize, Deserialize)]
-pub struct RaftMessageHeader {
+#[allow(missing_docs)]
+pub struct MessageHeader {
     pub from: NodeId,
     pub term: Term,
     pub seqno: u64,
 }
 
-impl RaftMessageHeader {
+impl MessageHeader {
     fn from_raftbare_header(header: raftbare::MessageHeader) -> Self {
         Self {
             from: header.from.into(),
@@ -227,7 +229,7 @@ impl RaftMessageHeader {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppendEntriesCallParams {
-    pub header: RaftMessageHeader,
+    pub header: MessageHeader,
     pub commit_index: LogIndex,
     pub prev_position: LogPosition,
     pub entries: Vec<Command>,
@@ -241,7 +243,7 @@ impl AppendEntriesCallParams {
         commands: &Commands,
     ) -> Option<Self> {
         Some(Self {
-            header: RaftMessageHeader::from_raftbare_header(header),
+            header: MessageHeader::from_raftbare_header(header),
             commit_index,
             prev_position: entries.prev_position().into(),
             entries: entries
