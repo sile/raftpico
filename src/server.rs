@@ -564,17 +564,16 @@ impl<M: Machine> Server<M> {
             }
             Request::Snapshot { params, .. } => self.handle_snapshot_request(params),
             Request::InitNode { params, .. } => self.handle_init_node_request(params),
-            Request::AppendEntriesCall { id, params, .. } => {
-                self.handle_append_entries_request(Caller::new(from, id), params)
+            Request::AppendEntriesCall { params, .. } => {
+                let caller = Caller::new(from, jsonlrpc::RequestId::Number(0)); // TODO: remove dummy id
+                self.handle_append_entries_request(caller, params)
             }
-            Request::AppendEntriesReply { id, params, .. } => {
-                self.handle_append_entries_result_request(Caller::new(from, id), params)
+            Request::AppendEntriesReply { params, .. } => {
+                self.handle_append_entries_result_request(params)
             }
-            Request::RequestVoteCall { id, params, .. } => {
-                self.handle_request_vote_request(Caller::new(from, id), params)
-            }
-            Request::RequestVoteReply { id, params, .. } => {
-                self.handle_request_vote_result_request(Caller::new(from, id), params)
+            Request::RequestVoteCall { params, .. } => self.handle_request_vote_request(params),
+            Request::RequestVoteReply { params, .. } => {
+                self.handle_request_vote_result_request(params)
             }
         }
     }
@@ -671,7 +670,6 @@ impl<M: Machine> Server<M> {
 
     fn handle_append_entries_result_request(
         &mut self,
-        caller: Caller,
         params: AppendEntriesReplyParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
@@ -679,14 +677,13 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let message = params.into_raft_message(&caller);
+        let message = params.into_raft_message();
         self.node.handle_message(message);
         Ok(())
     }
 
     fn handle_request_vote_request(
         &mut self,
-        caller: Caller,
         params: RequestVoteCallParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
@@ -694,14 +691,13 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let message = params.into_raft_message(&caller);
+        let message = params.into_raft_message();
         self.node.handle_message(message);
         Ok(())
     }
 
     fn handle_request_vote_result_request(
         &mut self,
-        caller: Caller,
         params: RequestVoteReplyParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
@@ -709,7 +705,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let message = params.into_raft_message(&caller);
+        let message = params.into_raft_message();
         self.node.handle_message(message);
         Ok(())
     }
@@ -793,7 +789,12 @@ impl<M: Machine> Server<M> {
             )?;
             return Ok(());
         }
-        if !self.machines.system.members.contains_key(&params.from) {
+        if !self
+            .machines
+            .system
+            .members
+            .contains_key(&params.header.from)
+        {
             self.reply_error(
                 caller,
                 ErrorKind::UnknownServer
@@ -803,7 +804,7 @@ impl<M: Machine> Server<M> {
         }
 
         let message = params
-            .into_raft_message(&caller, &mut self.local_commands)
+            .into_raft_message(&mut self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
         self.node.handle_message(message);
 

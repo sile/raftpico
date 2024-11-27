@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
 use jsonlrpc_mio::ClientId;
-use raftbare::{ClusterConfig, LogEntries, MessageHeader, MessageSeqNo};
+use raftbare::{ClusterConfig, LogEntries};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -80,28 +80,24 @@ pub enum Request {
     /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::AppendEntriesCall`].
     AppendEntriesCall {
         jsonrpc: JsonRpcVersion,
-        id: RequestId, // TODO: remove
         params: AppendEntriesCallParams,
     },
 
     /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::AppendEntriesReply`].
     AppendEntriesReply {
         jsonrpc: JsonRpcVersion,
-        id: RequestId, // TODO: remove
         params: AppendEntriesReplyParams,
     },
 
     /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::RequestVoteCall`].
     RequestVoteCall {
         jsonrpc: JsonRpcVersion,
-        id: RequestId, // TODO: remove
         params: RequestVoteCallParams,
     },
 
     /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::RequestVoteReply`].
     RequestVoteReply {
         jsonrpc: JsonRpcVersion,
-        id: RequestId, // TODO: remove
         params: RequestVoteReplyParams,
     },
 }
@@ -117,10 +113,8 @@ impl Request {
                 last_position,
             } => Self::RequestVoteCall {
                 jsonrpc: JsonRpcVersion::V2,
-                id: RequestId::Number(header.seqno.get() as i64),
                 params: RequestVoteCallParams {
-                    from: header.from.into(),
-                    term: header.term.into(),
+                    header: RaftMessageHeader::from_raftbare_header(header),
                     last_log_position: last_position.into(),
                 },
             },
@@ -128,24 +122,22 @@ impl Request {
                 header,
                 commit_index,
                 entries,
-            } => {
-                let params =
-                    AppendEntriesCallParams::new(header, commit_index.into(), entries, commands)?;
-                Self::AppendEntriesCall {
-                    jsonrpc: JsonRpcVersion::V2,
-                    id: RequestId::Number(header.seqno.get() as i64),
-                    params,
-                }
-            }
+            } => Self::AppendEntriesCall {
+                jsonrpc: JsonRpcVersion::V2,
+                params: AppendEntriesCallParams::new(
+                    header,
+                    commit_index.into(),
+                    entries,
+                    commands,
+                )?,
+            },
             raftbare::Message::RequestVoteReply {
                 header,
                 vote_granted,
             } => Self::RequestVoteReply {
                 jsonrpc: JsonRpcVersion::V2,
-                id: RequestId::Number(header.seqno.get() as i64),
                 params: RequestVoteReplyParams {
-                    from: header.from.into(),
-                    term: header.term.into(),
+                    header: RaftMessageHeader::from_raftbare_header(header),
                     vote_granted,
                 },
             },
@@ -154,10 +146,8 @@ impl Request {
                 last_position,
             } => Self::AppendEntriesReply {
                 jsonrpc: JsonRpcVersion::V2,
-                id: RequestId::Number(header.seqno.get() as i64),
                 params: AppendEntriesReplyParams {
-                    from: header.from.into(),
-                    term: header.term.into(),
+                    header: RaftMessageHeader::from_raftbare_header(header),
                     last_log_position: last_position.into(),
                 },
             },
@@ -167,23 +157,14 @@ impl Request {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppendEntriesReplyParams {
-    pub from: NodeId,
-    pub term: Term,
+    pub header: RaftMessageHeader,
     pub last_log_position: LogPosition,
 }
 
 impl AppendEntriesReplyParams {
-    pub fn into_raft_message(self, caller: &Caller) -> raftbare::Message {
-        let RequestId::Number(request_id) = caller.request_id else {
-            todo!("make this branch unreachable");
-        };
-
+    pub fn into_raft_message(self) -> raftbare::Message {
         raftbare::Message::AppendEntriesReply {
-            header: MessageHeader {
-                from: self.from.into(),
-                term: self.term.into(),
-                seqno: MessageSeqNo::new(request_id as u64),
-            },
+            header: self.header.to_raftbare_header(),
             last_position: self.last_log_position.into(),
         }
     }
@@ -191,23 +172,14 @@ impl AppendEntriesReplyParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RequestVoteCallParams {
-    pub from: NodeId,
-    pub term: Term,
+    pub header: RaftMessageHeader,
     pub last_log_position: LogPosition,
 }
 
 impl RequestVoteCallParams {
-    pub fn into_raft_message(self, caller: &Caller) -> raftbare::Message {
-        let RequestId::Number(request_id) = caller.request_id else {
-            todo!("make this branch unreachable");
-        };
-
+    pub fn into_raft_message(self) -> raftbare::Message {
         raftbare::Message::RequestVoteCall {
-            header: MessageHeader {
-                from: self.from.into(),
-                term: self.term.into(),
-                seqno: MessageSeqNo::new(request_id as u64),
-            },
+            header: self.header.to_raftbare_header(),
             last_position: self.last_log_position.into(),
         }
     }
@@ -215,32 +187,47 @@ impl RequestVoteCallParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RequestVoteReplyParams {
-    pub from: NodeId,
-    pub term: Term,
+    pub header: RaftMessageHeader,
     pub vote_granted: bool,
 }
 
 impl RequestVoteReplyParams {
-    pub fn into_raft_message(self, caller: &Caller) -> raftbare::Message {
-        let RequestId::Number(request_id) = caller.request_id else {
-            todo!("make this branch unreachable");
-        };
-
+    pub fn into_raft_message(self) -> raftbare::Message {
         raftbare::Message::RequestVoteReply {
-            header: MessageHeader {
-                from: self.from.into(),
-                term: self.term.into(),
-                seqno: MessageSeqNo::new(request_id as u64),
-            },
+            header: self.header.to_raftbare_header(),
             vote_granted: self.vote_granted,
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AppendEntriesCallParams {
+pub struct RaftMessageHeader {
     pub from: NodeId,
     pub term: Term,
+    pub seqno: u64,
+}
+
+impl RaftMessageHeader {
+    fn from_raftbare_header(header: raftbare::MessageHeader) -> Self {
+        Self {
+            from: header.from.into(),
+            term: header.term.into(),
+            seqno: header.seqno.get(),
+        }
+    }
+
+    fn to_raftbare_header(&self) -> raftbare::MessageHeader {
+        raftbare::MessageHeader {
+            from: self.from.into(),
+            term: self.term.into(),
+            seqno: raftbare::MessageSeqNo::new(self.seqno),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppendEntriesCallParams {
+    pub header: RaftMessageHeader,
     pub commit_index: LogIndex,
     pub prev_position: LogPosition,
     pub entries: Vec<Command>,
@@ -248,14 +235,13 @@ pub struct AppendEntriesCallParams {
 
 impl AppendEntriesCallParams {
     fn new(
-        header: MessageHeader,
+        header: raftbare::MessageHeader,
         commit_index: LogIndex,
         entries: LogEntries,
         commands: &Commands,
     ) -> Option<Self> {
         Some(Self {
-            from: header.from.into(),
-            term: header.term.into(),
+            header: RaftMessageHeader::from_raftbare_header(header),
             commit_index,
             prev_position: entries.prev_position().into(),
             entries: entries
@@ -265,15 +251,7 @@ impl AppendEntriesCallParams {
         })
     }
 
-    pub fn into_raft_message(
-        self,
-        caller: &Caller,
-        commands: &mut Commands,
-    ) -> Option<raftbare::Message> {
-        let RequestId::Number(request_id) = caller.request_id else {
-            return None;
-        };
-
+    pub fn into_raft_message(self, commands: &mut Commands) -> Option<raftbare::Message> {
         let prev_position = raftbare::LogPosition::from(self.prev_position);
         let prev_index = u64::from(self.prev_position.index);
         let entries = (1..)
@@ -296,11 +274,7 @@ impl AppendEntriesCallParams {
         let entries = LogEntries::from_iter(prev_position, entries);
 
         Some(raftbare::Message::AppendEntriesCall {
-            header: MessageHeader {
-                from: self.from.into(),
-                term: self.term.into(),
-                seqno: MessageSeqNo::new(request_id as u64),
-            },
+            header: self.header.to_raftbare_header(),
             commit_index: self.commit_index.into(),
             entries,
         })
