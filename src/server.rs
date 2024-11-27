@@ -192,19 +192,6 @@ impl<M: Machine> Server<M> {
                 // TODO: note doc
                 self.handle_install_snapshot_action(node_id)?;
             }
-            ResponseObject::Err { error, .. } if error.code == ErrorKind::UnknownServer.code() => {
-                let data = error.data.ok_or(std::io::ErrorKind::Other)?;
-
-                #[derive(Deserialize)]
-                struct Data {
-                    node_id: u64,
-                }
-                let Data { node_id } = serde_json::from_value(data)?;
-
-                let _ = node_id;
-
-                // TODO: send snapshot if need
-            }
             e @ ResponseObject::Err { .. } => {
                 // TODO
                 dbg!(e);
@@ -781,24 +768,17 @@ impl<M: Machine> Server<M> {
         caller: Caller,
         params: AppendEntriesCallParams,
     ) -> std::io::Result<()> {
-        if self.node().is_none() {
+        if self.node().is_none()
+            || !self
+                .machines
+                .system
+                .members
+                .contains_key(&params.header.from)
+        {
             self.reply_error(
                 caller,
                 ErrorKind::NotClusterMember
                     .object_with_data(serde_json::json!({"addr": self.addr()})),
-            )?;
-            return Ok(());
-        }
-        if !self
-            .machines
-            .system
-            .members
-            .contains_key(&params.header.from)
-        {
-            self.reply_error(
-                caller,
-                ErrorKind::UnknownServer
-                    .object_with_data(serde_json::json!({"node_id": self.node.id().get()})),
             )?;
             return Ok(());
         }

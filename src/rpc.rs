@@ -436,7 +436,6 @@ pub enum ErrorKind {
     NoMachineOutput,
     ServerAlreadyAdded,
     NotClusterMember,
-    UnknownServer,
 }
 
 impl ErrorKind {
@@ -454,7 +453,6 @@ impl ErrorKind {
             ErrorKind::InvalidMachineOutput => "Invalid machine output",
             ErrorKind::ServerAlreadyAdded => "Server already added",
             ErrorKind::NotClusterMember => "Not a cluster member",
-            ErrorKind::UnknownServer => "Unknown server",
         }
     }
 
