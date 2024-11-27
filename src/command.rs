@@ -95,7 +95,7 @@ impl Command {
                     .map(NodeId::from)
                     .collect(),
             }),
-            raftbare::LogEntry::Command => commands.get(&index.into()).cloned(),
+            raftbare::LogEntry::Command => commands.get(&index).cloned(),
         }
     }
 

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     command::Command,
     rpc::SnapshotParams,
-    types::{NodeId, Term},
+    types::{LogPosition, NodeId, Term},
 };
 
 #[derive(Debug)]
@@ -108,8 +108,9 @@ impl FileStorage {
     // }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Record<T, M> {
+// TODO: remove parameter
+#[derive(Debug, Serialize, Deserialize)]
+enum Record<T, M> {
     NodeId(u64),
     Term(u64),
     VotedFor(Option<u64>),
@@ -117,22 +118,20 @@ pub enum Record<T, M> {
     Snapshot(SnapshotParams<M>),
 }
 
-// TODO:
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogEntries {
-    pub prev_log_term: Term,
-    pub prev_log_index: u64,
-    pub entries: Vec<Command>,
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LogEntries {
+    prev_position: LogPosition,
+    entries: Vec<Command>,
 }
 
 impl LogEntries {
-    pub fn from_raftbare(
+    fn from_raftbare(
         entries: &raftbare::LogEntries,
         commands: &crate::server::Commands,
     ) -> std::io::Result<Self> {
         Ok(Self {
-            prev_log_term: entries.prev_position().term.into(),
-            prev_log_index: entries.prev_position().index.get(),
+            prev_position: entries.prev_position().into(),
             entries: entries
                 .iter_with_positions()
                 .map(|(position, entry)| match entry {

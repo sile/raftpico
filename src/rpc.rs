@@ -216,7 +216,7 @@ impl AppendEntriesCallParams {
     pub(crate) fn into_raft_message(self, commands: &mut Commands) -> Option<raftbare::Message> {
         let prev_position = raftbare::LogPosition::from(self.prev_position);
         let entries = (u64::from(self.prev_position.index) + 1..)
-            .map(|i| LogIndex::from(i))
+            .map(LogIndex::from)
             .zip(self.entries)
             .map(|(i, x)| x.into_log_entry(i, commands));
         let entries = LogEntries::from_iter(prev_position, entries);
