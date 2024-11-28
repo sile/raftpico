@@ -4,9 +4,8 @@ use jsonlrpc::JsonlStream;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    command::Command,
-    rpc::InstallSnapshotParams,
-    types::{LogPosition, NodeId, Term},
+    rpc::{InstallSnapshotParams, LogEntries},
+    types::{NodeId, Term},
 };
 
 #[derive(Debug)]
@@ -50,7 +49,10 @@ impl FileStorage {
         raft_log_entries: &raftbare::LogEntries,
         commands: &crate::server::Commands,
     ) -> std::io::Result<()> {
-        let entries = Record::LogEntries(LogEntries::from_raftbare(raft_log_entries, commands)?);
+        let entries = Record::LogEntries(
+            LogEntries::from_raftbare(raft_log_entries, commands)
+                .ok_or(std::io::ErrorKind::InvalidInput)?,
+        );
         self.file.write_value(&entries)?;
         self.maybe_fsync()?;
         Ok(())
@@ -63,14 +65,13 @@ impl FileStorage {
     }
 
     pub fn save_current_term(&mut self, term: Term) -> std::io::Result<()> {
-        self.file.write_value(&Record::Term(term.into()))?;
+        self.file.write_value(&Record::Term(term))?;
         self.maybe_fsync()?;
         Ok(())
     }
 
     pub fn save_voted_for(&mut self, voted_for: Option<NodeId>) -> std::io::Result<()> {
-        self.file
-            .write_value(&Record::VotedFor(voted_for.map(|n| n.into())))?;
+        self.file.write_value(&Record::VotedFor(voted_for))?;
         self.maybe_fsync()?;
         Ok(())
     }
@@ -99,40 +100,8 @@ impl FileStorage {
 #[derive(Debug, Serialize, Deserialize)]
 enum Record {
     NodeId(u64),
-    Term(u64),
-    VotedFor(Option<u64>),
+    Term(Term),
+    VotedFor(Option<NodeId>),
     LogEntries(LogEntries),
     Snapshot(InstallSnapshotParams),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LogEntries {
-    prev_position: LogPosition,
-    entries: Vec<Command>,
-}
-
-impl LogEntries {
-    fn from_raftbare(
-        entries: &raftbare::LogEntries,
-        commands: &crate::server::Commands,
-    ) -> std::io::Result<Self> {
-        Ok(Self {
-            prev_position: entries.prev_position().into(),
-            entries: entries
-                .iter_with_positions()
-                .map(|(position, entry)| match entry {
-                    raftbare::LogEntry::Term(t) => Ok(Command::StartTerm { term: t.into() }),
-                    raftbare::LogEntry::ClusterConfig(c) => Ok(Command::UpdateClusterConfig {
-                        voters: c.voters.iter().copied().map(NodeId::from).collect(),
-                        new_voters: c.new_voters.iter().copied().map(NodeId::from).collect(),
-                    }),
-                    raftbare::LogEntry::Command => commands
-                        .get(&position.index.into())
-                        .cloned()
-                        .ok_or(std::io::ErrorKind::InvalidInput),
-                })
-                .collect::<Result<_, _>>()?,
-        })
-    }
 }

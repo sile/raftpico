@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 
 use jsonlrpc::{ErrorCode, ErrorObject, JsonRpcVersion, RequestId};
 use jsonlrpc_mio::ClientId;
-use raftbare::LogEntries;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -101,10 +100,7 @@ pub enum Request {
 }
 
 impl Request {
-    pub(crate) fn from_raft_message(
-        message: raftbare::Message,
-        commands: &Commands,
-    ) -> Option<Self> {
+    pub(crate) fn from_raftbare(message: raftbare::Message, commands: &Commands) -> Option<Self> {
         Some(match message {
             raftbare::Message::RequestVoteCall {
                 header,
@@ -112,7 +108,7 @@ impl Request {
             } => Self::RequestVoteCall {
                 jsonrpc: JsonRpcVersion::V2,
                 params: RequestVoteCallParams {
-                    header: MessageHeader::from_raftbare_header(header),
+                    header: MessageHeader::from_raftbare(header),
                     last_log_position: last_position.into(),
                 },
             },
@@ -122,7 +118,7 @@ impl Request {
                 entries,
             } => Self::AppendEntriesCall {
                 jsonrpc: JsonRpcVersion::V2,
-                params: AppendEntriesCallParams::from_raft_message(
+                params: AppendEntriesCallParams::from_raftbare(
                     header,
                     commit_index.into(),
                     entries,
@@ -135,7 +131,7 @@ impl Request {
             } => Self::RequestVoteReply {
                 jsonrpc: JsonRpcVersion::V2,
                 params: RequestVoteReplyParams {
-                    header: MessageHeader::from_raftbare_header(header),
+                    header: MessageHeader::from_raftbare(header),
                     vote_granted,
                 },
             },
@@ -145,7 +141,7 @@ impl Request {
             } => Self::AppendEntriesReply {
                 jsonrpc: JsonRpcVersion::V2,
                 params: AppendEntriesReplyParams {
-                    header: MessageHeader::from_raftbare_header(header),
+                    header: MessageHeader::from_raftbare(header),
                     last_log_position: last_position.into(),
                 },
             },
@@ -163,7 +159,7 @@ pub struct MessageHeader {
 }
 
 impl MessageHeader {
-    fn from_raftbare_header(header: raftbare::MessageHeader) -> Self {
+    fn from_raftbare(header: raftbare::MessageHeader) -> Self {
         Self {
             from: header.from.into(),
             term: header.term.into(),
@@ -171,12 +167,35 @@ impl MessageHeader {
         }
     }
 
-    fn to_raftbare_header(&self) -> raftbare::MessageHeader {
+    fn to_raftbare(&self) -> raftbare::MessageHeader {
         raftbare::MessageHeader {
             from: self.from.into(),
             term: self.term.into(),
             seqno: raftbare::MessageSeqNo::new(self.seqno),
         }
+    }
+}
+
+/// Serializable version of [`raftbare::LogEntries`].
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(missing_docs)]
+pub struct LogEntries {
+    pub prev: LogPosition,
+    pub commands: Vec<Command>,
+}
+
+impl LogEntries {
+    pub(crate) fn from_raftbare(
+        entries: &raftbare::LogEntries,
+        commands: &Commands,
+    ) -> Option<Self> {
+        Some(Self {
+            prev: entries.prev_position().into(),
+            commands: entries
+                .iter_with_positions()
+                .map(|(p, x)| Command::from_log_entry(p.index.into(), &x, commands))
+                .collect::<Option<Vec<_>>>()?,
+        })
     }
 }
 
@@ -189,38 +208,33 @@ impl MessageHeader {
 pub struct AppendEntriesCallParams {
     pub header: MessageHeader,
     pub commit_index: LogIndex,
-    pub prev_position: LogPosition,
-    pub entries: Vec<Command>,
+    pub entries: LogEntries,
 }
 
 impl AppendEntriesCallParams {
-    fn from_raft_message(
+    pub(crate) fn from_raftbare(
         header: raftbare::MessageHeader,
         commit_index: LogIndex,
-        entries: LogEntries,
+        entries: raftbare::LogEntries,
         commands: &Commands,
     ) -> Option<Self> {
         Some(Self {
-            header: MessageHeader::from_raftbare_header(header),
+            header: MessageHeader::from_raftbare(header),
             commit_index,
-            prev_position: entries.prev_position().into(),
-            entries: entries
-                .iter_with_positions()
-                .map(|(p, x)| Command::from_log_entry(p.index.into(), &x, commands))
-                .collect::<Option<Vec<_>>>()?,
+            entries: LogEntries::from_raftbare(&entries, commands)?,
         })
     }
 
-    pub(crate) fn into_raft_message(self, commands: &mut Commands) -> Option<raftbare::Message> {
-        let prev_position = raftbare::LogPosition::from(self.prev_position);
-        let entries = (u64::from(self.prev_position.index) + 1..)
+    pub(crate) fn into_raftbare(self, commands: &mut Commands) -> Option<raftbare::Message> {
+        let prev_position = raftbare::LogPosition::from(self.entries.prev);
+        let entries = (u64::from(self.entries.prev.index) + 1..)
             .map(LogIndex::from)
-            .zip(self.entries)
+            .zip(self.entries.commands)
             .map(|(i, x)| x.into_log_entry(i, commands));
-        let entries = LogEntries::from_iter(prev_position, entries);
+        let entries = raftbare::LogEntries::from_iter(prev_position, entries);
 
         Some(raftbare::Message::AppendEntriesCall {
-            header: self.header.to_raftbare_header(),
+            header: self.header.to_raftbare(),
             commit_index: self.commit_index.into(),
             entries,
         })
@@ -239,9 +253,9 @@ pub struct AppendEntriesReplyParams {
 }
 
 impl AppendEntriesReplyParams {
-    pub(crate) fn into_raft_message(self) -> raftbare::Message {
+    pub(crate) fn into_raftbare(self) -> raftbare::Message {
         raftbare::Message::AppendEntriesReply {
-            header: self.header.to_raftbare_header(),
+            header: self.header.to_raftbare(),
             last_position: self.last_log_position.into(),
         }
     }
@@ -259,9 +273,9 @@ pub struct RequestVoteCallParams {
 }
 
 impl RequestVoteCallParams {
-    pub(crate) fn into_raft_message(self) -> raftbare::Message {
+    pub(crate) fn into_raftbare(self) -> raftbare::Message {
         raftbare::Message::RequestVoteCall {
-            header: self.header.to_raftbare_header(),
+            header: self.header.to_raftbare(),
             last_position: self.last_log_position.into(),
         }
     }
@@ -279,9 +293,9 @@ pub struct RequestVoteReplyParams {
 }
 
 impl RequestVoteReplyParams {
-    pub(crate) fn into_raft_message(self) -> raftbare::Message {
+    pub(crate) fn into_raftbare(self) -> raftbare::Message {
         raftbare::Message::RequestVoteReply {
-            header: self.header.to_raftbare_header(),
+            header: self.header.to_raftbare(),
             vote_granted: self.vote_granted,
         }
     }

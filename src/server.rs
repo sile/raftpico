@@ -463,7 +463,7 @@ impl<M: Machine> Server<M> {
         dst: NodeId,
         message: raftbare::Message,
     ) -> std::io::Result<()> {
-        let request = Request::from_raft_message(message, &self.local_commands)
+        let request = Request::from_raftbare(message, &self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
         let request = serde_json::to_value(&request)?;
         self.send_to(dst, &request)?;
@@ -474,7 +474,7 @@ impl<M: Machine> Server<M> {
         &mut self,
         message: raftbare::Message,
     ) -> std::io::Result<()> {
-        let request = Request::from_raft_message(message, &self.local_commands)
+        let request = Request::from_raftbare(message, &self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
         let request = serde_json::value::to_value(&request)?;
         for client in self.rpc_clients.values_mut() {
@@ -675,7 +675,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let message = params.into_raft_message();
+        let message = params.into_raftbare();
         self.node.handle_message(message);
         Ok(())
     }
@@ -689,7 +689,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let message = params.into_raft_message();
+        let message = params.into_raftbare();
         self.node.handle_message(message);
         Ok(())
     }
@@ -703,7 +703,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let message = params.into_raft_message();
+        let message = params.into_raftbare();
         self.node.handle_message(message);
         Ok(())
     }
@@ -784,7 +784,7 @@ impl<M: Machine> Server<M> {
         }
 
         let message = params
-            .into_raft_message(&mut self.local_commands)
+            .into_raftbare(&mut self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
         self.node.handle_message(message);
 
