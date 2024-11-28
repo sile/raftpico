@@ -197,6 +197,15 @@ impl LogEntries {
                 .collect::<Option<Vec<_>>>()?,
         })
     }
+
+    pub(crate) fn into_raftbare(self, commands: &mut Commands) -> raftbare::LogEntries {
+        let prev_position = raftbare::LogPosition::from(self.prev);
+        let entries = (u64::from(self.prev.index) + 1..)
+            .map(LogIndex::from)
+            .zip(self.commands)
+            .map(|(i, x)| x.into_log_entry(i, commands));
+        raftbare::LogEntries::from_iter(prev_position, entries)
+    }
 }
 
 /// Parameters of [`Request::AppendEntriesCall`].
@@ -225,19 +234,12 @@ impl AppendEntriesCallParams {
         })
     }
 
-    pub(crate) fn into_raftbare(self, commands: &mut Commands) -> Option<raftbare::Message> {
-        let prev_position = raftbare::LogPosition::from(self.entries.prev);
-        let entries = (u64::from(self.entries.prev.index) + 1..)
-            .map(LogIndex::from)
-            .zip(self.entries.commands)
-            .map(|(i, x)| x.into_log_entry(i, commands));
-        let entries = raftbare::LogEntries::from_iter(prev_position, entries);
-
-        Some(raftbare::Message::AppendEntriesCall {
+    pub(crate) fn into_raftbare(self, commands: &mut Commands) -> raftbare::Message {
+        raftbare::Message::AppendEntriesCall {
             header: self.header.to_raftbare(),
             commit_index: self.commit_index.into(),
-            entries,
-        })
+            entries: self.entries.into_raftbare(commands),
+        }
     }
 }
 

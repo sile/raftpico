@@ -79,8 +79,10 @@ pub struct Server<M> {
 }
 
 impl<M: Machine> Server<M> {
-    pub fn start(listen_addr: SocketAddr, storage: Option<FileStorage>) -> std::io::Result<Self> {
-        // TODO: storage.load
+    pub fn start(
+        listen_addr: SocketAddr,
+        mut storage: Option<FileStorage>,
+    ) -> std::io::Result<Self> {
         let mut poller = Poll::new()?;
         let events = Events::with_capacity(EVENTS_CAPACITY);
         let rpc_server = RpcServer::start(
@@ -89,21 +91,35 @@ impl<M: Machine> Server<M> {
             Token::SERVER_MIN.into(),
             Token::SERVER_MAX.into(),
         )?;
-        Ok(Self {
+
+        let mut local_commands = Commands::new();
+        let mut machines = Machines::default();
+        let mut node = Node::start(NodeId::UNINIT.into());
+        if let Some(storage) = &mut storage {
+            if let Some(loaded) = storage.load(&mut local_commands)? {
+                node = loaded.0;
+                machines = loaded.1;
+            }
+        }
+
+        let mut this = Self {
             instance_id: Uuid::new_v4(),
             poller,
             events,
             rpc_server,
             rpc_clients: HashMap::new(),
-            node: Node::start(NodeId::UNINIT.into()),
+            node,
             storage,
-            local_commands: Commands::new(),
+            local_commands,
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index: LogIndex::from(0),
             dirty_cluster_config: false,
             queries: BinaryHeap::new(),
-            machines: Machines::default(),
-        })
+            machines,
+        };
+        this.update_rpc_clients(); // TODO
+
+        Ok(this)
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -781,9 +797,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let message = params
-            .into_raftbare(&mut self.local_commands)
-            .ok_or(std::io::ErrorKind::Other)?;
+        let message = params.into_raftbare(&mut self.local_commands);
         self.node.handle_message(message);
 
         Ok(())
@@ -942,8 +956,9 @@ impl<M: Machine> Server<M> {
         }
 
         self.node = Node::start(NodeId::SEED.into());
+        let snapshot = self.snapshot(LogIndex::from(0))?;
         if let Some(storage) = &mut self.storage {
-            // TODO: take the initial snapshot here
+            storage.save_snapshot(snapshot)?;
         }
 
         self.node.create_cluster(&[self.node.id()]); // Always succeeds

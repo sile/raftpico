@@ -1,11 +1,15 @@
-use std::{fs::File, path::Path};
+use std::{fs::File, io::Seek, path::Path};
 
 use jsonlrpc::JsonlStream;
+use raftbare::Node;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    machines::Machines,
     rpc::{InstallSnapshotParams, LogEntries},
+    server::Commands,
     types::{NodeId, Term},
+    Machine,
 };
 
 /// Storage that stores the state of a server and local log entries into one .jsonl file.
@@ -86,24 +90,43 @@ impl FileStorage {
         Ok(())
     }
 
-    // TODO:
-    // pub fn load_record<M: Machine>(
-    //     &mut self,
-    //     commands: &mut Commands,
-    // ) -> Result<Option<Record<raftbare::LogEntries, M>>> {
-    //     if self.file.inner().metadata()?.len() == self.file.inner().stream_position()? {
-    //         return Ok(None);
-    //     }
-
-    //     let record: Record<LogEntries, _> = self.file.read_value()?;
-    //     match record {
-    //         Record::NodeId(v) => Ok(Some(Record::NodeId(v))),
-    //         Record::Term(v) => Ok(Some(Record::Term(v))),
-    //         Record::VotedFor(v) => Ok(Some(Record::VotedFor(v))),
-    //         Record::LogEntries(v) => Ok(Some(Record::LogEntries(v.to_raftbare(commands)))),
-    //         Record::Snapshot(v) => Ok(Some(Record::Snapshot(v))),
-    //     }
-    // }
+    pub(crate) fn load<M: Machine>(
+        &mut self,
+        commands: &mut Commands,
+    ) -> std::io::Result<Option<(Node, Machines<M>)>> {
+        let mut machine = None;
+        let mut node_id = raftbare::NodeId::new(0);
+        let mut term = raftbare::Term::new(0);
+        let mut voted_for = None;
+        let mut config = raftbare::ClusterConfig::default();
+        let mut entries = raftbare::LogEntries::new(raftbare::LogPosition::ZERO);
+        while self.file.inner().metadata()?.len() == self.file.inner().stream_position()? {
+            let record: Record = self.file.read_value()?;
+            match record {
+                Record::Term(v) => term = raftbare::Term::from(v),
+                Record::VotedFor(v) => voted_for = v.map(raftbare::NodeId::from),
+                Record::LogEntries(v) => {
+                    let v = v.into_raftbare(commands);
+                    let n = v.prev_position().index - entries.prev_position().index;
+                    entries.truncate(n.get() as usize);
+                    for e in v.iter() {
+                        entries.push(e);
+                    }
+                }
+                Record::Snapshot(snapshot) => {
+                    node_id = snapshot.node_id.into();
+                    config.voters = snapshot.voters.into_iter().map(From::from).collect();
+                    config.new_voters = snapshot.new_voters.into_iter().map(From::from).collect();
+                    machine = Some(serde_json::from_value(snapshot.machine)?);
+                }
+            }
+        }
+        Ok(machine.map(|m| {
+            let log = raftbare::Log::new(config, entries);
+            let node = Node::restart(node_id, term, voted_for, log);
+            (node, m)
+        }))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
