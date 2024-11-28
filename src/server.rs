@@ -590,7 +590,7 @@ impl<M: Machine> Server<M> {
         self.last_applied_index = last_included.index.into();
 
         if let Some(storage) = &mut self.storage {
-            storage.install_snapshot(params)?;
+            storage.save_snapshot(params)?;
             storage.save_current_term(self.node.current_term().into())?;
             storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
             storage.append_entries(self.node.log().entries(), &self.local_commands)?;
@@ -643,7 +643,7 @@ impl<M: Machine> Server<M> {
         if self.storage.is_some() {
             let snapshot = self.snapshot(index)?;
             if let Some(storage) = &mut self.storage {
-                storage.install_snapshot(snapshot)?;
+                storage.save_snapshot(snapshot)?;
                 storage.save_current_term(self.node.current_term().into())?;
                 storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
                 storage.append_entries(self.node.log().entries(), &self.local_commands)?;

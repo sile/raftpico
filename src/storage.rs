@@ -53,24 +53,27 @@ impl FileStorage {
 
     pub(crate) fn append_entries(
         &mut self,
-        raft_log_entries: &raftbare::LogEntries,
+        entries: &raftbare::LogEntries,
         commands: &crate::server::Commands,
     ) -> std::io::Result<()> {
-        let entries = Record::LogEntries(
-            LogEntries::from_raftbare(raft_log_entries, commands)
-                .ok_or(std::io::ErrorKind::InvalidInput)?,
+        let record = Record::LogEntries(
+            LogEntries::from_raftbare(entries, commands).ok_or(std::io::ErrorKind::InvalidInput)?,
         );
-        self.file.write_value(&entries)?;
+        self.file.write_value(&record)?;
         self.maybe_sync_data()?;
         Ok(())
     }
 
-    pub(crate) fn install_snapshot(
-        &mut self,
-        snapshot: InstallSnapshotParams,
-    ) -> std::io::Result<()> {
-        // TODO: temorary file and move (and writing the temporary file on a worker thread)
+    pub(crate) fn save_snapshot(&mut self, snapshot: InstallSnapshotParams) -> std::io::Result<()> {
         self.file.inner().set_len(0)?;
+
+        // [NOTE]
+        // There is a possibility that the storage data could be lost if the server process aborts
+        // between the above `set_len()` call and the subsequent `write_value()` call.
+        // In practice, I believe the likelihood of this happening is very low.
+        // However, if it becomes an issue, a safer approach would be to write the snapshot to a
+        // temporary file and then rename this temporary file to the storage file path.
+
         self.file.write_value(&Record::Snapshot(snapshot))?;
         self.maybe_sync_data()?;
         Ok(())
