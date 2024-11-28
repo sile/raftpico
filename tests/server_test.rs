@@ -9,9 +9,10 @@ use raftpico::{
         AddServerParams, AddServerResult, ApplyParams, CreateClusterParams, CreateClusterResult,
         ErrorKind, RemoveServerParams, RemoveServerResult, Request, TakeSnapshotResult,
     },
-    ApplyContext, ApplyKind, Machine, Server,
+    ApplyContext, ApplyKind, FileStorage, Machine, Server,
 };
 use serde::{Deserialize, Serialize};
+use tempfile::NamedTempFile;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(3);
 const POLL_TIMEOUT: Option<Duration> = Some(Duration::from_millis(10));
@@ -375,6 +376,106 @@ fn snapshot() {
     // Add two servers to the cluster.
     let server1 = Server::<Counter>::start(auto_addr(), None).expect("start() failed");
     let server2 = Server::<Counter>::start(auto_addr(), None).expect("start() failed");
+    let addr1 = server1.addr();
+    let addr2 = server2.addr();
+    let handle = std::thread::spawn(move || {
+        let mut contact_addr = addr0;
+        for addr in [addr1, addr2] {
+            let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
+            contact_addr = addr;
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    servers.push(server1);
+    servers.push(server2);
+
+    while !handle.is_finished() {
+        for server in &mut servers {
+            server.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
+    }
+    for server in &servers {
+        assert!(server.node().is_some());
+    }
+
+    // Propose commands.
+    let addrs = servers.iter().map(|s| s.addr()).collect::<Vec<_>>();
+    let handle = std::thread::spawn(move || {
+        for (i, addr) in addrs.into_iter().cycle().enumerate().take(10) {
+            let _: serde_json::Value = rpc(addr, apply_command_req(i));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    });
+
+    while !handle.is_finished() {
+        for server in &mut servers {
+            server.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
+    }
+    for server in &servers {
+        assert_eq!(
+            server.machine().0,
+            (0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9) * 2
+        );
+    }
+}
+
+#[test]
+fn storage() {
+    let tempfile0 = NamedTempFile::new().expect("cannot create temp file");
+    let tempfile1 = NamedTempFile::new().expect("cannot create temp file");
+    let tempfile2 = NamedTempFile::new().expect("cannot create temp file");
+
+    let mut servers = Vec::new();
+    let mut server0 = Server::<Counter>::start(
+        auto_addr(),
+        Some(FileStorage::new(tempfile0.path()).expect("cannot create storage")),
+    )
+    .expect("start() failed");
+
+    // Create a cluster with a small max log size.
+    let addr0 = server0.addr();
+    let handle =
+        std::thread::spawn(move || rpc::<CreateClusterResult>(addr0, create_cluster_req()));
+    while !handle.is_finished() {
+        server0.poll(POLL_TIMEOUT).expect("poll() failed");
+    }
+    servers.push(server0);
+
+    // Propose commands.
+    let handle = std::thread::spawn(move || {
+        for i in 0..10 {
+            let _: serde_json::Value = rpc(addr0, apply_command_req(i));
+        }
+
+        let _: TakeSnapshotResult = rpc(
+            addr0,
+            Request::TakeSnapshot {
+                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+                id: RequestId::Number(0),
+            },
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    });
+    while !handle.is_finished() {
+        servers[0].poll(POLL_TIMEOUT).expect("poll() failed");
+    }
+    assert_eq!(
+        servers[0].machine().0,
+        0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9
+    );
+
+    // Add two servers to the cluster.
+    let server1 = Server::<Counter>::start(
+        auto_addr(),
+        Some(FileStorage::new(tempfile1.path()).expect("cannot create storage")),
+    )
+    .expect("start() failed");
+    let server2 = Server::<Counter>::start(
+        auto_addr(),
+        Some(FileStorage::new(tempfile2.path()).expect("cannot create storage")),
+    )
+    .expect("start() failed");
     let addr1 = server1.addr();
     let addr2 = server2.addr();
     let handle = std::thread::spawn(move || {

@@ -503,11 +503,9 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn handle_append_log_entries_action(&mut self, _entries: LogEntries) -> std::io::Result<()> {
-        // TODO: stats
-        if let Some(_storage) = &mut self.storage {
-            // storage.append_entries(&entries, &self.commands)?;
-            todo!()
+    fn handle_append_log_entries_action(&mut self, entries: LogEntries) -> std::io::Result<()> {
+        if let Some(storage) = &mut self.storage {
+            storage.append_entries(&entries, &self.local_commands)?;
         }
         Ok(())
     }

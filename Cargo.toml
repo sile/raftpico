@@ -21,3 +21,4 @@ uuid = { version = "1.11.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
 clap = { version = "4.5.16", features = ["derive"] }
+tempfile = "3.14.0"

@@ -95,12 +95,12 @@ impl FileStorage {
         commands: &mut Commands,
     ) -> std::io::Result<Option<(Node, Machines<M>)>> {
         let mut machine = None;
-        let mut node_id = raftbare::NodeId::new(0);
+        let mut node_id = raftbare::NodeId::from(NodeId::UNINIT);
         let mut term = raftbare::Term::new(0);
         let mut voted_for = None;
         let mut config = raftbare::ClusterConfig::default();
         let mut entries = raftbare::LogEntries::new(raftbare::LogPosition::ZERO);
-        while self.file.inner().metadata()?.len() == self.file.inner().stream_position()? {
+        while self.file.inner().stream_position()? < self.file.inner().metadata()?.len() {
             let record: Record = self.file.read_value()?;
             match record {
                 Record::Term(v) => term = raftbare::Term::from(v),
