@@ -11,11 +11,10 @@ use crate::{
 #[derive(Debug)]
 pub struct FileStorage {
     file: JsonlStream<File>,
-    force_fsync: bool,
+    sync_data: bool,
 }
 
 impl FileStorage {
-    // TODO: with_options
     pub fn new<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -25,22 +24,23 @@ impl FileStorage {
             .open(&path)?;
         Ok(Self {
             file: JsonlStream::new(file),
-            force_fsync: true,
+            sync_data: true,
         })
     }
 
-    pub fn install_snapshot(&mut self, snapshot: InstallSnapshotParams) -> std::io::Result<()> {
-        // TODO: temorary file and move (and writing the temporary file on a worker thread)
-        self.file.inner().set_len(0)?;
-        self.file.write_value(&Record::Snapshot(snapshot))?;
-        self.maybe_fsync()?;
+    pub fn disable_sync_data(&mut self) {
+        self.sync_data = false;
+    }
+
+    pub fn save_current_term(&mut self, term: Term) -> std::io::Result<()> {
+        self.file.write_value(&Record::Term(term))?;
+        self.maybe_sync_data()?;
         Ok(())
     }
 
-    fn maybe_fsync(&self) -> std::io::Result<()> {
-        if self.force_fsync {
-            self.file.inner().sync_data()?;
-        }
+    pub fn save_voted_for(&mut self, voted_for: Option<NodeId>) -> std::io::Result<()> {
+        self.file.write_value(&Record::VotedFor(voted_for))?;
+        self.maybe_sync_data()?;
         Ok(())
     }
 
@@ -54,19 +54,22 @@ impl FileStorage {
                 .ok_or(std::io::ErrorKind::InvalidInput)?,
         );
         self.file.write_value(&entries)?;
-        self.maybe_fsync()?;
+        self.maybe_sync_data()?;
         Ok(())
     }
 
-    pub fn save_current_term(&mut self, term: Term) -> std::io::Result<()> {
-        self.file.write_value(&Record::Term(term))?;
-        self.maybe_fsync()?;
+    pub fn install_snapshot(&mut self, snapshot: InstallSnapshotParams) -> std::io::Result<()> {
+        // TODO: temorary file and move (and writing the temporary file on a worker thread)
+        self.file.inner().set_len(0)?;
+        self.file.write_value(&Record::Snapshot(snapshot))?;
+        self.maybe_sync_data()?;
         Ok(())
     }
 
-    pub fn save_voted_for(&mut self, voted_for: Option<NodeId>) -> std::io::Result<()> {
-        self.file.write_value(&Record::VotedFor(voted_for))?;
-        self.maybe_fsync()?;
+    fn maybe_sync_data(&self) -> std::io::Result<()> {
+        if self.sync_data {
+            self.file.inner().sync_data()?;
+        }
         Ok(())
     }
 
