@@ -8,6 +8,7 @@ use crate::{
     types::{NodeId, Term},
 };
 
+/// Storage that stores the state of a server and local log entries into one .jsonl file.
 #[derive(Debug)]
 pub struct FileStorage {
     file: JsonlStream<File>,
@@ -15,6 +16,9 @@ pub struct FileStorage {
 }
 
 impl FileStorage {
+    /// Makes a new [`FileStorage`] instance with the specified .jsonl file path.
+    ///
+    /// If the file is not empty, its contents are loaded when the server starts.
     pub fn new<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -28,23 +32,26 @@ impl FileStorage {
         })
     }
 
+    /// Disables the call to [`std::fs::File::sync_data()`] that is made after each file operation by default.
+    ///
+    /// Utilizing this method can enhance server performance, albeit at the risk of compromising consistency guarantees.
     pub fn disable_sync_data(&mut self) {
         self.sync_data = false;
     }
 
-    pub fn save_current_term(&mut self, term: Term) -> std::io::Result<()> {
+    pub(crate) fn save_current_term(&mut self, term: Term) -> std::io::Result<()> {
         self.file.write_value(&Record::Term(term))?;
         self.maybe_sync_data()?;
         Ok(())
     }
 
-    pub fn save_voted_for(&mut self, voted_for: Option<NodeId>) -> std::io::Result<()> {
+    pub(crate) fn save_voted_for(&mut self, voted_for: Option<NodeId>) -> std::io::Result<()> {
         self.file.write_value(&Record::VotedFor(voted_for))?;
         self.maybe_sync_data()?;
         Ok(())
     }
 
-    pub fn append_entries(
+    pub(crate) fn append_entries(
         &mut self,
         raft_log_entries: &raftbare::LogEntries,
         commands: &crate::server::Commands,
@@ -58,7 +65,10 @@ impl FileStorage {
         Ok(())
     }
 
-    pub fn install_snapshot(&mut self, snapshot: InstallSnapshotParams) -> std::io::Result<()> {
+    pub(crate) fn install_snapshot(
+        &mut self,
+        snapshot: InstallSnapshotParams,
+    ) -> std::io::Result<()> {
         // TODO: temorary file and move (and writing the temporary file on a worker thread)
         self.file.inner().set_len(0)?;
         self.file.write_value(&Record::Snapshot(snapshot))?;

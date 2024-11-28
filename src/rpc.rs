@@ -301,7 +301,7 @@ impl RequestVoteReplyParams {
     }
 }
 
-/// Parameters of [`Request::InstallSnapshotParams`].
+/// Parameters of [`Request::InstallSnapshot`].
 ///
 /// See also: [`raftbare::Action::InstallSnapshot`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
