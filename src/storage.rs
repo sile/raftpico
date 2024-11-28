@@ -58,12 +58,6 @@ impl FileStorage {
         Ok(())
     }
 
-    pub fn save_node_id(&mut self, node_id: NodeId) -> std::io::Result<()> {
-        self.file.write_value(&Record::NodeId(node_id.into()))?;
-        self.maybe_fsync()?;
-        Ok(())
-    }
-
     pub fn save_current_term(&mut self, term: Term) -> std::io::Result<()> {
         self.file.write_value(&Record::Term(term))?;
         self.maybe_fsync()?;
@@ -96,10 +90,8 @@ impl FileStorage {
     // }
 }
 
-// TODO: remove parameter
 #[derive(Debug, Serialize, Deserialize)]
 enum Record {
-    NodeId(u64),
     Term(Term),
     VotedFor(Option<NodeId>),
     LogEntries(LogEntries),
