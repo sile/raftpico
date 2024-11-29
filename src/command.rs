@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(doc)]
 use crate::rpc::Request;
 use crate::{
-    rpc::Proposer,
+    rpc::Caller,
     server::Commands,
     types::{LogIndex, NodeId, Term},
 };
@@ -21,28 +21,22 @@ pub enum Command {
         seed_addr: SocketAddr,
         min_election_timeout: Duration,
         max_election_timeout: Duration,
-        proposer: Proposer,
+        caller: Caller,
     },
 
     /// A command proposed via [`Request::AddServer`] API.
-    AddServer {
-        addr: SocketAddr,
-        proposer: Proposer,
-    },
+    AddServer { addr: SocketAddr, caller: Caller },
 
     /// A command proposed via [`Request::RemoveServer`] API.
-    RemoveServer {
-        addr: SocketAddr,
-        proposer: Proposer,
-    },
+    RemoveServer { addr: SocketAddr, caller: Caller },
 
     /// A command proposed via [`Request::TakeSnapshot`] API.
-    TakeSnapshot { proposer: Proposer },
+    TakeSnapshot { caller: Caller },
 
     /// A command proposed via [`Request::Apply`] API.
     Apply {
         input: serde_json::Value,
-        proposer: Proposer,
+        caller: Caller,
     },
 
     /// A command proposed via [`Request::Apply`] API.
@@ -59,13 +53,13 @@ pub enum Command {
 }
 
 impl Command {
-    pub(crate) fn proposer(&self) -> Option<&Proposer> {
+    pub(crate) fn caller(&self) -> Option<&Caller> {
         match self {
-            Command::CreateCluster { proposer, .. } => Some(proposer),
-            Command::AddServer { proposer, .. } => Some(proposer),
-            Command::RemoveServer { proposer, .. } => Some(proposer),
-            Command::TakeSnapshot { proposer, .. } => Some(proposer),
-            Command::Apply { proposer, .. } => Some(proposer),
+            Command::CreateCluster { caller, .. } => Some(caller),
+            Command::AddServer { caller, .. } => Some(caller),
+            Command::RemoveServer { caller, .. } => Some(caller),
+            Command::TakeSnapshot { caller, .. } => Some(caller),
+            Command::Apply { caller, .. } => Some(caller),
             Command::Query | Command::StartTerm { .. } | Command::UpdateClusterConfig { .. } => {
                 None
             }

@@ -407,14 +407,14 @@ pub struct ProposeParams {
 pub struct ProposeQueryParams {
     pub origin: NodeId,
     pub input: serde_json::Value, // TODO: remove
-    pub caller: Proposer,
+    pub caller: Caller,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NotifyQueryPromiseParams {
     pub commit_position: LogPosition,
     pub input: serde_json::Value, // TODO: remove
-    pub caller: Proposer,
+    pub caller: Caller,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -423,10 +423,9 @@ pub struct InitNodeParams {
     pub snapshot: InstallSnapshotParams, // TODO
 }
 
-// TODO: move
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Proposer {
+pub struct Caller {
     pub server_id: ServerInstanceId,
     pub client_id: ClientId,
     pub request_id: RequestId,
