@@ -3,7 +3,7 @@ use raftbare::{Node, Role};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    rpc::{Caller, ErrorKind},
+    rpc::{ErrorKind, Proposer},
     types::LogIndex,
 };
 
@@ -27,7 +27,7 @@ pub struct ApplyContext<'a> {
     pub(crate) node: &'a Node,
     pub(crate) commit_index: LogIndex,
     pub(crate) output: Option<Result<serde_json::Value, ErrorObject>>,
-    pub(crate) caller: Option<Caller>,
+    pub(crate) caller: Option<Proposer>,
 }
 
 impl ApplyContext<'_> {

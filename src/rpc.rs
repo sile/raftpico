@@ -407,14 +407,14 @@ pub struct ProposeParams {
 pub struct ProposeQueryParams {
     pub origin: NodeId,
     pub input: serde_json::Value, // TODO: remove
-    pub caller: Caller,
+    pub caller: Proposer,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NotifyQueryPromiseParams {
     pub commit_position: LogPosition,
     pub input: serde_json::Value, // TODO: remove
-    pub caller: Caller,
+    pub caller: Proposer,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -425,21 +425,11 @@ pub struct InitNodeParams {
 
 // TODO: move
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Proposer {
-    pub server: ServerInstanceId,
-    pub(crate) client: Caller, // TODO: rename
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Caller {
-    pub from: ClientId,
+    pub server_id: ServerInstanceId,
+    pub client_id: ClientId,
     pub request_id: RequestId,
-}
-
-impl Caller {
-    pub fn new(from: ClientId, request_id: RequestId) -> Self {
-        Self { from, request_id }
-    }
 }
 
 /// RPC error kind.

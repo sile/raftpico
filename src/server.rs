@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jsonlrpc::{ErrorObject, ResponseObject};
+use jsonlrpc::{ErrorObject, RequestId, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll};
 use raftbare::{Action, ClusterConfig, CommitStatus, LogEntries, Node, Role, Term};
@@ -17,7 +17,7 @@ use crate::{
     machine::{ApplyContext, Machine},
     machines::Machines,
     rpc::{
-        AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
+        AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams,
         CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyQueryPromiseParams,
         ProposeParams, ProposeQueryParams, Proposer, RemoveServerParams, Request,
         RequestVoteCallParams, RequestVoteReplyParams, TakeSnapshotResult,
@@ -38,7 +38,7 @@ pub type ServerInstanceId = Uuid;
 pub struct PendingQuery {
     pub commit_position: LogPosition,
     pub input: serde_json::Value,
-    pub caller: Caller,
+    pub caller: Proposer,
 }
 
 impl PartialEq for PendingQuery {
@@ -300,8 +300,8 @@ impl<M: Machine> Server<M> {
         // TODO: remove clone
         let caller = command
             .proposer()
-            .filter(|p| p.server == self.instance_id)
-            .map(|p| p.client.clone());
+            .filter(|p| p.server_id == self.instance_id)
+            .cloned();
         if matches!(command, Command::TakeSnapshot { .. }) {
             self.take_snapshot(index)?;
 
@@ -376,7 +376,7 @@ impl<M: Machine> Server<M> {
 
     fn reply_output(
         &mut self,
-        caller: Caller,
+        caller: Proposer,
         output: Option<Result<serde_json::Value, ErrorObject>>,
     ) -> std::io::Result<()> {
         let Some(output) = output else {
@@ -544,22 +544,30 @@ impl<M: Machine> Server<M> {
         self.election_abs_timeout = Instant::now() + timeout;
     }
 
+    fn caller(&self, client_id: ClientId, request_id: RequestId) -> Proposer {
+        Proposer {
+            server_id: self.instance_id,
+            client_id,
+            request_id,
+        }
+    }
+
     fn handle_request(&mut self, from: ClientId, request: Request) -> std::io::Result<()> {
         match request {
             Request::CreateCluster { id, params, .. } => {
-                self.handle_create_cluster_request(Caller::new(from, id), params)
+                self.handle_create_cluster_request(self.caller(from, id), params)
             }
             Request::AddServer { id, params, .. } => {
-                self.handle_add_server_request(Caller::new(from, id), params)
+                self.handle_add_server_request(self.caller(from, id), params)
             }
             Request::RemoveServer { id, params, .. } => {
-                self.handle_remove_server_request(Caller::new(from, id), params)
+                self.handle_remove_server_request(self.caller(from, id), params)
             }
             Request::TakeSnapshot { id, .. } => {
-                self.handle_take_snapshot_request(Caller::new(from, id))
+                self.handle_take_snapshot_request(self.caller(from, id))
             }
             Request::Apply { id, params, .. } => {
-                self.handle_apply_request(Caller::new(from, id), params)
+                self.handle_apply_request(self.caller(from, id), params)
             }
             Request::Propose { params, .. } => self.handle_propose_request(params),
             Request::ProposeQuery { params, .. } => self.handle_propose_query_request(params),
@@ -568,7 +576,7 @@ impl<M: Machine> Server<M> {
             }
             Request::InstallSnapshot { params, .. } => self.handle_install_snapshot_request(params),
             Request::AppendEntriesCall { params, .. } => {
-                let caller = Caller::new(from, jsonlrpc::RequestId::Number(0)); // TODO: remove dummy id
+                let caller = self.caller(from, jsonlrpc::RequestId::Number(0)); // TODO: remove dummy id
                 self.handle_append_entries_request(caller, params)
             }
             Request::AppendEntriesReply { params, .. } => {
@@ -674,13 +682,8 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn handle_take_snapshot_request(&mut self, caller: Caller) -> std::io::Result<()> {
-        let command = Command::TakeSnapshot {
-            proposer: Proposer {
-                server: self.instance_id,
-                client: caller,
-            },
-        };
+    fn handle_take_snapshot_request(&mut self, caller: Proposer) -> std::io::Result<()> {
+        let command = Command::TakeSnapshot { proposer: caller };
         self.propose_command(command)?;
         Ok(())
     }
@@ -784,7 +787,7 @@ impl<M: Machine> Server<M> {
 
     fn handle_append_entries_request(
         &mut self,
-        caller: Caller,
+        caller: Proposer,
         params: AppendEntriesCallParams,
     ) -> std::io::Result<()> {
         if self.node().is_none()
@@ -810,7 +813,7 @@ impl<M: Machine> Server<M> {
 
     fn handle_add_server_request(
         &mut self,
-        caller: Caller,
+        caller: Proposer,
         params: AddServerParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
@@ -819,17 +822,18 @@ impl<M: Machine> Server<M> {
         }
         let command = Command::AddServer {
             addr: params.addr,
-            proposer: Proposer {
-                server: self.instance_id,
-                client: caller,
-            },
+            proposer: caller,
         };
         self.propose_command(command)?;
 
         Ok(())
     }
 
-    fn handle_apply_request(&mut self, caller: Caller, params: ApplyParams) -> std::io::Result<()> {
+    fn handle_apply_request(
+        &mut self,
+        caller: Proposer,
+        params: ApplyParams,
+    ) -> std::io::Result<()> {
         if !self.is_initialized() {
             self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
@@ -838,10 +842,7 @@ impl<M: Machine> Server<M> {
             ApplyKind::Command => {
                 let command = Command::Apply {
                     input: params.input,
-                    proposer: Proposer {
-                        server: self.instance_id,
-                        client: caller,
-                    },
+                    proposer: caller,
                 };
                 self.propose_command(command)?;
             }
@@ -857,7 +858,7 @@ impl<M: Machine> Server<M> {
 
     fn handle_apply_query_request(
         &mut self,
-        caller: Caller,
+        caller: Proposer,
         input: serde_json::Value,
     ) -> std::io::Result<()> {
         if self.is_leader() {
@@ -908,7 +909,7 @@ impl<M: Machine> Server<M> {
 
     fn apply_local_query(
         &mut self,
-        caller: Caller,
+        caller: Proposer,
         input: serde_json::Value,
     ) -> std::io::Result<()> {
         let input = serde_json::from_value(input).expect("TODO: reply error response");
@@ -930,7 +931,7 @@ impl<M: Machine> Server<M> {
 
     fn handle_remove_server_request(
         &mut self,
-        caller: Caller,
+        caller: Proposer,
         params: RemoveServerParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
@@ -940,10 +941,7 @@ impl<M: Machine> Server<M> {
 
         let command = Command::RemoveServer {
             addr: params.addr,
-            proposer: Proposer {
-                server: self.instance_id,
-                client: caller,
-            },
+            proposer: caller,
         };
         self.propose_command(command)?;
 
@@ -952,7 +950,7 @@ impl<M: Machine> Server<M> {
 
     fn handle_create_cluster_request(
         &mut self,
-        caller: Caller,
+        caller: Proposer,
         params: CreateClusterParams,
     ) -> std::io::Result<()> {
         if self.is_initialized() {
@@ -972,10 +970,7 @@ impl<M: Machine> Server<M> {
             seed_addr: self.addr(),
             min_election_timeout: Duration::from_millis(params.min_election_timeout_ms as u64),
             max_election_timeout: Duration::from_millis(params.max_election_timeout_ms as u64),
-            proposer: Proposer {
-                server: self.instance_id,
-                client: caller,
-            },
+            proposer: caller,
         };
         self.propose_command(command)?;
 
@@ -1031,25 +1026,25 @@ impl<M: Machine> Server<M> {
         position
     }
 
-    fn reply_ok<T: Serialize>(&mut self, caller: Caller, value: T) -> std::io::Result<()> {
+    fn reply_ok<T: Serialize>(&mut self, caller: Proposer, value: T) -> std::io::Result<()> {
         let response = serde_json::json!({
             "jsonrpc": jsonlrpc::JsonRpcVersion::V2,
             "id": caller.request_id,
             "result": value
         });
         self.rpc_server
-            .reply(&mut self.poller, caller.from, &response)?;
+            .reply(&mut self.poller, caller.client_id, &response)?;
         Ok(())
     }
 
-    fn reply_error(&mut self, caller: Caller, error: ErrorObject) -> std::io::Result<()> {
+    fn reply_error(&mut self, caller: Proposer, error: ErrorObject) -> std::io::Result<()> {
         let response = ResponseObject::Err {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             error,
             id: Some(caller.request_id),
         };
         self.rpc_server
-            .reply(&mut self.poller, caller.from, &response)?;
+            .reply(&mut self.poller, caller.client_id, &response)?;
         Ok(())
     }
 }
