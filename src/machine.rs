@@ -30,7 +30,7 @@ pub struct ApplyContext<'a> {
     pub(crate) caller: Option<Caller>,
 }
 
-impl<'a> ApplyContext<'a> {
+impl ApplyContext<'_> {
     /// Returns the kind of the apply call.
     pub fn kind(&self) -> ApplyKind {
         self.kind
