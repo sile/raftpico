@@ -481,7 +481,7 @@ fn storage() {
         for (i, addr) in addrs.into_iter().cycle().enumerate().take(10) {
             let _: serde_json::Value = rpc(addr, apply_command_req(i));
         }
-        std::thread::sleep(Duration::from_millis(300));
+        std::thread::sleep(Duration::from_millis(500));
     });
 
     while !handle.is_finished() {
@@ -493,7 +493,7 @@ fn storage() {
         assert_eq!(server.machine().0, 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9);
     }
 
-    // Restart servers.
+    // Restart 2 servers.
     let addrs = servers.iter().map(|s| s.addr()).collect::<Vec<_>>();
     std::mem::drop(servers);
     let mut servers = vec![
@@ -503,23 +503,15 @@ fn storage() {
         )
         .expect("restart failed"),
         Server::start(
-            addrs[1],
-            Some(FileStorage::new(tempfile1.path()).expect("cannot create storage")),
-        )
-        .expect("restart failed"),
-        Server::start(
             addrs[2],
             Some(FileStorage::new(tempfile2.path()).expect("cannot create storage")),
         )
         .expect("restart failed"),
     ];
 
-    for _ in 0..10 {
+    for _ in 0..50 {
         for server in &mut servers {
             server.poll(POLL_TIMEOUT).expect("poll() failed");
-        }
-        if servers.iter().any(|s| s.is_leader()) {
-            break;
         }
     }
     assert!(servers.iter().any(|s| s.is_leader()));

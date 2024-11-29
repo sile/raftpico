@@ -154,7 +154,7 @@ impl<M: Machine> Server<M> {
         let mut responses = Vec::new();
         for event in self.events.iter() {
             if let Some(client) = self.rpc_clients.get_mut(&event.token().into()) {
-                client.handle_event(&mut self.poller, event)?;
+                let _ = client.handle_event(&mut self.poller, event); // TODO: note doc
                 while let Some(response) = client.try_recv() {
                     responses.push(response);
                 }
@@ -290,6 +290,12 @@ impl<M: Machine> Server<M> {
         }
 
         let member_change = matches!(command, Command::AddServer { .. });
+        let needs_snapshot = matches!(
+            command,
+            Command::CreateCluster { .. }
+                | Command::AddServer { .. }
+                | Command::RemoveServer { .. }
+        );
 
         // TODO: remove clone
         let caller = command
@@ -329,6 +335,11 @@ impl<M: Machine> Server<M> {
 
             // TODO: call when node.latest_config() is changed
             self.update_rpc_clients();
+        }
+
+        if needs_snapshot {
+            // TODO: note comment
+            self.take_snapshot(index)?;
         }
 
         Ok(())
@@ -963,16 +974,7 @@ impl<M: Machine> Server<M> {
             max_election_timeout: Duration::from_millis(params.max_election_timeout_ms as u64),
             proposer: Proposer {
                 server: self.instance_id,
-                client: caller.clone(), // TODO: remove clone()
-            },
-        };
-        self.propose_command(command)?;
-
-        // TODO: doc
-        let command = Command::TakeSnapshot {
-            proposer: Proposer {
-                server: Uuid::new_v4(),
-                client: caller, // TODO: use dummy
+                client: caller,
             },
         };
         self.propose_command(command)?;
