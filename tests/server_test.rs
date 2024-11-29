@@ -442,29 +442,6 @@ fn storage() {
     }
     servers.push(server0);
 
-    // Propose commands.
-    let handle = std::thread::spawn(move || {
-        for i in 0..10 {
-            let _: serde_json::Value = rpc(addr0, apply_command_req(i));
-        }
-
-        let _: TakeSnapshotResult = rpc(
-            addr0,
-            Request::TakeSnapshot {
-                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                id: RequestId::Number(0),
-            },
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    });
-    while !handle.is_finished() {
-        servers[0].poll(POLL_TIMEOUT).expect("poll() failed");
-    }
-    assert_eq!(
-        servers[0].machine().0,
-        0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9
-    );
-
     // Add two servers to the cluster.
     let server1 = Server::<Counter>::start(
         auto_addr(),
@@ -513,10 +490,37 @@ fn storage() {
         }
     }
     for server in &servers {
-        assert_eq!(
-            server.machine().0,
-            (0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9) * 2
-        );
+        assert_eq!(server.machine().0, 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9);
+    }
+
+    // Restart servers.
+    let addrs = servers.iter().map(|s| s.addr()).collect::<Vec<_>>();
+    std::mem::drop(servers);
+    let mut servers = vec![
+        Server::<Counter>::start(
+            addrs[0],
+            Some(FileStorage::new(tempfile0.path()).expect("cannot create storage")),
+        )
+        .expect("restart failed"),
+        Server::start(
+            addrs[1],
+            Some(FileStorage::new(tempfile1.path()).expect("cannot create storage")),
+        )
+        .expect("restart failed"),
+        Server::start(
+            addrs[2],
+            Some(FileStorage::new(tempfile2.path()).expect("cannot create storage")),
+        )
+        .expect("restart failed"),
+    ];
+
+    for _ in 0..100 {
+        for server in &mut servers {
+            server.poll(POLL_TIMEOUT).expect("poll() failed");
+        }
+    }
+    for server in &servers {
+        assert_eq!(server.machine().0, 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9);
     }
 }
 

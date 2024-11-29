@@ -1,4 +1,4 @@
-use std::{fs::File, io::Seek, path::Path};
+use std::{fs::File, path::Path};
 
 use jsonlrpc::JsonlStream;
 use raftbare::Node;
@@ -100,8 +100,7 @@ impl FileStorage {
         let mut voted_for = None;
         let mut config = raftbare::ClusterConfig::default();
         let mut entries = raftbare::LogEntries::new(raftbare::LogPosition::ZERO);
-        while self.file.inner().stream_position()? < self.file.inner().metadata()?.len() {
-            let record: Record = self.file.read_value()?;
+        while let Some(record) = self.load_record()? {
             match record {
                 Record::Term(v) => term = raftbare::Term::from(v),
                 Record::VotedFor(v) => voted_for = v.map(raftbare::NodeId::from),
@@ -126,6 +125,19 @@ impl FileStorage {
             let node = Node::restart(node_id, term, voted_for, log);
             (node, m)
         }))
+    }
+
+    fn load_record(&mut self) -> std::io::Result<Option<Record>> {
+        match self.file.read_value() {
+            Ok(record) => Ok(Some(record)),
+            Err(e)
+                if e.io_error_kind() == Some(std::io::ErrorKind::UnexpectedEof)
+                    && self.file.read_buf().is_empty() =>
+            {
+                Ok(None)
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 }
 
