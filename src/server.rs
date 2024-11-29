@@ -102,6 +102,7 @@ impl<M: Machine> Server<M> {
             }
         }
 
+        let last_applied_index = node.log().snapshot_position().index.into();
         let mut this = Self {
             instance_id: Uuid::new_v4(),
             poller,
@@ -112,7 +113,7 @@ impl<M: Machine> Server<M> {
             storage,
             local_commands,
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
-            last_applied_index: LogIndex::from(0),
+            last_applied_index,
             dirty_cluster_config: false,
             queries: BinaryHeap::new(),
             machines,
@@ -232,11 +233,6 @@ impl<M: Machine> Server<M> {
 
             self.last_applied_index = self.node.commit_index().into();
             self.handle_pending_queries()?;
-
-            // TODO: snapshot handling
-            // if self.commands.len() > self.max_log_entries_hint {
-            //     self.install_snapshot();
-            // }
         }
 
         Ok(())

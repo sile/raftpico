@@ -514,11 +514,16 @@ fn storage() {
         .expect("restart failed"),
     ];
 
-    for _ in 0..100 {
+    for _ in 0..10 {
         for server in &mut servers {
             server.poll(POLL_TIMEOUT).expect("poll() failed");
         }
+        if servers.iter().any(|s| s.is_leader()) {
+            break;
+        }
     }
+    assert!(servers.iter().any(|s| s.is_leader()));
+
     for server in &servers {
         assert_eq!(server.machine().0, 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9);
     }
