@@ -963,7 +963,16 @@ impl<M: Machine> Server<M> {
             max_election_timeout: Duration::from_millis(params.max_election_timeout_ms as u64),
             proposer: Proposer {
                 server: self.instance_id,
-                client: caller,
+                client: caller.clone(), // TODO: remove clone()
+            },
+        };
+        self.propose_command(command)?;
+
+        // TODO: doc
+        let command = Command::TakeSnapshot {
+            proposer: Proposer {
+                server: Uuid::new_v4(),
+                client: caller, // TODO: use dummy
             },
         };
         self.propose_command(command)?;

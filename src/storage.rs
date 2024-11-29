@@ -1,4 +1,8 @@
-use std::{fs::File, path::Path};
+use std::{
+    fs::File,
+    io::{Seek, SeekFrom},
+    path::Path,
+};
 
 use jsonlrpc::JsonlStream;
 use raftbare::Node;
@@ -70,6 +74,7 @@ impl FileStorage {
 
     pub(crate) fn save_snapshot(&mut self, snapshot: InstallSnapshotParams) -> std::io::Result<()> {
         self.file.inner().set_len(0)?;
+        self.file.inner().seek(SeekFrom::Start(0))?;
 
         // [NOTE]
         // There is a possibility that the storage data could be lost if the server process aborts
@@ -114,6 +119,7 @@ impl FileStorage {
                 }
                 Record::Snapshot(snapshot) => {
                     node_id = snapshot.node_id.into();
+                    entries = raftbare::LogEntries::new(snapshot.last_included_position.into());
                     config.voters = snapshot.voters.into_iter().map(From::from).collect();
                     config.new_voters = snapshot.new_voters.into_iter().map(From::from).collect();
                     machine = Some(serde_json::from_value(snapshot.machine)?);

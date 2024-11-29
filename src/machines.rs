@@ -56,6 +56,7 @@ pub(crate) struct Member {
 
 /// Replicated state machine responsible for handling system commands.
 #[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SystemMachine {
     pub(crate) min_election_timeout: Duration,
     pub(crate) max_election_timeout: Duration,
