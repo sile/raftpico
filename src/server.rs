@@ -7,7 +7,7 @@ use std::{
 use jsonlrpc::{ErrorObject, RequestId, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll};
-use raftbare::{Action, ClusterConfig, CommitStatus, LogEntries, Node, Role, Term};
+use raftbare::{Action, ClusterConfig, CommitStatus, LogEntries, Node, Role};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -71,7 +71,6 @@ pub struct Server<M> {
     last_applied_index: LogIndex,
     local_commands: Commands,
     storage: Option<FileStorage>, // TODO: local_storage
-    dirty_cluster_config: bool,
     pendings: BinaryHeap<Pending>,
     machines: Machines<M>,
 }
@@ -112,7 +111,6 @@ impl<M: Machine> Server<M> {
             local_commands,
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index,
-            dirty_cluster_config: false,
             pendings: BinaryHeap::new(),
             machines,
         };
@@ -262,11 +260,12 @@ impl<M: Machine> Server<M> {
             unreachable!("Bug: {index:?}");
         };
         match entry {
-            raftbare::LogEntry::Term(x) => self.handle_committed_term(x),
-            raftbare::LogEntry::ClusterConfig(x) => self.handle_committed_cluster_config(x),
+            raftbare::LogEntry::Term(_) => {}
+            raftbare::LogEntry::ClusterConfig(_) => {
+                self.maybe_update_cluster_config();
+            }
             raftbare::LogEntry::Command => self.handle_committed_command(index)?,
         }
-        self.maybe_update_cluster_config();
 
         Ok(())
     }
@@ -286,7 +285,7 @@ impl<M: Machine> Server<M> {
             command = Command::Apply { input };
         }
 
-        let member_change = matches!(command, Command::AddServer { .. });
+        // TODO: rename
         let needs_snapshot = matches!(
             command,
             Command::CreateCluster { .. }
@@ -316,22 +315,17 @@ impl<M: Machine> Server<M> {
             output: None,
             caller,
         };
-        self.machines.apply(&mut ctx, command); // TODO: use value passing
+        self.machines.apply(&mut ctx, command);
 
         if let Some(caller) = ctx.caller {
             self.reply_output(caller, ctx.output)?;
         }
 
-        if member_change {
-            self.dirty_cluster_config = true;
-
-            // TODO: call when node.latest_config() is changed
-            self.update_rpc_clients();
-        }
-
         if needs_snapshot {
             // TODO: note comment
             self.take_snapshot(index)?;
+            self.maybe_update_cluster_config();
+            self.update_rpc_clients();
         }
 
         Ok(())
@@ -385,10 +379,6 @@ impl<M: Machine> Server<M> {
     }
 
     fn maybe_update_cluster_config(&mut self) {
-        if !self.dirty_cluster_config {
-            return;
-        }
-
         if !self.is_leader() {
             return;
         }
@@ -400,47 +390,21 @@ impl<M: Machine> Server<M> {
         let mut adding = Vec::new();
         let mut removing = Vec::new();
         for &id in self.machines.system.members.keys() {
-            // TODO: if !m.evicting && !self.node.config().voters.contains(id) {
             if !self.node.config().voters.contains(&id.into()) {
                 adding.push(id.into());
             }
         }
         for &id in &self.node.config().voters {
-            // TODO: if self.members.get(id).map_or(true, |m| m.evicting) {
             if !self.machines.system.members.contains_key(&id.into()) {
                 removing.push(id);
             }
         }
         if adding.is_empty() && removing.is_empty() {
-            self.dirty_cluster_config = false;
             return;
         }
 
         let new_config = self.node.config().to_joint_consensus(&adding, &removing);
         self.node.propose_config(new_config); // Always succeeds
-    }
-
-    fn handle_committed_term(&mut self, _term: Term) {
-        // TOOD: update dirty_cluster_config flag
-    }
-
-    fn handle_committed_cluster_config(&mut self, _config: ClusterConfig) {
-        // dbg!(self.node.id().get());
-        // dbg!(self.is_leader());
-        // dbg!(&config);
-
-        // TODO: evict handling
-        // if c.is_joint_consensus() {
-        //     let mut evicted = Vec::new();
-        //     for m in self.members.values() {
-        //         if m.evicting && !c.new_voters.contains(&m.node_id) {
-        //             evicted.push(m.node_id);
-        //         }
-        //     }
-        //     for id in evicted {
-        //         self.handle_evicted(id)?;
-        //     }
-        // }
     }
 
     fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
