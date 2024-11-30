@@ -63,9 +63,9 @@ pub enum Request {
         jsonrpc: JsonRpcVersion,
         params: ProposeQueryParams,
     },
-    NotifyQueryPromise {
+    NotifyCommit {
         jsonrpc: JsonRpcVersion,
-        params: NotifyQueryPromiseParams,
+        params: NotifyCommitParams,
     },
 
     /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::AppendEntriesCall`].
@@ -411,9 +411,8 @@ pub struct ProposeQueryParams {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NotifyQueryPromiseParams {
-    pub commit_position: LogPosition,
+pub struct NotifyCommitParams {
+    pub commit: LogPosition,
     pub input: serde_json::Value, // TODO: remove
     pub caller: Caller,
 }

@@ -18,8 +18,8 @@ use crate::{
     machines::Machines,
     rpc::{
         AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyQueryPromiseParams,
-        ProposeParams, ProposeQueryParams, RemoveServerParams, Request, RequestVoteCallParams,
+        CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyCommitParams, ProposeParams,
+        ProposeQueryParams, RemoveServerParams, Request, RequestVoteCallParams,
         RequestVoteReplyParams, TakeSnapshotResult,
     },
     storage::FileStorage,
@@ -560,9 +560,7 @@ impl<M: Machine> Server<M> {
             }
             Request::Propose { params, .. } => self.handle_propose_request(params),
             Request::ProposeQuery { params, .. } => self.handle_propose_query_request(params),
-            Request::NotifyQueryPromise { params, .. } => {
-                self.handle_notify_query_promise_request(params)
-            }
+            Request::NotifyCommit { params, .. } => self.handle_notify_commit_request(params),
             Request::InstallSnapshot { params, .. } => self.handle_install_snapshot_request(params),
             Request::AppendEntriesCall { params, .. } => {
                 let caller = self.caller(from, jsonlrpc::RequestId::Number(0)); // TODO: remove dummy id
@@ -735,10 +733,10 @@ impl<M: Machine> Server<M> {
         let position = self.propose_command_leader(Command::Query { input: None });
         self.send_to(
             params.caller.node_id,
-            &Request::NotifyQueryPromise {
+            &Request::NotifyCommit {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                params: NotifyQueryPromiseParams {
-                    commit_position: position,
+                params: NotifyCommitParams {
+                    commit: position,
                     input: params.input,
                     caller: params.caller,
                 },
@@ -761,12 +759,9 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn handle_notify_query_promise_request(
-        &mut self,
-        params: NotifyQueryPromiseParams,
-    ) -> std::io::Result<()> {
+    fn handle_notify_commit_request(&mut self, params: NotifyCommitParams) -> std::io::Result<()> {
         self.pendings.push(Pending {
-            commit_position: params.commit_position,
+            commit_position: params.commit,
             input: params.input,
             caller: params.caller,
         });
