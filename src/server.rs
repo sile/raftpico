@@ -32,32 +32,32 @@ pub const EVENTS_CAPACITY: usize = 1024;
 // TODO: move
 pub type Commands = BTreeMap<LogIndex, Command>;
 
-// TODO: struct or remove or use timestamp instead
+// TODO: struct or remove or use timestamp (or pid) instead
 pub type ServerInstanceId = Uuid;
 
 // TODO: rename
 #[derive(Debug)]
-pub struct PendingQuery {
+pub struct Pending {
     pub commit_position: LogPosition,
     pub input: serde_json::Value,
     pub caller: Caller,
 }
 
-impl PartialEq for PendingQuery {
+impl PartialEq for Pending {
     fn eq(&self, other: &Self) -> bool {
         self.commit_position == other.commit_position
     }
 }
 
-impl Eq for PendingQuery {}
+impl Eq for Pending {}
 
-impl PartialOrd for PendingQuery {
+impl PartialOrd for Pending {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for PendingQuery {
+impl Ord for Pending {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.commit_position.cmp(&other.commit_position).reverse()
     }
@@ -65,7 +65,7 @@ impl Ord for PendingQuery {
 
 #[derive(Debug)]
 pub struct Server<M> {
-    instance_id: ServerInstanceId, // TODO: remove
+    instance_id: ServerInstanceId,
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
@@ -76,7 +76,7 @@ pub struct Server<M> {
     local_commands: Commands,
     storage: Option<FileStorage>, // TODO: local_storage
     dirty_cluster_config: bool,
-    queries: BinaryHeap<PendingQuery>,
+    pendings: BinaryHeap<Pending>,
     machines: Machines<M>,
 }
 
@@ -117,7 +117,7 @@ impl<M: Machine> Server<M> {
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index,
             dirty_cluster_config: false,
-            queries: BinaryHeap::new(),
+            pendings: BinaryHeap::new(),
             machines,
         };
         this.update_rpc_clients(); // TODO
@@ -241,7 +241,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_pending_queries(&mut self) -> std::io::Result<()> {
-        while let Some(query) = self.queries.peek() {
+        while let Some(query) = self.pendings.peek() {
             match self.node.get_commit_status(query.commit_position.into()) {
                 CommitStatus::InProgress => {
                     break;
@@ -250,7 +250,7 @@ impl<M: Machine> Server<M> {
                     todo!("error response");
                 }
                 CommitStatus::Committed => {
-                    let query = self.queries.pop().expect("unreachable");
+                    let query = self.pendings.pop().expect("unreachable");
                     let input =
                         serde_json::from_value(query.input).expect("TODO: reply error response");
 
@@ -780,7 +780,7 @@ impl<M: Machine> Server<M> {
         &mut self,
         params: NotifyQueryPromiseParams,
     ) -> std::io::Result<()> {
-        self.queries.push(PendingQuery {
+        self.pendings.push(Pending {
             commit_position: params.commit_position,
             input: params.input,
             caller: params.caller,
@@ -863,7 +863,7 @@ impl<M: Machine> Server<M> {
         if self.is_leader() {
             let command = Command::Query;
             let promise = self.propose_command_leader(command);
-            self.queries.push(PendingQuery {
+            self.pendings.push(Pending {
                 commit_position: promise,
                 input,
                 caller,
