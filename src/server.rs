@@ -18,9 +18,9 @@ use crate::{
     machines::Machines,
     rpc::{
         AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyCommitParams, ProposeParams,
-        ProposeQueryParams, RemoveServerParams, Request, RequestVoteCallParams,
-        RequestVoteReplyParams, TakeSnapshotResult,
+        CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyCommitParams,
+        ProposeCommandParams, ProposeQueryParams, RemoveServerParams, Request,
+        RequestVoteCallParams, RequestVoteReplyParams, TakeSnapshotResult,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, Token},
@@ -558,7 +558,7 @@ impl<M: Machine> Server<M> {
             Request::Apply { id, params, .. } => {
                 self.handle_apply_request(self.caller(from, id), params)
             }
-            Request::Propose { params, .. } => self.handle_propose_request(params),
+            Request::ProposeCommand { params, .. } => self.handle_propose_command_request(params),
             Request::ProposeQuery { params, .. } => self.handle_propose_query_request(params),
             Request::NotifyCommit { params, .. } => self.handle_notify_commit_request(params),
             Request::InstallSnapshot { params, .. } => self.handle_install_snapshot_request(params),
@@ -720,7 +720,10 @@ impl<M: Machine> Server<M> {
         self.node().is_some()
     }
 
-    fn handle_propose_request(&mut self, params: ProposeParams) -> std::io::Result<()> {
+    fn handle_propose_command_request(
+        &mut self,
+        params: ProposeCommandParams,
+    ) -> std::io::Result<()> {
         self.propose_command(params.caller, params.command)?;
         Ok(())
     }
@@ -960,9 +963,9 @@ impl<M: Machine> Server<M> {
                 todo!("notify this error to the origin node");
             }
 
-            let request = Request::Propose {
+            let request = Request::ProposeCommand {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                params: ProposeParams { command, caller },
+                params: ProposeCommandParams { command, caller },
             };
             self.send_to(maybe_leader, &request)?;
             return Ok(());

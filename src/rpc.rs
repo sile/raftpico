@@ -54,10 +54,9 @@ pub enum Request {
     // TODO: GetServerState
 
     // Internal APIs
-    Propose {
-        // TODO: ProposeCommand (?)
+    ProposeCommand {
         jsonrpc: JsonRpcVersion,
-        params: ProposeParams,
+        params: ProposeCommandParams,
     },
     ProposeQuery {
         jsonrpc: JsonRpcVersion,
@@ -399,7 +398,7 @@ pub struct TakeSnapshotResult {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ProposeParams {
+pub struct ProposeCommandParams {
     pub command: Command,
     pub caller: Caller,
 }
@@ -417,8 +416,10 @@ pub struct NotifyCommitParams {
     pub caller: Caller,
 }
 
+/// Caller of an RPC request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
 pub struct Caller {
     pub server_id: ServerInstanceId,
     pub node_id: NodeId,
