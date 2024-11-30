@@ -761,6 +761,10 @@ impl<M: Machine> Server<M> {
     fn handle_notify_commit_request(&mut self, params: NotifyCommitParams) -> std::io::Result<()> {
         if self.process_id != params.caller.process_id {
             // This notification is irrelevant as the server has been restarted.
+            //
+            // [NOTE]
+            // Theoretically, the restarted server could have the same process ID as before.
+            // However, in practice, I believe the likelihood of this occurring is extremely low.
             return Ok(());
         }
 
