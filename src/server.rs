@@ -6,7 +6,7 @@ use std::{
 
 use jsonlrpc::{RequestId, ResponseObject};
 use jsonlrpc_mio::ClientId;
-use raftbare::{Action, ClusterConfig, CommitStatus, LogEntries, Node, Role};
+use raftbare::{Action, ClusterConfig, CommitStatus, Node, Role};
 use rand::Rng;
 use serde::Deserialize;
 
@@ -123,10 +123,8 @@ impl<M: Machine> Server<M> {
             .election_abs_timeout
             .saturating_duration_since(Instant::now())
             .min(timeout.unwrap_or(Duration::MAX));
-        if !self.broker.poll(timeout)? {
-            if self.election_abs_timeout <= Instant::now() {
-                self.node.handle_election_timeout();
-            }
+        if !self.broker.poll(timeout)? && self.election_abs_timeout <= Instant::now() {
+            self.node.handle_election_timeout();
         }
 
         while let Some(response) = self.broker.try_recv_response() {
@@ -342,9 +340,21 @@ impl<M: Machine> Server<M> {
     fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
         match action {
             Action::SetElectionTimeout => self.handle_set_election_timeout_action(),
-            Action::SaveCurrentTerm => self.handle_save_current_term_action()?,
-            Action::SaveVotedFor => self.handle_save_voted_for_action()?,
-            Action::AppendLogEntries(entries) => self.handle_append_log_entries_action(entries)?,
+            Action::SaveCurrentTerm => {
+                if let Some(storage) = &mut self.storage {
+                    storage.save_current_term(self.node.current_term().into())?;
+                }
+            }
+            Action::SaveVotedFor => {
+                if let Some(storage) = &mut self.storage {
+                    storage.save_voted_for(self.node.voted_for().map(From::from))?;
+                }
+            }
+            Action::AppendLogEntries(entries) => {
+                if let Some(storage) = &mut self.storage {
+                    storage.append_entries(&entries, &self.local_commands)?;
+                }
+            }
             Action::BroadcastMessage(message) => self.handle_broadcast_message_action(message)?,
             Action::SendMessage(dst, message) => {
                 self.handle_send_message_action(dst.into(), message)?
@@ -386,27 +396,6 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn handle_append_log_entries_action(&mut self, entries: LogEntries) -> std::io::Result<()> {
-        if let Some(storage) = &mut self.storage {
-            storage.append_entries(&entries, &self.local_commands)?;
-        }
-        Ok(())
-    }
-
-    fn handle_save_current_term_action(&mut self) -> std::io::Result<()> {
-        if let Some(storage) = &mut self.storage {
-            storage.save_current_term(self.node.current_term().into())?;
-        }
-        Ok(())
-    }
-
-    fn handle_save_voted_for_action(&mut self) -> std::io::Result<()> {
-        if let Some(storage) = &mut self.storage {
-            storage.save_voted_for(self.node.voted_for().map(From::from))?;
-        }
-        Ok(())
-    }
-
     fn handle_set_election_timeout_action(&mut self) {
         let min = self.machines.system.min_election_timeout;
         let max = self.machines.system.max_election_timeout.max(min);
@@ -444,7 +433,9 @@ impl<M: Machine> Server<M> {
             Request::Apply { id, params, .. } => {
                 self.handle_apply_request(self.caller(from, id), params)
             }
-            Request::ProposeCommand { params, .. } => self.handle_propose_command_request(params),
+            Request::ProposeCommand { params, .. } => {
+                self.propose_command(params.caller, params.command)
+            }
             Request::ProposeQuery { params, .. } => self.handle_propose_query_request(params),
             Request::NotifyCommit { params, .. } => self.handle_notify_commit_request(params),
             Request::InstallSnapshot { params, .. } => self.handle_install_snapshot_request(params),
@@ -600,14 +591,6 @@ impl<M: Machine> Server<M> {
 
     fn is_initialized(&self) -> bool {
         self.node().is_some()
-    }
-
-    fn handle_propose_command_request(
-        &mut self,
-        params: ProposeCommandParams,
-    ) -> std::io::Result<()> {
-        self.propose_command(params.caller, params.command)?;
-        Ok(())
     }
 
     fn handle_propose_query_request(&mut self, params: ProposeQueryParams) -> std::io::Result<()> {
