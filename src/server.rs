@@ -26,14 +26,14 @@ use crate::{
     ApplyKind,
 };
 
-pub const EVENTS_CAPACITY: usize = 1024;
+const EVENTS_CAPACITY: usize = 1024;
 
 // TODO: rename
 #[derive(Debug)]
-pub struct Pending {
-    pub commit_position: LogPosition,
-    pub input: serde_json::Value,
-    pub caller: Caller,
+struct Pending {
+    commit_position: LogPosition,
+    input: serde_json::Value,
+    caller: Caller,
 }
 
 impl PartialEq for Pending {
@@ -56,6 +56,9 @@ impl Ord for Pending {
     }
 }
 
+// TODO: struct ServerState
+
+/// Raft server.
 #[derive(Debug)]
 pub struct Server<M> {
     process_id: u32,
@@ -269,6 +272,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
+        // TODO: while loop for merged commands / queries
         let pending = self.pop_pending(index);
         let caller = pending.as_ref().map(|p| p.caller.clone()); // TODO: remove clone
 

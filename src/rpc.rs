@@ -64,6 +64,7 @@ pub enum Request {
         params: ProposeQueryParams,
     },
 
+    // TODO: rename
     /// **\[INTERNAL:raftpico\]** Notify the commit position associated with a proposal.
     NotifyCommit {
         jsonrpc: JsonRpcVersion,
