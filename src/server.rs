@@ -1,17 +1,17 @@
 use std::{
-    collections::{BinaryHeap, HashMap, HashSet},
+    collections::BinaryHeap,
     net::SocketAddr,
     time::{Duration, Instant},
 };
 
 use jsonlrpc::{ErrorObject, RequestId, ResponseObject};
-use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
-use mio::{Events, Poll};
+use jsonlrpc_mio::ClientId;
 use raftbare::{Action, ClusterConfig, CommitStatus, LogEntries, Node, Role};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    broker::MessageBroker,
     command::{Command, Commands},
     machine::{ApplyContext, Machine},
     machines::Machines,
@@ -22,11 +22,9 @@ use crate::{
         RequestVoteCallParams, RequestVoteReplyParams, TakeSnapshotResult,
     },
     storage::FileStorage,
-    types::{LogIndex, LogPosition, NodeId, Token},
+    types::{LogIndex, LogPosition, NodeId},
     ApplyKind,
 };
-
-const EVENTS_CAPACITY: usize = 1024;
 
 // TODO: rename
 #[derive(Debug)]
@@ -62,10 +60,7 @@ impl Ord for Pending {
 #[derive(Debug)]
 pub struct Server<M> {
     process_id: u32,
-    poller: Poll,
-    events: Events,
-    rpc_server: RpcServer<Request>,
-    rpc_clients: HashMap<Token, RpcClient>,
+    broker: MessageBroker,
     node: Node,
     election_abs_timeout: Instant,
     last_applied_index: LogIndex,
@@ -80,15 +75,6 @@ impl<M: Machine> Server<M> {
         listen_addr: SocketAddr,
         mut storage: Option<FileStorage>,
     ) -> std::io::Result<Self> {
-        let mut poller = Poll::new()?;
-        let events = Events::with_capacity(EVENTS_CAPACITY);
-        let rpc_server = RpcServer::start(
-            &mut poller,
-            listen_addr,
-            Token::SERVER_MIN.into(),
-            Token::SERVER_MAX.into(),
-        )?;
-
         let mut local_commands = Commands::new();
         let mut machines = Machines::default();
         let mut node = Node::start(NodeId::UNINIT.into());
@@ -102,10 +88,7 @@ impl<M: Machine> Server<M> {
         let last_applied_index = node.log().snapshot_position().index.into();
         let mut this = Self {
             process_id: std::process::id(),
-            poller,
-            events,
-            rpc_server,
-            rpc_clients: HashMap::new(),
+            broker: MessageBroker::start(listen_addr)?,
             node,
             storage,
             local_commands,
@@ -120,7 +103,7 @@ impl<M: Machine> Server<M> {
     }
 
     pub fn addr(&self) -> SocketAddr {
-        self.rpc_server.listen_addr()
+        self.broker.listen_addr()
     }
 
     pub fn node(&self) -> Option<&Node> {
@@ -136,41 +119,26 @@ impl<M: Machine> Server<M> {
     }
 
     pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
-        // I/O event handling.
         let timeout = self
             .election_abs_timeout
             .saturating_duration_since(Instant::now())
             .min(timeout.unwrap_or(Duration::MAX));
-        self.poller.poll(&mut self.events, Some(timeout))?;
-        if self.election_abs_timeout <= Instant::now() {
-            // TODO: stats per role
-            self.node.handle_election_timeout();
-        }
-
-        let mut responses = Vec::new();
-        for event in self.events.iter() {
-            if let Some(client) = self.rpc_clients.get_mut(&event.token().into()) {
-                let _ = client.handle_event(&mut self.poller, event); // TODO: note doc
-                while let Some(response) = client.try_recv() {
-                    responses.push(response);
-                }
-            } else {
-                self.rpc_server.handle_event(&mut self.poller, event)?;
+        if !self.broker.poll(timeout)? {
+            if self.election_abs_timeout <= Instant::now() {
+                self.node.handle_election_timeout();
             }
         }
-        for response in responses {
+
+        while let Some(response) = self.broker.try_recv_response() {
             self.handle_response(response)?;
         }
 
-        // RPC request handling.
-        while let Some((from, request)) = self.rpc_server.try_recv() {
+        while let Some((from, request)) = self.broker.try_recv_request() {
             self.handle_request(from, request)?;
         }
 
-        // Commit handling.
         self.handle_committed_entries()?;
 
-        // Raft action handling.
         while let Some(action) = self.node.actions_mut().next() {
             self.handle_action(action)?;
         }
@@ -331,33 +299,15 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    // TOOD: lazy update
     fn update_rpc_clients(&mut self) {
-        // Removed server handling.
-        let addrs = self
-            .machines
-            .system
-            .members
-            .values()
-            .map(|m| m.addr)
-            .collect::<HashSet<_>>();
-        self.rpc_clients
-            .retain(|_, client| addrs.contains(&client.server_addr()));
-        // TODO: Remove from node_id_to_token too (or don't remove rpc_clients at all)
-
-        // Added server handling.
-        for member in self.machines.system.members.values() {
-            if member.addr == self.addr() {
-                continue;
-            }
-
-            if self.rpc_clients.contains_key(&member.token) {
-                continue;
-            }
-
-            let rpc_client = RpcClient::new(member.token.into(), member.addr);
-            self.rpc_clients.insert(member.token, rpc_client);
-        }
+        self.broker.update_peers(
+            self.machines
+                .system
+                .members
+                .iter()
+                .filter(|(&id, _)| id != self.node.id().into())
+                .map(|(&id, m)| (id, m.token, m.addr)),
+        );
     }
 
     fn reply_output(
@@ -451,14 +401,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         let request = Request::from_raftbare(message, &self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
-        let request = serde_json::value::to_value(&request)?;
-        for client in self.rpc_clients.values_mut() {
-            // TODO: Drop if sending queue is full
-            if let Err(e) = client.send(&mut self.poller, &request) {
-                // Not a critial error.
-                todo!("{e:?}");
-            }
-        }
+        self.broker.broadcast(&request)?;
         Ok(())
     }
 
@@ -712,18 +655,9 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
+    // TODO: remove
     fn send_to<T: Serialize>(&mut self, node_id: NodeId, message: &T) -> std::io::Result<()> {
-        let Some(token) = self.machines.system.members.get(&node_id).map(|m| m.token) else {
-            return Ok(());
-        };
-
-        let Some(client) = self.rpc_clients.get_mut(&token) else {
-            // TODO: use entry
-            return Ok(());
-        };
-
-        client.send(&mut self.poller, message)?;
-        Ok(())
+        self.broker.send_to(node_id, message)
     }
 
     fn handle_notify_commit_request(&mut self, params: NotifyCommitParams) -> std::io::Result<()> {
@@ -830,25 +764,7 @@ impl<M: Machine> Server<M> {
             params: ProposeQueryParams { input, caller },
         };
 
-        // TODO: optimize
-        let Some(addr) = self
-            .machines
-            .system
-            .members
-            .iter()
-            .find(|x| *x.0 == maybe_leader)
-            .map(|x| x.1.addr)
-        else {
-            todo!();
-        };
-        let Some(client) = self
-            .rpc_clients
-            .values_mut()
-            .find(|c| c.server_addr() == addr)
-        else {
-            todo!("error response");
-        };
-        client.send(&mut self.poller, &request)?;
+        self.broker.send_to(maybe_leader, &request)?;
 
         Ok(())
     }
@@ -991,24 +907,10 @@ impl<M: Machine> Server<M> {
     }
 
     fn reply_ok<T: Serialize>(&mut self, caller: Caller, value: T) -> std::io::Result<()> {
-        let response = serde_json::json!({
-            "jsonrpc": jsonlrpc::JsonRpcVersion::V2,
-            "id": caller.request_id,
-            "result": value
-        });
-        self.rpc_server
-            .reply(&mut self.poller, caller.client_id, &response)?;
-        Ok(())
+        self.broker.reply_ok(caller, value)
     }
 
     fn reply_error(&mut self, caller: Caller, error: ErrorObject) -> std::io::Result<()> {
-        let response = ResponseObject::Err {
-            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            error,
-            id: Some(caller.request_id),
-        };
-        self.rpc_server
-            .reply(&mut self.poller, caller.client_id, &response)?;
-        Ok(())
+        self.broker.reply_error(caller, error)
     }
 }

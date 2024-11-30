@@ -1,3 +1,4 @@
+mod broker;
 pub mod command;
 mod machine;
 pub mod machines;
