@@ -969,12 +969,26 @@ impl<M: Machine> Server<M> {
         }
 
         let commit_position = self.propose_command_leader(command);
-        let pending = Pending {
-            commit_position,
-            input: serde_json::Value::Null, // Always null for non-query commands
-            caller,
-        };
-        self.pendings.push(pending);
+        if caller.node_id == self.node.id().into() {
+            let pending = Pending {
+                commit_position,
+                input: serde_json::Value::Null, // Always null for non-query commands
+                caller,
+            };
+            self.pendings.push(pending);
+        } else {
+            // TODO: add note doc about message reordering
+            let node_id = caller.node_id;
+            let request = Request::NotifyCommit {
+                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+                params: NotifyCommitParams {
+                    commit: commit_position,
+                    input: serde_json::Value::Null,
+                    caller,
+                },
+            };
+            self.send_to(node_id, &request)?;
+        }
 
         Ok(())
     }
