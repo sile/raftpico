@@ -17,7 +17,7 @@ pub trait Machine: Default + Serialize + for<'de> Deserialize<'de> {
     ///
     /// It is important to note that during the execution of this method,
     /// [`ApplyContext::output()`] must be called to return the output to the caller.
-    fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input);
+    fn apply(&mut self, ctx: &mut ApplyContext, input: Self::Input);
 }
 
 /// Context of a [`Machine::apply()`] call.

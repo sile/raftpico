@@ -23,16 +23,16 @@ pub struct Machines<M> {
 impl<M: Machine> Machine for Machines<M> {
     type Input = Command;
 
-    fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input) {
+    fn apply(&mut self, ctx: &mut ApplyContext, input: Self::Input) {
         match input {
             Command::CreateCluster { .. }
             | Command::AddServer { .. }
             | Command::RemoveServer { .. } => {
                 self.system.apply(ctx, input);
             }
-            Command::Apply { input } => match serde_json::from_value(input.clone()) {
+            Command::Apply { input } => match serde_json::from_value(input) {
                 Ok(input) => {
-                    self.user.apply(ctx, &input);
+                    self.user.apply(ctx, input);
                 }
                 Err(e) => {
                     ctx.error(ErrorKind::InvalidMachineInput.object_with_reason(e));
@@ -118,7 +118,7 @@ impl SystemMachine {
 impl Machine for SystemMachine {
     type Input = Command;
 
-    fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input) {
+    fn apply(&mut self, ctx: &mut ApplyContext, input: Self::Input) {
         match input {
             Command::CreateCluster {
                 seed_addr,
@@ -127,12 +127,12 @@ impl Machine for SystemMachine {
                 ..
             } => self.apply_create_cluster_command(
                 ctx,
-                *seed_addr,
-                *min_election_timeout,
-                *max_election_timeout,
+                seed_addr,
+                min_election_timeout,
+                max_election_timeout,
             ),
-            Command::AddServer { addr, .. } => self.apply_add_server_command(ctx, *addr),
-            Command::RemoveServer { addr, .. } => self.apply_remove_server_command(ctx, *addr),
+            Command::AddServer { addr, .. } => self.apply_add_server_command(ctx, addr),
+            Command::RemoveServer { addr, .. } => self.apply_remove_server_command(ctx, addr),
             Command::Apply { .. }
             | Command::TakeSnapshot { .. }
             | Command::Query { .. }

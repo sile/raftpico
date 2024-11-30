@@ -319,7 +319,7 @@ impl<M: Machine> Server<M> {
             output: None,
             caller,
         };
-        self.machines.apply(&mut ctx, &command); // TODO: use value passing
+        self.machines.apply(&mut ctx, command); // TODO: use value passing
 
         if let Some(caller) = ctx.caller {
             self.reply_output(caller, ctx.output)?;
@@ -898,7 +898,7 @@ impl<M: Machine> Server<M> {
             caller: Some(caller),
         };
 
-        self.machines.user.apply(&mut ctx, &input);
+        self.machines.user.apply(&mut ctx, input);
         let caller = ctx.caller.expect("unreachale");
         self.reply_output(caller, ctx.output)?;
 

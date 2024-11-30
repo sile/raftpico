@@ -32,8 +32,7 @@ struct KvsMachine {
 impl Machine for KvsMachine {
     type Input = KvsInput;
 
-    fn apply(&mut self, ctx: &mut ApplyContext, input: &Self::Input) {
-        let input = input.clone(); //TODO
+    fn apply(&mut self, ctx: &mut ApplyContext, input: Self::Input) {
         match input {
             KvsInput::Put { key, value } => {
                 let value = self.entries.insert(key, value);
