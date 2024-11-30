@@ -51,17 +51,21 @@ pub enum Request {
         jsonrpc: JsonRpcVersion,
         id: RequestId,
     },
-    // TODO: GetServerState
 
-    // Internal APIs
+    // TODO: GetServerState
+    /// **\[INTERNAL:raftpico\]** Propose a command.
     ProposeCommand {
         jsonrpc: JsonRpcVersion,
         params: ProposeCommandParams,
     },
+
+    /// **\[INTERNAL:raftpico\]** Propose a (consistent) query.
     ProposeQuery {
         jsonrpc: JsonRpcVersion,
         params: ProposeQueryParams,
     },
+
+    /// **\[INTERNAL:raftpico\]** Notify the commit position associated with a proposal.
     NotifyCommit {
         jsonrpc: JsonRpcVersion,
         params: NotifyCommitParams,
@@ -394,25 +398,46 @@ pub struct ApplyParams {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TakeSnapshotResult {
+    /// Log index where the snapshot was taken.
     pub snapshot_index: LogIndex,
 }
 
+/// Parameters of [`Request::ProposeCommand`].
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeCommandParams {
+    /// Proposed command.
     pub command: Command,
+
+    /// RPC caller that receives the output of the command result.
     pub caller: Caller,
 }
 
+/// Parameters of [`Request::ProposeQuery`].
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeQueryParams {
-    pub input: serde_json::Value, // TODO: remove
+    // [NOTE]
+    // This field can be omitted if the `Server` handles additional state for this,
+    // albeit with a slight increase in complexity.
+    /// Input of the query.
+    pub input: serde_json::Value,
+
+    /// RPC caller that receives the output of the query result.
     pub caller: Caller,
 }
 
+/// Parameters of [`Request::NotifyCommit`].
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NotifyCommitParams {
+    /// Commit position.
     pub commit: LogPosition,
-    pub input: serde_json::Value, // TODO: remove
+
+    // [NOTE]
+    // This field can be omitted if the `Server` handles additional state for this,
+    // albeit with a slight increase in complexity.
+    /// Input for the associated query (if a command is associated, this value becomes null).
+    pub input: serde_json::Value,
+
+    /// RPC caller that receives the output of the associated command / query result.
     pub caller: Caller,
 }
 
