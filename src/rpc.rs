@@ -405,7 +405,6 @@ pub struct ProposeParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeQueryParams {
-    pub origin: NodeId,
     pub input: serde_json::Value, // TODO: remove
     pub caller: Caller,
 }
@@ -427,6 +426,7 @@ pub struct InitNodeParams {
 #[serde(rename_all = "camelCase")]
 pub struct Caller {
     pub server_id: ServerInstanceId,
+    pub node_id: NodeId,
     pub client_id: ClientId,
     pub request_id: RequestId,
 }

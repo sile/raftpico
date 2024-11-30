@@ -11,7 +11,7 @@ use crate::{
     types::{LogIndex, NodeId, Term},
 };
 
-/// List of commands that can be proposed to [`Server`][crate::Server].
+/// Commmand that can be proposed to [`Server`][crate::Server].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]

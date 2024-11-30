@@ -29,11 +29,13 @@ use crate::{
 
 pub const EVENTS_CAPACITY: usize = 1024;
 
+// TODO: move
 pub type Commands = BTreeMap<LogIndex, Command>;
 
-// TODO: struct
+// TODO: struct or remove or use timestamp instead
 pub type ServerInstanceId = Uuid;
 
+// TODO: rename
 #[derive(Debug)]
 pub struct PendingQuery {
     pub commit_position: LogPosition,
@@ -63,7 +65,7 @@ impl Ord for PendingQuery {
 
 #[derive(Debug)]
 pub struct Server<M> {
-    instance_id: ServerInstanceId,
+    instance_id: ServerInstanceId, // TODO: remove
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
@@ -547,6 +549,7 @@ impl<M: Machine> Server<M> {
     fn caller(&self, client_id: ClientId, request_id: RequestId) -> Caller {
         Caller {
             server_id: self.instance_id,
+            node_id: self.node.id().into(),
             client_id,
             request_id,
         }
@@ -746,7 +749,7 @@ impl<M: Machine> Server<M> {
 
         let position = self.propose_command_leader(Command::Query);
         self.send_to(
-            params.origin,
+            params.caller.node_id,
             &Request::NotifyQueryPromise {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
                 params: NotifyQueryPromiseParams {
@@ -873,11 +876,7 @@ impl<M: Machine> Server<M> {
         };
         let request = Request::ProposeQuery {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            params: ProposeQueryParams {
-                origin: self.node.id().into(),
-                input,
-                caller,
-            },
+            params: ProposeQueryParams { input, caller },
         };
 
         // TODO: optimize
