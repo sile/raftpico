@@ -77,6 +77,9 @@ pub enum ApplyKind {
     Query,
 
     /// Local queries are executed immediately on the server that received the request without guaranteeing that the state machine is up-to-date.
+    ///
+    /// However, it is guaranteed that the commit index is equal to or higher than
+    /// the index associated with a previous command or consistent query proposed to the same server.
     LocalQuery,
 }
 

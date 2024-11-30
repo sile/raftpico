@@ -35,7 +35,10 @@ pub enum Command {
     Apply { input: serde_json::Value },
 
     /// A command proposed via [`Request::Apply`] API.
-    Query,
+    Query {
+        #[serde(skip)]
+        input: Option<serde_json::Value>,
+    },
 
     /// A command proposed by `raftbare` (see: [`raftbare::LogEntry::Term`])
     StartTerm { term: Term },
