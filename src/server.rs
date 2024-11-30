@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BinaryHeap, HashMap, HashSet},
+    collections::{BinaryHeap, HashMap, HashSet},
     net::SocketAddr,
     time::{Duration, Instant},
 };
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    command::Command,
+    command::{Command, Commands},
     machine::{ApplyContext, Machine},
     machines::Machines,
     rpc::{
@@ -28,9 +28,6 @@ use crate::{
 };
 
 pub const EVENTS_CAPACITY: usize = 1024;
-
-// TODO: move
-pub type Commands = BTreeMap<LogIndex, Command>;
 
 // TODO: struct or remove or use timestamp (or pid) instead
 pub type ServerInstanceId = Uuid;

@@ -6,8 +6,8 @@ use jsonlrpc_mio::ClientId;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    command::Command,
-    server::{Commands, ServerInstanceId},
+    command::{Command, Commands},
+    server::ServerInstanceId,
     types::{LogIndex, LogPosition, NodeId, Term},
     ApplyKind,
 };

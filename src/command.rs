@@ -1,14 +1,13 @@
 //! Raft command.
-use std::{net::SocketAddr, time::Duration};
+use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
 use crate::rpc::Request;
-use crate::{
-    server::Commands,
-    types::{LogIndex, NodeId, Term},
-};
+use crate::types::{LogIndex, NodeId, Term};
+
+pub(crate) type Commands = BTreeMap<LogIndex, Command>;
 
 /// Commmand that can be proposed to [`Server`][crate::Server].
 #[derive(Debug, Clone, Serialize, Deserialize)]

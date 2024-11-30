@@ -9,9 +9,9 @@ use raftbare::Node;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    command::Commands,
     machines::Machines,
     rpc::{InstallSnapshotParams, LogEntries},
-    server::Commands,
     types::{NodeId, Term},
     Machine,
 };
@@ -62,7 +62,7 @@ impl FileStorage {
     pub(crate) fn append_entries(
         &mut self,
         entries: &raftbare::LogEntries,
-        commands: &crate::server::Commands,
+        commands: &Commands,
     ) -> std::io::Result<()> {
         let record = Record::LogEntries(
             LogEntries::from_raftbare(entries, commands).ok_or(std::io::ErrorKind::InvalidInput)?,
