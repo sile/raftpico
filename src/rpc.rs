@@ -417,12 +417,6 @@ pub struct NotifyCommitParams {
     pub caller: Caller,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InitNodeParams {
-    pub node_id: NodeId,
-    pub snapshot: InstallSnapshotParams, // TODO
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Caller {
