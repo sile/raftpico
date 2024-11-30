@@ -112,6 +112,8 @@ impl FileStorage {
                 Record::LogEntries(v) => {
                     let v = v.into_raftbare(commands);
                     let n = v.prev_position().index - entries.prev_position().index;
+
+                    // If necessary, truncate any conflicting log suffixes.
                     entries.truncate(n.get() as usize);
                     for e in v.iter() {
                         entries.push(e);
