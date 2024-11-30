@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(doc)]
 use crate::rpc::Request;
 use crate::{
-    rpc::Caller,
     server::Commands,
     types::{LogIndex, NodeId, Term},
 };
@@ -21,23 +20,19 @@ pub enum Command {
         seed_addr: SocketAddr,
         min_election_timeout: Duration,
         max_election_timeout: Duration,
-        caller: Caller,
     },
 
     /// A command proposed via [`Request::AddServer`] API.
-    AddServer { addr: SocketAddr, caller: Caller },
+    AddServer { addr: SocketAddr },
 
     /// A command proposed via [`Request::RemoveServer`] API.
-    RemoveServer { addr: SocketAddr, caller: Caller },
+    RemoveServer { addr: SocketAddr },
 
     /// A command proposed via [`Request::TakeSnapshot`] API.
-    TakeSnapshot { caller: Caller },
+    TakeSnapshot,
 
     /// A command proposed via [`Request::Apply`] API.
-    Apply {
-        input: serde_json::Value,
-        caller: Caller,
-    },
+    Apply { input: serde_json::Value },
 
     /// A command proposed via [`Request::Apply`] API.
     Query,
@@ -53,19 +48,6 @@ pub enum Command {
 }
 
 impl Command {
-    pub(crate) fn caller(&self) -> Option<&Caller> {
-        match self {
-            Command::CreateCluster { caller, .. } => Some(caller),
-            Command::AddServer { caller, .. } => Some(caller),
-            Command::RemoveServer { caller, .. } => Some(caller),
-            Command::TakeSnapshot { caller, .. } => Some(caller),
-            Command::Apply { caller, .. } => Some(caller),
-            Command::Query | Command::StartTerm { .. } | Command::UpdateClusterConfig { .. } => {
-                None
-            }
-        }
-    }
-
     pub(crate) fn from_log_entry(
         index: LogIndex,
         entry: &raftbare::LogEntry,

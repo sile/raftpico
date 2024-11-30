@@ -18,9 +18,9 @@ use crate::{
     machines::Machines,
     rpc::{
         AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyQueryPromiseParams,
-        ProposeParams, ProposeQueryParams, RemoveServerParams, Request, RequestVoteCallParams,
-        RequestVoteReplyParams, TakeSnapshotResult,
+        CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyOutputParams,
+        NotifyQueryPromiseParams, ProposeParams, ProposeQueryParams, RemoveServerParams, Request,
+        RequestVoteCallParams, RequestVoteReplyParams, TakeSnapshotResult,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, Token},
@@ -76,7 +76,8 @@ pub struct Server<M> {
     local_commands: Commands,
     storage: Option<FileStorage>, // TODO: local_storage
     dirty_cluster_config: bool,
-    pendings: BinaryHeap<Pending>,
+    pending_commands: BinaryHeap<Pending>,
+    pending_queries: BinaryHeap<Pending>,
     machines: Machines<M>,
 }
 
@@ -117,7 +118,8 @@ impl<M: Machine> Server<M> {
             election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied_index,
             dirty_cluster_config: false,
-            pendings: BinaryHeap::new(),
+            pending_commands: BinaryHeap::new(),
+            pending_queries: BinaryHeap::new(),
             machines,
         };
         this.update_rpc_clients(); // TODO
@@ -240,8 +242,29 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
+    fn pop_caller(&mut self, commit_index: LogIndex) -> Option<Caller> {
+        while let Some(pending) = self.pending_commands.peek() {
+            if pending.commit_position.index < commit_index {
+                return None;
+            }
+            match self.node.get_commit_status(pending.commit_position.into()) {
+                CommitStatus::InProgress => {
+                    break;
+                }
+                CommitStatus::Rejected | CommitStatus::Unknown => {
+                    todo!("error response");
+                }
+                CommitStatus::Committed => {
+                    let pending = self.pending_commands.pop().expect("unreachable");
+                    return Some(pending.caller);
+                }
+            }
+        }
+        None
+    }
+
     fn handle_pending_queries(&mut self) -> std::io::Result<()> {
-        while let Some(query) = self.pendings.peek() {
+        while let Some(query) = self.pending_queries.peek() {
             match self.node.get_commit_status(query.commit_position.into()) {
                 CommitStatus::InProgress => {
                     break;
@@ -250,7 +273,7 @@ impl<M: Machine> Server<M> {
                     todo!("error response");
                 }
                 CommitStatus::Committed => {
-                    let query = self.pendings.pop().expect("unreachable");
+                    let query = self.pending_queries.pop().expect("unreachable");
                     let input =
                         serde_json::from_value(query.input).expect("TODO: reply error response");
 
@@ -286,6 +309,8 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
+        let caller = self.pop_caller(index);
+
         let command = self.local_commands.get(&index).expect("bug");
         if matches!(command, Command::Query) {
             return Ok(());
@@ -299,11 +324,6 @@ impl<M: Machine> Server<M> {
                 | Command::RemoveServer { .. }
         );
 
-        // TODO: remove clone
-        let caller = command
-            .caller()
-            .filter(|p| p.server_id == self.instance_id)
-            .cloned();
         if matches!(command, Command::TakeSnapshot { .. }) {
             self.take_snapshot(index)?;
 
@@ -381,10 +401,16 @@ impl<M: Machine> Server<M> {
         caller: Caller,
         output: Option<Result<serde_json::Value, ErrorObject>>,
     ) -> std::io::Result<()> {
-        let Some(output) = output else {
-            self.reply_error(caller, ErrorKind::NoMachineOutput.object())?;
+        let output = output.unwrap_or_else(|| Err(ErrorKind::NoMachineOutput.object()));
+        if caller.node_id != self.node.id().into() {
+            let node_id = caller.node_id;
+            let request = Request::NotifyOutput {
+                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+                params: NotifyOutputParams { output, caller },
+            };
+            self.send_to(node_id, &request)?;
             return Ok(());
-        };
+        }
 
         match output {
             Err(e) => {
@@ -577,6 +603,7 @@ impl<M: Machine> Server<M> {
             Request::NotifyQueryPromise { params, .. } => {
                 self.handle_notify_query_promise_request(params)
             }
+            Request::NotifyOutput { params, .. } => self.handle_notify_output(params),
             Request::InstallSnapshot { params, .. } => self.handle_install_snapshot_request(params),
             Request::AppendEntriesCall { params, .. } => {
                 let caller = self.caller(from, jsonlrpc::RequestId::Number(0)); // TODO: remove dummy id
@@ -686,8 +713,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_take_snapshot_request(&mut self, caller: Caller) -> std::io::Result<()> {
-        let command = Command::TakeSnapshot { caller };
-        self.propose_command(command)?;
+        self.propose_command(caller, Command::TakeSnapshot)?;
         Ok(())
     }
 
@@ -738,7 +764,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_propose_request(&mut self, params: ProposeParams) -> std::io::Result<()> {
-        self.propose_command(params.command)?;
+        self.propose_command(params.caller, params.command)?;
         Ok(())
     }
 
@@ -776,11 +802,19 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
+    fn handle_notify_output(&mut self, params: NotifyOutputParams) -> std::io::Result<()> {
+        if params.caller.server_id != self.instance_id {
+            return Ok(());
+        }
+        self.reply_output(params.caller, Some(params.output))?;
+        Ok(())
+    }
+
     fn handle_notify_query_promise_request(
         &mut self,
         params: NotifyQueryPromiseParams,
     ) -> std::io::Result<()> {
-        self.pendings.push(Pending {
+        self.pending_queries.push(Pending {
             commit_position: params.commit_position,
             input: params.input,
             caller: params.caller,
@@ -823,11 +857,8 @@ impl<M: Machine> Server<M> {
             self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
         }
-        let command = Command::AddServer {
-            addr: params.addr,
-            caller,
-        };
-        self.propose_command(command)?;
+        let command = Command::AddServer { addr: params.addr };
+        self.propose_command(caller, command)?;
 
         Ok(())
     }
@@ -841,9 +872,8 @@ impl<M: Machine> Server<M> {
             ApplyKind::Command => {
                 let command = Command::Apply {
                     input: params.input,
-                    caller,
                 };
-                self.propose_command(command)?;
+                self.propose_command(caller, command)?;
             }
             ApplyKind::Query => {
                 self.handle_apply_query_request(caller, params.input)?;
@@ -863,7 +893,7 @@ impl<M: Machine> Server<M> {
         if self.is_leader() {
             let command = Command::Query;
             let promise = self.propose_command_leader(command);
-            self.pendings.push(Pending {
+            self.pending_queries.push(Pending {
                 commit_position: promise,
                 input,
                 caller,
@@ -934,11 +964,8 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let command = Command::RemoveServer {
-            addr: params.addr,
-            caller,
-        };
-        self.propose_command(command)?;
+        let command = Command::RemoveServer { addr: params.addr };
+        self.propose_command(caller, command)?;
 
         Ok(())
     }
@@ -965,9 +992,8 @@ impl<M: Machine> Server<M> {
             seed_addr: self.addr(),
             min_election_timeout: Duration::from_millis(params.min_election_timeout_ms as u64),
             max_election_timeout: Duration::from_millis(params.max_election_timeout_ms as u64),
-            caller,
         };
-        self.propose_command(command)?;
+        self.propose_command(caller, command)?;
 
         Ok(())
     }
@@ -976,7 +1002,7 @@ impl<M: Machine> Server<M> {
         self.node.role().is_leader()
     }
 
-    fn propose_command(&mut self, command: Command) -> std::io::Result<()> {
+    fn propose_command(&mut self, caller: Caller, command: Command) -> std::io::Result<()> {
         assert!(self.is_initialized());
 
         if !self.is_leader() {
@@ -989,13 +1015,20 @@ impl<M: Machine> Server<M> {
 
             let request = Request::Propose {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                params: ProposeParams { command },
+                params: ProposeParams { command, caller },
             };
             self.send_to(maybe_leader, &request)?;
             return Ok(());
         }
 
-        self.propose_command_leader(command);
+        let commit_position = self.propose_command_leader(command);
+        let pending = Pending {
+            commit_position,
+            input: serde_json::Value::Null, // Always null for non-query commands
+            caller,
+        };
+        self.pending_commands.push(pending);
+
         Ok(())
     }
 
@@ -1033,6 +1066,18 @@ impl<M: Machine> Server<M> {
     }
 
     fn reply_error(&mut self, caller: Caller, error: ErrorObject) -> std::io::Result<()> {
+        // TODO: factor out
+        if caller.node_id != self.node.id().into() {
+            let node_id = caller.node_id;
+            let output = Err(error);
+            let request = Request::NotifyOutput {
+                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+                params: NotifyOutputParams { output, caller },
+            };
+            self.send_to(node_id, &request)?;
+            return Ok(());
+        }
+
         let response = ResponseObject::Err {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             error,
