@@ -281,9 +281,12 @@ impl<M: Machine> Server<M> {
 
         let mut command = self.local_commands.get(&index).expect("bug").clone(); // TODO: remove clone
         let mut kind = ApplyKind::Command;
-        if let Command::Query { input } = &mut command {
-            *input = pending.map(|p| p.input);
+        if matches!(command, Command::Query) {
+            let Some(input) = pending.map(|p| p.input) else {
+                return Ok(());
+            };
             kind = ApplyKind::Query;
+            command = Command::Apply { input };
         }
 
         let member_change = matches!(command, Command::AddServer { .. });
@@ -733,7 +736,7 @@ impl<M: Machine> Server<M> {
             todo!("redirect if possible");
         }
 
-        let position = self.propose_command_leader(Command::Query { input: None });
+        let position = self.propose_command_leader(Command::Query);
         self.send_to(
             params.caller.node_id,
             &Request::NotifyCommit {
@@ -840,8 +843,7 @@ impl<M: Machine> Server<M> {
         input: serde_json::Value,
     ) -> std::io::Result<()> {
         if self.is_leader() {
-            let command = Command::Query { input: None };
-            let promise = self.propose_command_leader(command);
+            let promise = self.propose_command_leader(Command::Query);
             self.pendings.push(Pending {
                 commit_position: promise,
                 input,

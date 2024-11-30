@@ -38,21 +38,8 @@ impl<M: Machine> Machine for Machines<M> {
                     ctx.error(ErrorKind::InvalidMachineInput.object_with_reason(e));
                 }
             },
-            Command::Query { input } => {
-                let Some(input) = input else {
-                    return;
-                };
-                // TODO: factor out
-                match serde_json::from_value(input.clone()) {
-                    Ok(input) => {
-                        self.user.apply(ctx, &input);
-                    }
-                    Err(e) => {
-                        ctx.error(ErrorKind::InvalidMachineInput.object_with_reason(e));
-                    }
-                }
-            }
-            Command::TakeSnapshot { .. }
+            Command::Query
+            | Command::TakeSnapshot { .. }
             | Command::StartTerm { .. }
             | Command::UpdateClusterConfig { .. } => {
                 unreachable!();
