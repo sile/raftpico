@@ -972,7 +972,7 @@ impl<M: Machine> Server<M> {
 
     fn handle_create_cluster_request(
         &mut self,
-        caller: Caller,
+        mut caller: Caller,
         params: CreateClusterParams,
     ) -> std::io::Result<()> {
         if self.is_initialized() {
@@ -981,6 +981,7 @@ impl<M: Machine> Server<M> {
         }
 
         self.node = Node::start(NodeId::SEED.into());
+        caller.node_id = NodeId::SEED;
         let snapshot = self.snapshot(LogIndex::from(0))?;
         if let Some(storage) = &mut self.storage {
             storage.save_snapshot(snapshot)?;

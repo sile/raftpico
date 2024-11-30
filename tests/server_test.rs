@@ -204,7 +204,7 @@ fn command() {
         for (i, addr) in addrs.into_iter().enumerate() {
             let _v: serde_json::Value = rpc(addr, apply_command_req(i));
         }
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(500));
     });
 
     while !handle.is_finished() {
@@ -481,7 +481,7 @@ fn storage() {
         for (i, addr) in addrs.into_iter().cycle().enumerate().take(10) {
             let _: serde_json::Value = rpc(addr, apply_command_req(i));
         }
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(1000));
     });
 
     while !handle.is_finished() {
