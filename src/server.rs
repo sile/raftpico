@@ -4,11 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jsonlrpc::{ErrorObject, RequestId, ResponseObject};
+use jsonlrpc::{RequestId, ResponseObject};
 use jsonlrpc_mio::ClientId;
 use raftbare::{Action, ClusterConfig, CommitStatus, LogEntries, Node, Role};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::{
     broker::MessageBroker,
@@ -265,7 +265,7 @@ impl<M: Machine> Server<M> {
             self.take_snapshot(index)?;
 
             if let Some(caller) = caller {
-                self.reply_ok(
+                self.broker.reply_ok(
                     caller,
                     &TakeSnapshotResult {
                         snapshot_index: index,
@@ -286,7 +286,7 @@ impl<M: Machine> Server<M> {
         self.machines.apply(&mut ctx, command);
 
         if let Some(caller) = ctx.caller {
-            self.reply_output(caller, ctx.output)?;
+            self.broker.reply_output(caller, ctx.output)?;
         }
 
         if needs_snapshot {
@@ -308,24 +308,6 @@ impl<M: Machine> Server<M> {
                 .filter(|(&id, _)| id != self.node.id().into())
                 .map(|(&id, m)| (id, m.token, m.addr)),
         );
-    }
-
-    fn reply_output(
-        &mut self,
-        caller: Caller,
-        output: Option<Result<serde_json::Value, ErrorObject>>,
-    ) -> std::io::Result<()> {
-        let output = output.unwrap_or_else(|| Err(ErrorKind::NoMachineOutput.object()));
-        match output {
-            Err(e) => {
-                self.reply_error(caller, e)?;
-            }
-            Ok(value) => {
-                self.reply_ok(caller, value)?;
-            }
-        }
-
-        Ok(())
     }
 
     fn maybe_update_cluster_config(&mut self) {
@@ -379,7 +361,7 @@ impl<M: Machine> Server<M> {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             params: snapshot,
         };
-        self.send_to(dst, &request)?;
+        self.broker.send_to(dst, &request)?;
         Ok(())
     }
 
@@ -390,8 +372,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         let request = Request::from_raftbare(message, &self.local_commands)
             .ok_or(std::io::ErrorKind::Other)?;
-        let request = serde_json::to_value(&request)?;
-        self.send_to(dst, &request)?;
+        self.broker.send_to(dst, &request)?;
         Ok(())
     }
 
@@ -413,7 +394,6 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_save_current_term_action(&mut self) -> std::io::Result<()> {
-        // TODO: stats
         if let Some(storage) = &mut self.storage {
             storage.save_current_term(self.node.current_term().into())?;
         }
@@ -421,7 +401,6 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_save_voted_for_action(&mut self) -> std::io::Result<()> {
-        // TODO: stats
         if let Some(storage) = &mut self.storage {
             storage.save_voted_for(self.node.voted_for().map(From::from))?;
         }
@@ -495,7 +474,6 @@ impl<M: Machine> Server<M> {
         }
 
         if params.last_included_position.index <= self.node.commit_index().into() {
-            // TODO: stats
             return Ok(());
         }
 
@@ -586,7 +564,6 @@ impl<M: Machine> Server<M> {
         params: AppendEntriesReplyParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
-            // TODO: stats
             return Ok(());
         }
 
@@ -600,7 +577,6 @@ impl<M: Machine> Server<M> {
         params: RequestVoteCallParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
-            // TODO: stats
             return Ok(());
         }
 
@@ -614,7 +590,6 @@ impl<M: Machine> Server<M> {
         params: RequestVoteReplyParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
-            // TODO: stats
             return Ok(());
         }
 
@@ -641,7 +616,7 @@ impl<M: Machine> Server<M> {
         }
 
         let position = self.propose_command_leader(Command::Query);
-        self.send_to(
+        self.broker.send_to(
             params.caller.node_id,
             &Request::NotifyCommit {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
@@ -653,11 +628,6 @@ impl<M: Machine> Server<M> {
             },
         )?;
         Ok(())
-    }
-
-    // TODO: remove
-    fn send_to<T: Serialize>(&mut self, node_id: NodeId, message: &T) -> std::io::Result<()> {
-        self.broker.send_to(node_id, message)
     }
 
     fn handle_notify_commit_request(&mut self, params: NotifyCommitParams) -> std::io::Result<()> {
@@ -690,7 +660,7 @@ impl<M: Machine> Server<M> {
                 .members
                 .contains_key(&params.header.from)
         {
-            self.reply_error(
+            self.broker.reply_error(
                 caller,
                 ErrorKind::NotClusterMember
                     .object_with_data(serde_json::json!({"addr": self.addr()})),
@@ -710,7 +680,8 @@ impl<M: Machine> Server<M> {
         params: AddServerParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
-            self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
+            self.broker
+                .reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
         }
         let command = Command::AddServer { addr: params.addr };
@@ -721,7 +692,8 @@ impl<M: Machine> Server<M> {
 
     fn handle_apply_request(&mut self, caller: Caller, params: ApplyParams) -> std::io::Result<()> {
         if !self.is_initialized() {
-            self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
+            self.broker
+                .reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
         }
         match params.kind {
@@ -786,7 +758,7 @@ impl<M: Machine> Server<M> {
 
         self.machines.user.apply(&mut ctx, input);
         let caller = ctx.caller.expect("unreachale");
-        self.reply_output(caller, ctx.output)?;
+        self.broker.reply_output(caller, ctx.output)?;
 
         Ok(())
     }
@@ -797,7 +769,8 @@ impl<M: Machine> Server<M> {
         params: RemoveServerParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
-            self.reply_error(caller, ErrorKind::NotClusterMember.object())?;
+            self.broker
+                .reply_error(caller, ErrorKind::NotClusterMember.object())?;
             return Ok(());
         }
 
@@ -813,7 +786,8 @@ impl<M: Machine> Server<M> {
         params: CreateClusterParams,
     ) -> std::io::Result<()> {
         if self.is_initialized() {
-            self.reply_error(caller, ErrorKind::ClusterAlreadyCreated.object())?;
+            self.broker
+                .reply_error(caller, ErrorKind::ClusterAlreadyCreated.object())?;
             return Ok(());
         }
 
@@ -855,7 +829,7 @@ impl<M: Machine> Server<M> {
                 jsonrpc: jsonlrpc::JsonRpcVersion::V2,
                 params: ProposeCommandParams { command, caller },
             };
-            self.send_to(maybe_leader, &request)?;
+            self.broker.send_to(maybe_leader, &request)?;
             return Ok(());
         }
 
@@ -878,7 +852,7 @@ impl<M: Machine> Server<M> {
                     caller,
                 },
             };
-            self.send_to(node_id, &request)?;
+            self.broker.send_to(node_id, &request)?;
         }
 
         Ok(())
@@ -904,13 +878,5 @@ impl<M: Machine> Server<M> {
         self.local_commands.insert(position.index, command);
 
         position
-    }
-
-    fn reply_ok<T: Serialize>(&mut self, caller: Caller, value: T) -> std::io::Result<()> {
-        self.broker.reply_ok(caller, value)
-    }
-
-    fn reply_error(&mut self, caller: Caller, error: ErrorObject) -> std::io::Result<()> {
-        self.broker.reply_error(caller, error)
     }
 }

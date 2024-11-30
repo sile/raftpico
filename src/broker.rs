@@ -4,13 +4,13 @@ use std::{
     time::Duration,
 };
 
-use jsonlrpc::{ErrorObject, ResponseObject};
+use jsonlrpc::{ErrorObject, JsonRpcVersion, RequestId, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll};
 use serde::Serialize;
 
 use crate::{
-    messages::Caller,
+    messages::{Caller, ErrorKind},
     types::{NodeId, Token},
     Request,
 };
@@ -81,13 +81,30 @@ impl MessageBroker {
         Ok(())
     }
 
+    pub fn reply_output(
+        &mut self,
+        caller: Caller,
+        output: Option<Result<serde_json::Value, ErrorObject>>,
+    ) -> std::io::Result<()> {
+        let output = output.unwrap_or_else(|| Err(ErrorKind::NoMachineOutput.object()));
+        match output {
+            Err(e) => self.reply_error(caller, e),
+            Ok(value) => self.reply_ok(caller, value),
+        }
+    }
+
     pub fn reply_ok<T: Serialize>(&mut self, caller: Caller, value: T) -> std::io::Result<()> {
-        // TODO: ResponseObject<T>
-        let response = serde_json::json!({
-            "jsonrpc": jsonlrpc::JsonRpcVersion::V2,
-            "id": caller.request_id,
-            "result": value
-        });
+        #[derive(Serialize)]
+        struct Response<T> {
+            jsonrpc: JsonRpcVersion,
+            id: RequestId,
+            result: T,
+        }
+        let response = Response {
+            jsonrpc: JsonRpcVersion::V2,
+            id: caller.request_id,
+            result: value,
+        };
         self.rpc_server
             .reply(&mut self.poller, caller.client_id, &response)?;
         Ok(())
@@ -95,7 +112,7 @@ impl MessageBroker {
 
     pub fn reply_error(&mut self, caller: Caller, error: ErrorObject) -> std::io::Result<()> {
         let response = ResponseObject::Err {
-            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            jsonrpc: JsonRpcVersion::V2,
             error,
             id: Some(caller.request_id),
         };
