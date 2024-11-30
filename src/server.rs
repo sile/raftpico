@@ -18,9 +18,9 @@ use crate::{
     machines::Machines,
     rpc::{
         AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyOutputParams,
-        NotifyQueryPromiseParams, ProposeParams, ProposeQueryParams, RemoveServerParams, Request,
-        RequestVoteCallParams, RequestVoteReplyParams, TakeSnapshotResult,
+        CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyQueryPromiseParams,
+        ProposeParams, ProposeQueryParams, RemoveServerParams, Request, RequestVoteCallParams,
+        RequestVoteReplyParams, TakeSnapshotResult,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, Token},
@@ -372,16 +372,6 @@ impl<M: Machine> Server<M> {
         output: Option<Result<serde_json::Value, ErrorObject>>,
     ) -> std::io::Result<()> {
         let output = output.unwrap_or_else(|| Err(ErrorKind::NoMachineOutput.object()));
-        if caller.node_id != self.node.id().into() {
-            let node_id = caller.node_id;
-            let request = Request::NotifyOutput {
-                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                params: NotifyOutputParams { output, caller },
-            };
-            self.send_to(node_id, &request)?;
-            return Ok(());
-        }
-
         match output {
             Err(e) => {
                 self.reply_error(caller, e)?;
@@ -573,7 +563,6 @@ impl<M: Machine> Server<M> {
             Request::NotifyQueryPromise { params, .. } => {
                 self.handle_notify_query_promise_request(params)
             }
-            Request::NotifyOutput { params, .. } => self.handle_notify_output(params),
             Request::InstallSnapshot { params, .. } => self.handle_install_snapshot_request(params),
             Request::AppendEntriesCall { params, .. } => {
                 let caller = self.caller(from, jsonlrpc::RequestId::Number(0)); // TODO: remove dummy id
@@ -769,14 +758,6 @@ impl<M: Machine> Server<M> {
         };
 
         client.send(&mut self.poller, message)?;
-        Ok(())
-    }
-
-    fn handle_notify_output(&mut self, params: NotifyOutputParams) -> std::io::Result<()> {
-        if params.caller.server_id != self.instance_id {
-            return Ok(());
-        }
-        self.reply_output(params.caller, Some(params.output))?;
         Ok(())
     }
 
@@ -1037,18 +1018,6 @@ impl<M: Machine> Server<M> {
     }
 
     fn reply_error(&mut self, caller: Caller, error: ErrorObject) -> std::io::Result<()> {
-        // TODO: factor out
-        if caller.node_id != self.node.id().into() {
-            let node_id = caller.node_id;
-            let output = Err(error);
-            let request = Request::NotifyOutput {
-                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                params: NotifyOutputParams { output, caller },
-            };
-            self.send_to(node_id, &request)?;
-            return Ok(());
-        }
-
         let response = ResponseObject::Err {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
             error,
