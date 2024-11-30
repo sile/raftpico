@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::Command,
-    rpc::{AddServerResult, CreateClusterResult, ErrorKind, RemoveServerResult},
+    messages::{AddServerResult, CreateClusterResult, ErrorKind, RemoveServerResult},
     types::{NodeId, Token},
     ApplyContext, Machine,
 };

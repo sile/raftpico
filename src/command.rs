@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
 use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
-use crate::rpc::Request;
+use crate::messages::Request;
 use crate::types::{LogIndex, NodeId, Term};
 
 pub(crate) type Commands = BTreeMap<LogIndex, Command>;

@@ -3,7 +3,7 @@ use raftbare::{Node, Role};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    rpc::{Caller, ErrorKind},
+    messages::{Caller, ErrorKind},
     types::LogIndex,
 };
 

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     command::Commands,
     machines::Machines,
-    rpc::{InstallSnapshotParams, LogEntries},
+    messages::{InstallSnapshotParams, LogEntries},
     types::{NodeId, Term},
     Machine,
 };

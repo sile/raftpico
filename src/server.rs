@@ -15,7 +15,7 @@ use crate::{
     command::{Command, Commands},
     machine::{ApplyContext, Machine},
     machines::Machines,
-    rpc::{
+    messages::{
         AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
         CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyCommitParams,
         ProposeCommandParams, ProposeQueryParams, RemoveServerParams, Request,

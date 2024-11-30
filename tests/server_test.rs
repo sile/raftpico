@@ -5,7 +5,7 @@ use std::{
 
 use jsonlrpc::{ErrorCode, RequestId, ResponseObject, RpcClient};
 use raftpico::{
-    rpc::{
+    messages::{
         AddServerParams, AddServerResult, ApplyParams, CreateClusterParams, CreateClusterResult,
         ErrorKind, RemoveServerParams, RemoveServerResult, Request, TakeSnapshotResult,
     },
