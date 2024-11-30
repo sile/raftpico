@@ -10,7 +10,6 @@ use mio::{Events, Poll};
 use raftbare::{Action, ClusterConfig, CommitStatus, LogEntries, Node, Role, Term};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::{
     command::{Command, Commands},
@@ -28,9 +27,6 @@ use crate::{
 };
 
 pub const EVENTS_CAPACITY: usize = 1024;
-
-// TODO: struct or remove or use timestamp (or pid) instead
-pub type ServerInstanceId = Uuid;
 
 // TODO: rename
 #[derive(Debug)]
@@ -62,7 +58,7 @@ impl Ord for Pending {
 
 #[derive(Debug)]
 pub struct Server<M> {
-    instance_id: ServerInstanceId,
+    process_id: u32,
     poller: Poll,
     events: Events,
     rpc_server: RpcServer<Request>,
@@ -103,7 +99,7 @@ impl<M: Machine> Server<M> {
 
         let last_applied_index = node.log().snapshot_position().index.into();
         let mut this = Self {
-            instance_id: Uuid::new_v4(),
+            process_id: std::process::id(),
             poller,
             events,
             rpc_server,
@@ -534,8 +530,8 @@ impl<M: Machine> Server<M> {
 
     fn caller(&self, client_id: ClientId, request_id: RequestId) -> Caller {
         Caller {
-            server_id: self.instance_id,
             node_id: self.node.id().into(),
+            process_id: self.process_id,
             client_id,
             request_id,
         }
@@ -763,6 +759,11 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_notify_commit_request(&mut self, params: NotifyCommitParams) -> std::io::Result<()> {
+        if self.process_id != params.caller.process_id {
+            // This notification is irrelevant as the server has been restarted.
+            return Ok(());
+        }
+
         self.pendings.push(Pending {
             commit_position: params.commit,
             input: params.input,

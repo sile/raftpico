@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{Command, Commands},
-    server::ServerInstanceId,
     types::{LogIndex, LogPosition, NodeId, Term},
     ApplyKind,
 };
@@ -446,8 +445,8 @@ pub struct NotifyCommitParams {
 #[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct Caller {
-    pub server_id: ServerInstanceId,
     pub node_id: NodeId,
+    pub process_id: u32,
     pub client_id: ClientId,
     pub request_id: RequestId,
 }
