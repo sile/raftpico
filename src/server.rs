@@ -134,13 +134,13 @@ impl<M: Machine> Server<M> {
             }
         };
 
+        // The sender's `node_id` is not trusted because their knowledge might be outdated.
+        let Some(node_id) = self.machines.system.get_node_id_by_addr(addr) else {
+            return Ok(());
+        };
+
         let mut params: AppendEntriesReplyParams = serde_json::from_value(data)?;
-        if params.header.from == NodeId::UNINIT {
-            let Some(node_id) = self.machines.system.get_node_id_by_addr(addr) else {
-                return Ok(());
-            };
-            params.header.from = node_id;
-        }
+        params.header.from = node_id;
 
         // This call will generate an `Action::InstallSnapshot`
         // to inform the latest cluster members to the follower.
@@ -394,6 +394,7 @@ impl<M: Machine> Server<M> {
                 return Ok(());
             };
             let reply = AppendEntriesReplyParams::from_raftbare(header, last_position);
+            // TODO: use reply_ok(request)
             self.broker
                 .reply_error(caller, ErrorReason::UnknownMember { reply })?;
         }

@@ -139,6 +139,7 @@ impl SystemMachine {
     }
 
     pub(crate) fn gen_election_timeout(&self, role: Role) -> Duration {
+        // TODO: check membership
         let min = self.min_election_timeout_ms;
         let max = self.max_election_timeout_ms.max(min);
         let timeout = match role {
