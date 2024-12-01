@@ -64,9 +64,7 @@ impl FileStorage {
         entries: &raftbare::LogEntries,
         commands: &Commands,
     ) -> std::io::Result<()> {
-        let record = Record::LogEntries(
-            LogEntries::from_raftbare(entries, commands).ok_or(std::io::ErrorKind::InvalidInput)?,
-        );
+        let record = Record::LogEntries(LogEntries::from_raftbare(entries, commands));
         self.file.write_value(&record)?;
         self.maybe_sync_data()?;
         Ok(())

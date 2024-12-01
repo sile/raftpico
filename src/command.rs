@@ -51,12 +51,12 @@ impl Command {
         index: LogIndex,
         entry: &raftbare::LogEntry,
         commands: &Commands,
-    ) -> Option<Self> {
+    ) -> Self {
         match entry {
-            raftbare::LogEntry::Term(term) => Some(Self::StartTerm {
+            raftbare::LogEntry::Term(term) => Self::StartTerm {
                 term: Term::from(*term),
-            }),
-            raftbare::LogEntry::ClusterConfig(cluster_config) => Some(Self::UpdateClusterConfig {
+            },
+            raftbare::LogEntry::ClusterConfig(cluster_config) => Self::UpdateClusterConfig {
                 voters: cluster_config
                     .voters
                     .iter()
@@ -69,8 +69,8 @@ impl Command {
                     .copied()
                     .map(NodeId::from)
                     .collect(),
-            }),
-            raftbare::LogEntry::Command => commands.get(&index).cloned(),
+            },
+            raftbare::LogEntry::Command => commands.get(&index).expect("bug").clone(),
         }
     }
 

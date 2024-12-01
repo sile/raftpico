@@ -1,6 +1,8 @@
 //! Predefined replicated state machines.
 use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
 
+use raftbare::Role;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -112,6 +114,16 @@ impl SystemMachine {
         });
 
         // TODO: reset self.node for removed server
+    }
+
+    pub(crate) fn gen_election_timeout(&self, role: Role) -> Duration {
+        let min = self.min_election_timeout;
+        let max = self.max_election_timeout.max(min);
+        match role {
+            Role::Follower => max,
+            Role::Candidate => rand::thread_rng().gen_range(min..=max),
+            Role::Leader => min,
+        }
     }
 }
 

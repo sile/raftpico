@@ -103,8 +103,45 @@ pub enum Request {
 }
 
 impl Request {
-    pub(crate) fn from_raftbare(message: raftbare::Message, commands: &Commands) -> Option<Self> {
-        Some(match message {
+    pub(crate) fn install_snapshot(node_id: NodeId, mut params: InstallSnapshotParams) -> Self {
+        params.node_id = node_id;
+        Request::InstallSnapshot {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            params,
+        }
+    }
+
+    pub(crate) fn notify_commit(
+        commit: LogPosition,
+        input: serde_json::Value,
+        caller: Caller,
+    ) -> Self {
+        Self::NotifyCommit {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            params: NotifyCommitParams {
+                commit,
+                input,
+                caller,
+            },
+        }
+    }
+
+    pub(crate) fn propose_command(command: Command, caller: Caller) -> Self {
+        Self::ProposeCommand {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            params: ProposeCommandParams { command, caller },
+        }
+    }
+
+    pub(crate) fn propose_query(input: serde_json::Value, caller: Caller) -> Self {
+        Self::ProposeQuery {
+            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
+            params: ProposeQueryParams { input, caller },
+        }
+    }
+
+    pub(crate) fn from_raftbare(message: raftbare::Message, commands: &Commands) -> Self {
+        match message {
             raftbare::Message::RequestVoteCall {
                 header,
                 last_position,
@@ -126,7 +163,7 @@ impl Request {
                     commit_index.into(),
                     entries,
                     commands,
-                )?,
+                ),
             },
             raftbare::Message::RequestVoteReply {
                 header,
@@ -148,7 +185,7 @@ impl Request {
                     last_log_position: last_position.into(),
                 },
             },
-        })
+        }
     }
 }
 
@@ -188,17 +225,14 @@ pub struct LogEntries {
 }
 
 impl LogEntries {
-    pub(crate) fn from_raftbare(
-        entries: &raftbare::LogEntries,
-        commands: &Commands,
-    ) -> Option<Self> {
-        Some(Self {
+    pub(crate) fn from_raftbare(entries: &raftbare::LogEntries, commands: &Commands) -> Self {
+        Self {
             prev: entries.prev_position().into(),
             commands: entries
                 .iter_with_positions()
                 .map(|(p, x)| Command::from_log_entry(p.index.into(), &x, commands))
-                .collect::<Option<Vec<_>>>()?,
-        })
+                .collect(),
+        }
     }
 
     pub(crate) fn into_raftbare(self, commands: &mut Commands) -> raftbare::LogEntries {
@@ -229,12 +263,12 @@ impl AppendEntriesCallParams {
         commit_index: LogIndex,
         entries: raftbare::LogEntries,
         commands: &Commands,
-    ) -> Option<Self> {
-        Some(Self {
+    ) -> Self {
+        Self {
             header: MessageHeader::from_raftbare(header),
             commit_index,
-            entries: LogEntries::from_raftbare(&entries, commands)?,
-        })
+            entries: LogEntries::from_raftbare(&entries, commands),
+        }
     }
 
     pub(crate) fn into_raftbare(self, commands: &mut Commands) -> raftbare::Message {

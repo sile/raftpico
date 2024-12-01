@@ -6,8 +6,7 @@ use std::{
 
 use jsonlrpc::{RequestId, ResponseObject};
 use jsonlrpc_mio::ClientId;
-use raftbare::{Action, ClusterConfig, CommitStatus, Node, Role};
-use rand::Rng;
+use raftbare::{Action, ClusterConfig, CommitStatus, Node};
 use serde::Deserialize;
 
 use crate::{
@@ -18,8 +17,8 @@ use crate::{
     messages::{
         AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
         CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyCommitParams,
-        ProposeCommandParams, ProposeQueryParams, RemoveServerParams, Request,
-        RequestVoteCallParams, RequestVoteReplyParams, TakeSnapshotResult,
+        ProposeQueryParams, RemoveServerParams, Request, RequestVoteCallParams,
+        RequestVoteReplyParams, TakeSnapshotResult,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, QueueItem},
@@ -47,11 +46,11 @@ impl<M: Machine> Server<M> {
         listen_addr: SocketAddr,
         mut storage: Option<FileStorage>,
     ) -> std::io::Result<Self> {
-        let mut local_commands = Commands::new();
+        let mut commands = Commands::new();
         let mut machines = Machines::default();
         let mut node = Node::start(NodeId::UNINIT.into());
         if let Some(storage) = &mut storage {
-            if let Some(loaded) = storage.load(&mut local_commands)? {
+            if let Some(loaded) = storage.load(&mut commands)? {
                 node = loaded.0;
                 machines = loaded.1;
             }
@@ -63,7 +62,7 @@ impl<M: Machine> Server<M> {
             broker: MessageBroker::start(listen_addr)?,
             node,
             storage,
-            commands: local_commands,
+            commands,
             election_timeout_deadline: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
             last_applied: last_applied_index,
             pendings: BinaryHeap::new(),
@@ -141,7 +140,7 @@ impl<M: Machine> Server<M> {
                 };
 
                 // TODO: note doc
-                self.handle_install_snapshot_action(node_id)?;
+                self.send_install_snapshot_request(node_id)?;
             }
             e @ ResponseObject::Err { .. } => {
                 // TODO
@@ -311,7 +310,10 @@ impl<M: Machine> Server<M> {
 
     fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
         match action {
-            Action::SetElectionTimeout => self.handle_set_election_timeout_action(),
+            Action::SetElectionTimeout => {
+                let timeout = self.machines.system.gen_election_timeout(self.node.role());
+                self.election_timeout_deadline = Instant::now() + timeout;
+            }
             Action::SaveCurrentTerm => {
                 if let Some(storage) = &mut self.storage {
                     storage.save_current_term(self.node.current_term().into())?;
@@ -319,7 +321,7 @@ impl<M: Machine> Server<M> {
             }
             Action::SaveVotedFor => {
                 if let Some(storage) = &mut self.storage {
-                    storage.save_voted_for(self.node.voted_for().map(From::from))?;
+                    storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
                 }
             }
             Action::AppendLogEntries(entries) => {
@@ -327,56 +329,24 @@ impl<M: Machine> Server<M> {
                     storage.append_entries(&entries, &self.commands)?;
                 }
             }
-            Action::BroadcastMessage(message) => self.handle_broadcast_message_action(message)?,
-            Action::SendMessage(dst, message) => {
-                self.handle_send_message_action(dst.into(), message)?
+            Action::BroadcastMessage(message) => {
+                let request = Request::from_raftbare(message, &self.commands);
+                self.broker.broadcast(&request)?;
             }
-            Action::InstallSnapshot(dst) => self.handle_install_snapshot_action(dst.into())?,
+            Action::SendMessage(dst, message) => {
+                let request = Request::from_raftbare(message, &self.commands);
+                self.broker.send_to(dst.into(), &request)?;
+            }
+            Action::InstallSnapshot(dst) => self.send_install_snapshot_request(dst.into())?,
         }
         Ok(())
     }
 
-    fn handle_install_snapshot_action(&mut self, dst: NodeId) -> std::io::Result<()> {
-        let mut snapshot = self.snapshot(self.node.commit_index().into())?;
-        snapshot.node_id = dst;
-        let request = Request::InstallSnapshot {
-            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            params: snapshot,
-        };
+    fn send_install_snapshot_request(&mut self, dst: NodeId) -> std::io::Result<()> {
+        let snapshot = self.get_snapshot(self.node.commit_index().into())?;
+        let request = Request::install_snapshot(dst, snapshot);
         self.broker.send_to(dst, &request)?;
         Ok(())
-    }
-
-    fn handle_send_message_action(
-        &mut self,
-        dst: NodeId,
-        message: raftbare::Message,
-    ) -> std::io::Result<()> {
-        let request =
-            Request::from_raftbare(message, &self.commands).ok_or(std::io::ErrorKind::Other)?;
-        self.broker.send_to(dst, &request)?;
-        Ok(())
-    }
-
-    fn handle_broadcast_message_action(
-        &mut self,
-        message: raftbare::Message,
-    ) -> std::io::Result<()> {
-        let request =
-            Request::from_raftbare(message, &self.commands).ok_or(std::io::ErrorKind::Other)?;
-        self.broker.broadcast(&request)?;
-        Ok(())
-    }
-
-    fn handle_set_election_timeout_action(&mut self) {
-        let min = self.machines.system.min_election_timeout;
-        let max = self.machines.system.max_election_timeout.max(min);
-        let timeout = match self.node.role() {
-            Role::Follower => max,
-            Role::Candidate => rand::thread_rng().gen_range(min..=max),
-            Role::Leader => min,
-        };
-        self.election_timeout_deadline = Instant::now() + timeout;
     }
 
     fn caller(&self, client_id: ClientId, request_id: RequestId) -> Caller {
@@ -464,7 +434,7 @@ impl<M: Machine> Server<M> {
     }
 
     // TODO
-    fn snapshot(&self, index: LogIndex) -> std::io::Result<InstallSnapshotParams> {
+    fn get_snapshot(&self, index: LogIndex) -> std::io::Result<InstallSnapshotParams> {
         let (last_included, config) = self
             .node
             .log()
@@ -473,15 +443,8 @@ impl<M: Machine> Server<M> {
         let snapshot = InstallSnapshotParams {
             node_id: self.node.id().into(),
             last_included_position: last_included.into(),
-            voters: config.voters.iter().copied().map(|n| n.into()).collect(),
-            new_voters: config
-                .new_voters
-                .iter()
-                .copied()
-                .map(|n| n.into())
-                .collect(),
-
-            // TODO: impl Clone for Machine ?
+            voters: config.voters.iter().map(|n| NodeId::from(*n)).collect(),
+            new_voters: config.new_voters.iter().map(|n| NodeId::from(*n)).collect(),
             machine: serde_json::to_value(&self.machines)?,
         };
         Ok(snapshot)
@@ -501,7 +464,7 @@ impl<M: Machine> Server<M> {
 
         // TODO: factor out
         if self.storage.is_some() {
-            let snapshot = self.snapshot(index)?;
+            let snapshot = self.get_snapshot(index)?;
             if let Some(storage) = &mut self.storage {
                 storage.save_snapshot(&snapshot)?;
                 storage.save_current_term(self.node.current_term().into())?;
@@ -569,14 +532,7 @@ impl<M: Machine> Server<M> {
         let position = self.propose_command_leader(Command::Query);
         self.broker.send_to(
             params.caller.node_id,
-            &Request::NotifyCommit {
-                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                params: NotifyCommitParams {
-                    commit: position,
-                    input: params.input,
-                    caller: params.caller,
-                },
-            },
+            &Request::notify_commit(position, params.input, params.caller),
         )?;
         Ok(())
     }
@@ -680,11 +636,7 @@ impl<M: Machine> Server<M> {
         let Some(maybe_leader) = self.node.voted_for().map(NodeId::from) else {
             todo!("error response");
         };
-        let request = Request::ProposeQuery {
-            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            params: ProposeQueryParams { input, caller },
-        };
-
+        let request = Request::propose_query(input, caller);
         self.broker.send_to(maybe_leader, &request)?;
 
         Ok(())
@@ -742,7 +694,7 @@ impl<M: Machine> Server<M> {
 
         self.node = Node::start(NodeId::SEED.into());
         caller.node_id = NodeId::SEED;
-        let snapshot = self.snapshot(LogIndex::from(0))?;
+        let snapshot = self.get_snapshot(LogIndex::from(0))?;
         if let Some(storage) = &mut self.storage {
             storage.save_snapshot(&snapshot)?;
         }
@@ -774,10 +726,7 @@ impl<M: Machine> Server<M> {
                 todo!("notify this error to the origin node");
             }
 
-            let request = Request::ProposeCommand {
-                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                params: ProposeCommandParams { command, caller },
-            };
+            let request = Request::propose_command(command, caller);
             self.broker.send_to(maybe_leader, &request)?;
             return Ok(());
         }
@@ -792,14 +741,7 @@ impl<M: Machine> Server<M> {
         } else {
             // TODO: add note doc about message reordering
             let node_id = caller.node_id;
-            let request = Request::NotifyCommit {
-                jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-                params: NotifyCommitParams {
-                    commit: commit_position,
-                    input: serde_json::Value::Null,
-                    caller,
-                },
-            };
+            let request = Request::notify_commit(commit_position, serde_json::Value::Null, caller);
             self.broker.send_to(node_id, &request)?;
         }
 
