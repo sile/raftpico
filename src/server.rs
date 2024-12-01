@@ -34,10 +34,10 @@ pub struct Server<M> {
     process_id: u32,
     broker: MessageBroker,
     node: Node,
-    election_abs_timeout: Instant,
-    last_applied_index: LogIndex,
-    local_commands: Commands,
-    storage: Option<FileStorage>, // TODO: local_storage
+    election_timeout_deadline: Instant,
+    last_applied: LogIndex,
+    commands: Commands,
+    storage: Option<FileStorage>,
     pendings: BinaryHeap<QueueItem<LogPosition, (serde_json::Value, Caller)>>,
     machines: Machines<M>,
 }
@@ -63,9 +63,9 @@ impl<M: Machine> Server<M> {
             broker: MessageBroker::start(listen_addr)?,
             node,
             storage,
-            local_commands,
-            election_abs_timeout: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
-            last_applied_index,
+            commands: local_commands,
+            election_timeout_deadline: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
+            last_applied: last_applied_index,
             pendings: BinaryHeap::new(),
             machines,
         };
@@ -92,10 +92,10 @@ impl<M: Machine> Server<M> {
 
     pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
         let timeout = self
-            .election_abs_timeout
+            .election_timeout_deadline
             .saturating_duration_since(Instant::now())
             .min(timeout.unwrap_or(Duration::MAX));
-        if !self.broker.poll(timeout)? && self.election_abs_timeout <= Instant::now() {
+        if !self.broker.poll(timeout)? && self.election_timeout_deadline <= Instant::now() {
             self.node.handle_election_timeout();
         }
 
@@ -153,19 +153,19 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_committed_entries(&mut self) -> std::io::Result<()> {
-        for index in (u64::from(self.last_applied_index) + 1..=self.node.commit_index().get())
-            .map(LogIndex::from)
+        for index in
+            (u64::from(self.last_applied) + 1..=self.node.commit_index().get()).map(LogIndex::from)
         {
             self.handle_committed_entry(index)?;
         }
 
-        if self.last_applied_index < self.node.commit_index().into() {
+        if self.last_applied < self.node.commit_index().into() {
             if self.is_leader() {
                 // TODO: doc  (Quickly notify followers about the latest commit index)
                 self.node.heartbeat();
             }
 
-            self.last_applied_index = self.node.commit_index().into();
+            self.last_applied = self.node.commit_index().into();
         }
 
         Ok(())
@@ -213,7 +213,7 @@ impl<M: Machine> Server<M> {
         let pending = self.pop_pending(index);
         let caller = pending.as_ref().map(|p| p.1.clone()); // TODO: remove clone
 
-        let mut command = self.local_commands.get(&index).expect("bug").clone(); // TODO: remove clone
+        let mut command = self.commands.get(&index).expect("bug").clone(); // TODO: remove clone
         let mut kind = ApplyKind::Command;
         if matches!(command, Command::Query) {
             let Some(input) = pending.map(|p| p.0) else {
@@ -324,7 +324,7 @@ impl<M: Machine> Server<M> {
             }
             Action::AppendLogEntries(entries) => {
                 if let Some(storage) = &mut self.storage {
-                    storage.append_entries(&entries, &self.local_commands)?;
+                    storage.append_entries(&entries, &self.commands)?;
                 }
             }
             Action::BroadcastMessage(message) => self.handle_broadcast_message_action(message)?,
@@ -352,8 +352,8 @@ impl<M: Machine> Server<M> {
         dst: NodeId,
         message: raftbare::Message,
     ) -> std::io::Result<()> {
-        let request = Request::from_raftbare(message, &self.local_commands)
-            .ok_or(std::io::ErrorKind::Other)?;
+        let request =
+            Request::from_raftbare(message, &self.commands).ok_or(std::io::ErrorKind::Other)?;
         self.broker.send_to(dst, &request)?;
         Ok(())
     }
@@ -362,8 +362,8 @@ impl<M: Machine> Server<M> {
         &mut self,
         message: raftbare::Message,
     ) -> std::io::Result<()> {
-        let request = Request::from_raftbare(message, &self.local_commands)
-            .ok_or(std::io::ErrorKind::Other)?;
+        let request =
+            Request::from_raftbare(message, &self.commands).ok_or(std::io::ErrorKind::Other)?;
         self.broker.broadcast(&request)?;
         Ok(())
     }
@@ -376,7 +376,7 @@ impl<M: Machine> Server<M> {
             Role::Candidate => rand::thread_rng().gen_range(min..=max),
             Role::Leader => min,
         };
-        self.election_abs_timeout = Instant::now() + timeout;
+        self.election_timeout_deadline = Instant::now() + timeout;
     }
 
     fn caller(&self, client_id: ClientId, request_id: RequestId) -> Caller {
@@ -438,8 +438,6 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        self.machines = serde_json::from_value(params.machine.clone())?; // TODO: remove clone
-
         let last_included = params.last_included_position.into();
         let config = ClusterConfig {
             voters: params.voters.iter().copied().map(From::from).collect(),
@@ -449,16 +447,18 @@ impl<M: Machine> Server<M> {
 
         let ok = self.node.handle_snapshot_installed(last_included, config);
         assert!(ok); // TODO: error handling
-        self.last_applied_index = last_included.index.into();
+        self.last_applied = last_included.index.into();
 
         if let Some(storage) = &mut self.storage {
-            storage.save_snapshot(params)?;
+            storage.save_snapshot(&params)?;
             storage.save_current_term(self.node.current_term().into())?;
             storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
-            storage.append_entries(self.node.log().entries(), &self.local_commands)?;
+            storage.append_entries(self.node.log().entries(), &self.commands)?;
         }
 
-        self.update_rpc_clients();
+        self.machines = serde_json::from_value(params.machine)?;
+
+        self.update_rpc_clients(); // TODO
 
         Ok(())
     }
@@ -497,18 +497,16 @@ impl<M: Machine> Server<M> {
             .node
             .handle_snapshot_installed(position, config.clone());
         assert!(success); // TODO:
-        self.local_commands = self
-            .local_commands
-            .split_off(&(u64::from(index) + 1).into());
+        self.commands = self.commands.split_off(&(u64::from(index) + 1).into());
 
         // TODO: factor out
         if self.storage.is_some() {
             let snapshot = self.snapshot(index)?;
             if let Some(storage) = &mut self.storage {
-                storage.save_snapshot(snapshot)?;
+                storage.save_snapshot(&snapshot)?;
                 storage.save_current_term(self.node.current_term().into())?;
                 storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
-                storage.append_entries(self.node.log().entries(), &self.local_commands)?;
+                storage.append_entries(self.node.log().entries(), &self.commands)?;
             }
         }
 
@@ -620,7 +618,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        let message = params.into_raftbare(&mut self.local_commands);
+        let message = params.into_raftbare(&mut self.commands);
         self.node.handle_message(message);
 
         Ok(())
@@ -702,7 +700,7 @@ impl<M: Machine> Server<M> {
         let mut ctx = ApplyContext {
             kind: ApplyKind::LocalQuery,
             node: &self.node,
-            commit_index: self.last_applied_index,
+            commit_index: self.last_applied,
             output: None,
             caller: Some(caller),
         };
@@ -746,7 +744,7 @@ impl<M: Machine> Server<M> {
         caller.node_id = NodeId::SEED;
         let snapshot = self.snapshot(LogIndex::from(0))?;
         if let Some(storage) = &mut self.storage {
-            storage.save_snapshot(snapshot)?;
+            storage.save_snapshot(&snapshot)?;
         }
 
         self.node.create_cluster(&[self.node.id()]); // Always succeeds
@@ -825,7 +823,7 @@ impl<M: Machine> Server<M> {
         }
 
         let position = LogPosition::from(self.node.propose_command()); // Always succeeds
-        self.local_commands.insert(position.index, command);
+        self.commands.insert(position.index, command);
 
         position
     }

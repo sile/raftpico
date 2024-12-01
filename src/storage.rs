@@ -72,7 +72,10 @@ impl FileStorage {
         Ok(())
     }
 
-    pub(crate) fn save_snapshot(&mut self, snapshot: InstallSnapshotParams) -> std::io::Result<()> {
+    pub(crate) fn save_snapshot(
+        &mut self,
+        snapshot: &InstallSnapshotParams,
+    ) -> std::io::Result<()> {
         self.file.inner().set_len(0)?;
         self.file.inner().seek(SeekFrom::Start(0))?;
 
@@ -83,7 +86,7 @@ impl FileStorage {
         // However, if it becomes an issue, a safer approach would be to write the snapshot to a
         // temporary file and then rename this temporary file to the storage file path.
 
-        self.file.write_value(&Record::Snapshot(snapshot))?;
+        self.file.write_value(&RecordRef::Snapshot(snapshot))?;
         self.maybe_sync_data()?;
         Ok(())
     }
@@ -155,4 +158,9 @@ enum Record {
     VotedFor(Option<NodeId>),
     LogEntries(LogEntries),
     Snapshot(InstallSnapshotParams),
+}
+
+#[derive(Debug, Serialize)]
+enum RecordRef<'a> {
+    Snapshot(&'a InstallSnapshotParams),
 }
