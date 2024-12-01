@@ -20,6 +20,7 @@ fn main() -> std::io::Result<()> {
         .transpose()?;
     let mut server = Server::<KvsMachine>::start(args.listen_addr, storage)?;
     loop {
+        // TODO: if (term changed) { println!() }
         server.poll(None)?;
     }
 }

@@ -113,7 +113,7 @@ impl Request {
 
     pub(crate) fn notify_commit(
         commit: LogPosition,
-        input: serde_json::Value,
+        input: Option<serde_json::Value>,
         caller: Caller,
     ) -> Self {
         Self::NotifyCommit {
@@ -475,8 +475,8 @@ pub struct NotifyCommitParams {
     // [NOTE]
     // This field can be omitted if the `Server` handles additional state for this,
     // albeit with a slight increase in complexity.
-    /// Input for the associated query (if a command is associated, this value becomes null).
-    pub input: serde_json::Value,
+    /// Input for the associated query (if a command is associated, this value becomes `None`).
+    pub input: Option<serde_json::Value>,
 
     /// RPC caller that receives the output of the associated command / query result.
     pub caller: Caller,
@@ -507,6 +507,8 @@ pub enum ErrorReason {
     InvalidMachineInput { reason: serde_json::Error },
     InvalidMachineOutput { reason: serde_json::Error },
     NoMachineOutput,
+    RequestRejected,
+    RequestResultUnknown,
     UnknownMember { reply: AppendEntriesReplyParams },
 }
 
@@ -518,6 +520,8 @@ impl ErrorReason {
     pub const ERROR_CODE_INVALID_MACHINE_INPUT: ErrorCode = ErrorCode::new(2000);
     pub const ERROR_CODE_INVALID_MACHINE_OUTPUT: ErrorCode = ErrorCode::new(2001);
     pub const ERROR_CODE_NO_MACHINE_OUTPUT: ErrorCode = ErrorCode::new(2002);
+    pub const ERROR_CODE_REQUEST_REJECTED: ErrorCode = ErrorCode::new(2003);
+    pub const ERROR_CODE_REQUEST_RESULT_UNKNOWN: ErrorCode = ErrorCode::new(2004);
 
     pub const ERROR_CODE_UNKNOWN_MEMBER: ErrorCode = ErrorCode::new(3000);
 
@@ -529,6 +533,8 @@ impl ErrorReason {
             ErrorReason::InvalidMachineInput { .. } => Self::ERROR_CODE_INVALID_MACHINE_INPUT,
             ErrorReason::InvalidMachineOutput { .. } => Self::ERROR_CODE_INVALID_MACHINE_OUTPUT,
             ErrorReason::NoMachineOutput => Self::ERROR_CODE_NO_MACHINE_OUTPUT,
+            ErrorReason::RequestRejected => Self::ERROR_CODE_REQUEST_REJECTED,
+            ErrorReason::RequestResultUnknown => Self::ERROR_CODE_REQUEST_RESULT_UNKNOWN,
             ErrorReason::UnknownMember { .. } => Self::ERROR_CODE_UNKNOWN_MEMBER,
         }
     }
@@ -541,6 +547,10 @@ impl ErrorReason {
             ErrorReason::NoMachineOutput => "No machine output",
             ErrorReason::InvalidMachineInput { .. } => "Invalid machine input",
             ErrorReason::InvalidMachineOutput { .. } => "Invalid machine output",
+            ErrorReason::RequestRejected => "Request rejected due to leader change",
+            ErrorReason::RequestResultUnknown => {
+                "Request result unknown (it could either be accepted or rejected)"
+            }
             ErrorReason::UnknownMember { .. } => "Unknown cluster member",
         }
     }
@@ -555,15 +565,12 @@ impl ErrorReason {
 
     fn data(&self) -> Option<serde_json::Value> {
         match self {
-            ErrorReason::ClusterAlreadyCreated => None,
-            ErrorReason::ServerAlreadyAdded => None,
-            ErrorReason::NotClusterMember => None,
             ErrorReason::InvalidMachineInput { reason }
             | ErrorReason::InvalidMachineOutput { reason } => {
                 Some(serde_json::json!({"reason": reason.to_string()}))
             }
-            ErrorReason::NoMachineOutput => None,
             ErrorReason::UnknownMember { reply } => Some(serde_json::json!(reply)),
+            _ => None,
         }
     }
 }

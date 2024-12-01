@@ -127,7 +127,7 @@ impl From<Term> for raftbare::Term {
 /// This struct is the same as [`raftbare::LogIndex`], except that it is serializable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(into = "u64", from = "u64")]
-pub struct LogIndex(raftbare::LogIndex);
+pub struct LogIndex(pub(crate) raftbare::LogIndex);
 
 impl From<u64> for LogIndex {
     fn from(value: u64) -> Self {
@@ -141,6 +141,7 @@ impl From<LogIndex> for u64 {
     }
 }
 
+// TODO: remove
 impl From<raftbare::LogIndex> for LogIndex {
     fn from(value: raftbare::LogIndex) -> Self {
         Self(value)
