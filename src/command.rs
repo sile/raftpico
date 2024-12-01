@@ -70,6 +70,13 @@ impl Command {
         Self::Apply { input }
     }
 
+    pub(crate) fn will_change_member(&self) -> bool {
+        matches!(
+            self,
+            Self::CreateCluster { .. } | Self::AddServer { .. } | Self::RemoveServer { .. }
+        )
+    }
+
     pub(crate) fn from_log_entry(
         index: LogIndex,
         entry: &raftbare::LogEntry,

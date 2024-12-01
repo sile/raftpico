@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::Command,
-    messages::{AddServerResult, CreateClusterResult, ErrorReason, RemoveServerResult},
+    messages::{
+        AddServerResult, CreateClusterResult, ErrorReason, RemoveServerResult, TakeSnapshotResult,
+    },
     types::{NodeId, Token},
     ApplyContext, Machine,
 };
@@ -29,7 +31,8 @@ impl<M: Machine> Machine for Machines<M> {
         match input {
             Command::CreateCluster { .. }
             | Command::AddServer { .. }
-            | Command::RemoveServer { .. } => {
+            | Command::RemoveServer { .. }
+            | Command::TakeSnapshot { .. } => {
                 self.system.apply(ctx, input);
             }
             Command::Apply { input } => match serde_json::from_value(input) {
@@ -40,10 +43,7 @@ impl<M: Machine> Machine for Machines<M> {
                     ctx.error(ErrorReason::InvalidMachineInput { reason: e });
                 }
             },
-            Command::Query
-            | Command::TakeSnapshot { .. }
-            | Command::StartTerm { .. }
-            | Command::UpdateClusterConfig { .. } => {
+            Command::Query | Command::StartTerm { .. } | Command::UpdateClusterConfig { .. } => {
                 unreachable!();
             }
         }
@@ -166,8 +166,10 @@ impl Machine for SystemMachine {
             ),
             Command::AddServer { addr, .. } => self.apply_add_server_command(ctx, addr),
             Command::RemoveServer { addr, .. } => self.apply_remove_server_command(ctx, addr),
+            Command::TakeSnapshot => ctx.output(&TakeSnapshotResult {
+                snapshot_index: ctx.commit_index(),
+            }),
             Command::Apply { .. }
-            | Command::TakeSnapshot { .. }
             | Command::Query
             | Command::StartTerm { .. }
             | Command::UpdateClusterConfig { .. } => {

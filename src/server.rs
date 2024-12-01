@@ -16,7 +16,7 @@ use crate::{
     messages::{
         AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
         CreateClusterParams, ErrorReason, InstallSnapshotParams, NotifyCommitParams,
-        ProposeQueryParams, Request, TakeSnapshotResult,
+        ProposeQueryParams, Request,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, QueueItem},
@@ -215,11 +215,13 @@ impl<M: Machine> Server<M> {
     }
 
     fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
+        let mut command = self.commands.get(&index).expect("bug").clone();
+        let will_change_member = command.will_change_member();
+
         // TODO: while loop for merged commands / queries
         let pending = self.pop_pending(index)?;
         let caller = pending.as_ref().map(|p| p.1.clone()); // TODO: remove clone
 
-        let mut command = self.commands.get(&index).expect("bug").clone(); // TODO: remove clone
         let mut kind = ApplyKind::Command;
         if matches!(command, Command::Query) {
             let Some(input) = pending.map(|p| p.0) else {
@@ -230,26 +232,8 @@ impl<M: Machine> Server<M> {
             command = Command::Apply { input };
         }
 
-        let member_changed = matches!(
-            command,
-            Command::CreateCluster { .. }
-                | Command::AddServer { .. }
-                | Command::RemoveServer { .. }
-        );
-
-        if matches!(command, Command::TakeSnapshot { .. }) {
+        if matches!(command, Command::TakeSnapshot) {
             self.take_snapshot(index)?;
-
-            if let Some(caller) = caller {
-                self.broker.reply_ok(
-                    caller,
-                    &TakeSnapshotResult {
-                        snapshot_index: index,
-                    },
-                )?;
-            }
-
-            return Ok(());
         }
 
         let mut ctx = ApplyContext {
@@ -265,8 +249,8 @@ impl<M: Machine> Server<M> {
             self.broker.reply_output(caller, ctx.output)?;
         }
 
-        if member_changed {
-            // TODO: note comment
+        if will_change_member {
+            // Ensure that the snapshot consistently includes the latest member information for simplicity.
             self.take_snapshot(index)?;
             self.maybe_sync_cluster_config();
             self.broker
