@@ -183,7 +183,7 @@ fn command() {
         for addr in [addr1, addr2] {
             let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
-            std::thread::sleep(Duration::from_millis(400));
+            std::thread::sleep(Duration::from_millis(500));
         }
     });
     servers.push(server1);
@@ -404,7 +404,7 @@ fn snapshot() {
         for (i, addr) in addrs.into_iter().cycle().enumerate().take(10) {
             let _: serde_json::Value = rpc(addr, apply_command_req(i));
         }
-        std::thread::sleep(Duration::from_millis(300));
+        std::thread::sleep(Duration::from_millis(500));
     });
 
     while !handle.is_finished() {

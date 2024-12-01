@@ -343,6 +343,7 @@ impl<M: Machine> Server<M> {
         let snapshot = self.get_snapshot(self.node.commit_index().into())?;
         let request = Request::install_snapshot(dst, snapshot);
         self.broker.send_to(dst, &request)?;
+        self.node.heartbeat(); // TODO: doc and note (p2p message is sufficient for this purpose)
         Ok(())
     }
 
