@@ -1,4 +1,3 @@
-use jsonlrpc::ErrorObject;
 use raftbare::{Node, Role};
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +25,7 @@ pub struct ApplyContext<'a> {
     pub(crate) kind: ApplyKind,
     pub(crate) node: &'a Node,
     pub(crate) commit_index: LogIndex,
-    pub(crate) output: Option<Result<serde_json::Value, ErrorObject>>,
+    pub(crate) output: Option<Result<serde_json::Value, ErrorKind>>,
     pub(crate) caller: Option<Caller>,
 }
 
@@ -51,12 +50,12 @@ impl ApplyContext<'_> {
         if self.caller.is_some() {
             self.output = Some(
                 serde_json::to_value(output)
-                    .map_err(|e| ErrorKind::InvalidMachineOutput.object_with_reason(e)),
+                    .map_err(|reason| ErrorKind::InvalidMachineOutput { reason }),
             )
         }
     }
 
-    pub(crate) fn error(&mut self, error: ErrorObject) {
+    pub(crate) fn error(&mut self, error: ErrorKind) {
         if self.caller.is_some() {
             self.output = Some(Err(error));
         }

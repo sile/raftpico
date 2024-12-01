@@ -7,7 +7,6 @@ use std::{
 use jsonlrpc::{RequestId, ResponseObject};
 use jsonlrpc_mio::ClientId;
 use raftbare::{Action, ClusterConfig, CommitStatus, Node};
-use serde::Deserialize;
 
 use crate::{
     broker::MessageBroker,
@@ -15,9 +14,9 @@ use crate::{
     machine::{ApplyContext, Machine},
     machines::Machines,
     messages::{
-        AddServerParams, ApplyParams, Caller, CreateClusterParams, ErrorKind,
-        InstallSnapshotParams, NotifyCommitParams, ProposeQueryParams, RemoveServerParams, Request,
-        TakeSnapshotResult,
+        AddServerParams, AppendEntriesReplyParams, ApplyParams, Caller, CreateClusterParams,
+        ErrorKind, InstallSnapshotParams, NotifyCommitParams, ProposeQueryParams,
+        RemoveServerParams, Request, TakeSnapshotResult,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, QueueItem},
@@ -99,8 +98,8 @@ impl<M: Machine> Server<M> {
             self.node.handle_election_timeout();
         }
 
-        while let Some(response) = self.broker.try_recv_response() {
-            self.handle_response(response)?;
+        while let Some((addr, response)) = self.broker.try_recv_response() {
+            self.handle_response(addr, response)?;
         }
 
         while let Some((from, request)) = self.broker.try_recv_request() {
@@ -116,32 +115,28 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn handle_response(&mut self, response: ResponseObject) -> std::io::Result<()> {
+    fn handle_response(
+        &mut self,
+        addr: SocketAddr,
+        response: ResponseObject,
+    ) -> std::io::Result<()> {
         match response {
-            ResponseObject::Ok { result, id, .. } => todo!("{result:?}, {id:?}"),
+            ResponseObject::Ok { result, id, .. } => todo!("unexpected {result:?}, {id:?}"),
             ResponseObject::Err { error, .. }
-                if error.code == ErrorKind::NotClusterMember.code() =>
+                if error.code == ErrorKind::ERROR_CODE_UNKNOWN_MEMBER =>
             {
-                let data = error.data.ok_or(std::io::ErrorKind::Other)?;
-
-                #[derive(Deserialize)]
-                struct Data {
-                    addr: SocketAddr,
+                if let Some(mut params) = error
+                    .data
+                    .and_then(|d| serde_json::from_value::<AppendEntriesReplyParams>(d).ok())
+                {
+                    if params.header.from == NodeId::UNINIT {
+                        let Some(node_id) = self.machines.system.get_node_id_by_addr(addr) else {
+                            return Ok(());
+                        };
+                        params.header.from = node_id;
+                    }
+                    self.node.handle_message(params.into_raftbare());
                 }
-                let Data { addr } = serde_json::from_value(data)?;
-
-                let Some((&node_id, _)) = self
-                    .machines
-                    .system
-                    .members
-                    .iter()
-                    .find(|(_, m)| m.addr == addr)
-                else {
-                    return Ok(());
-                };
-
-                // TODO: note doc
-                self.send_install_snapshot_request(node_id)?;
             }
             e @ ResponseObject::Err { .. } => {
                 // TODO
@@ -384,16 +379,27 @@ impl<M: Machine> Server<M> {
                 self.handle_install_snapshot_request(params)?
             }
             Request::AppendEntriesCall { params, .. } => {
+                let sender = params.header.from;
                 let caller = self.caller(from, Caller::DUMMY_REQUEST_ID);
-                if self.is_known_node(params.header.from) {
-                    self.node
-                        .handle_message(params.into_raftbare(&mut self.commands));
-                } else {
-                    self.broker.reply_error(
-                        caller,
-                        ErrorKind::NotClusterMember
-                            .object_with_data(serde_json::json!({"addr": self.addr()})),
-                    )?;
+                self.node
+                    .handle_message(params.into_raftbare(&mut self.commands));
+                if !self.is_known_node(sender) {
+                    let Some(raftbare::Message::AppendEntriesReply {
+                        header,
+                        last_position,
+                    }) = self
+                        .node
+                        .actions()
+                        .send_messages
+                        .get(&sender.into())
+                        .cloned()
+                    else {
+                        return Ok(());
+                    };
+                    self.node.actions_mut().send_messages.remove(&sender.into());
+                    let reply = AppendEntriesReplyParams::from_raftbare(header, last_position);
+                    self.broker
+                        .reply_error(caller, ErrorKind::UnknownMember { reply })?;
                 }
             }
             Request::AppendEntriesReply { params, .. } => {
@@ -419,6 +425,8 @@ impl<M: Machine> Server<M> {
         if self.node.id() != params.node_id.into() {
             return Ok(());
         }
+
+        // TODO: term check
 
         if params.last_included_position.index <= self.node.commit_index().into() {
             return Ok(());
@@ -537,7 +545,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
             self.broker
-                .reply_error(caller, ErrorKind::NotClusterMember.object())?;
+                .reply_error(caller, ErrorKind::NotClusterMember)?;
             return Ok(());
         }
         let command = Command::AddServer { addr: params.addr };
@@ -549,7 +557,7 @@ impl<M: Machine> Server<M> {
     fn handle_apply_request(&mut self, caller: Caller, params: ApplyParams) -> std::io::Result<()> {
         if !self.is_initialized() {
             self.broker
-                .reply_error(caller, ErrorKind::NotClusterMember.object())?;
+                .reply_error(caller, ErrorKind::NotClusterMember)?;
             return Ok(());
         }
         match params.kind {
@@ -621,7 +629,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
             self.broker
-                .reply_error(caller, ErrorKind::NotClusterMember.object())?;
+                .reply_error(caller, ErrorKind::NotClusterMember)?;
             return Ok(());
         }
 
@@ -638,7 +646,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         if self.is_initialized() {
             self.broker
-                .reply_error(caller, ErrorKind::ClusterAlreadyCreated.object())?;
+                .reply_error(caller, ErrorKind::ClusterAlreadyCreated)?;
             return Ok(());
         }
 

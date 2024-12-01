@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use jsonlrpc::{ErrorObject, JsonRpcVersion, RequestId, ResponseObject};
+use jsonlrpc::{JsonRpcVersion, RequestId, ResponseObject};
 use jsonlrpc_mio::{ClientId, RpcClient, RpcServer};
 use mio::{Events, Poll};
 use serde::Serialize;
@@ -25,7 +25,7 @@ pub(crate) struct MessageBroker {
     rpc_server: RpcServer<Request>,
     rpc_clients: HashMap<Token, RpcClient>,
     id_to_token: HashMap<NodeId, Token>,
-    responses: VecDeque<ResponseObject>,
+    responses: VecDeque<(SocketAddr, ResponseObject)>,
 }
 
 impl MessageBroker {
@@ -84,10 +84,9 @@ impl MessageBroker {
     pub fn reply_output(
         &mut self,
         caller: Caller,
-        output: Option<Result<serde_json::Value, ErrorObject>>,
+        output: Option<Result<serde_json::Value, ErrorKind>>,
     ) -> std::io::Result<()> {
-        let output = output.unwrap_or_else(|| Err(ErrorKind::NoMachineOutput.object()));
-        match output {
+        match output.unwrap_or(Err(ErrorKind::NoMachineOutput)) {
             Err(e) => self.reply_error(caller, e),
             Ok(value) => self.reply_ok(caller, value),
         }
@@ -110,10 +109,10 @@ impl MessageBroker {
         Ok(())
     }
 
-    pub fn reply_error(&mut self, caller: Caller, error: ErrorObject) -> std::io::Result<()> {
+    pub fn reply_error(&mut self, caller: Caller, error: ErrorKind) -> std::io::Result<()> {
         let response = ResponseObject::Err {
             jsonrpc: JsonRpcVersion::V2,
-            error,
+            error: error.object(),
             id: Some(caller.request_id),
         };
         self.rpc_server
@@ -145,7 +144,7 @@ impl MessageBroker {
             if let Some(client) = self.rpc_clients.get_mut(&event.token().into()) {
                 let _ = client.handle_event(&mut self.poller, event);
                 while let Some(response) = client.try_recv() {
-                    self.responses.push_back(response);
+                    self.responses.push_back((client.server_addr(), response));
                 }
             } else {
                 self.rpc_server.handle_event(&mut self.poller, event)?;
@@ -159,7 +158,7 @@ impl MessageBroker {
         self.rpc_server.try_recv()
     }
 
-    pub fn try_recv_response(&mut self) -> Option<ResponseObject> {
+    pub fn try_recv_response(&mut self) -> Option<(SocketAddr, ResponseObject)> {
         self.responses.pop_front()
     }
 }

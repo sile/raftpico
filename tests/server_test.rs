@@ -120,7 +120,7 @@ fn re_election() {
         for addr in [addr1, addr2] {
             let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
-            std::thread::sleep(Duration::from_millis(200));
+            std::thread::sleep(Duration::from_millis(400));
         }
         std::thread::sleep(Duration::from_millis(200));
     });
@@ -183,7 +183,7 @@ fn command() {
         for addr in [addr1, addr2] {
             let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
-            std::thread::sleep(Duration::from_millis(200));
+            std::thread::sleep(Duration::from_millis(400));
         }
     });
     servers.push(server1);
@@ -383,7 +383,7 @@ fn snapshot() {
         for addr in [addr1, addr2] {
             let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(400));
         }
     });
     servers.push(server1);
@@ -460,7 +460,7 @@ fn storage() {
         for addr in [addr1, addr2] {
             let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(400));
         }
     });
     servers.push(server1);

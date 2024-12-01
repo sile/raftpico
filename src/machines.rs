@@ -37,7 +37,7 @@ impl<M: Machine> Machine for Machines<M> {
                     self.user.apply(ctx, input);
                 }
                 Err(e) => {
-                    ctx.error(ErrorKind::InvalidMachineInput.object_with_reason(e));
+                    ctx.error(ErrorKind::InvalidMachineInput { reason: e });
                 }
             },
             Command::Query
@@ -90,7 +90,7 @@ impl SystemMachine {
 
     fn apply_add_server_command(&mut self, ctx: &mut ApplyContext, addr: SocketAddr) {
         if self.members.values().any(|m| m.addr == addr) {
-            ctx.error(ErrorKind::ServerAlreadyAdded.object());
+            ctx.error(ErrorKind::ServerAlreadyAdded);
             return;
         }
 
@@ -104,7 +104,7 @@ impl SystemMachine {
 
     fn apply_remove_server_command(&mut self, ctx: &mut ApplyContext, addr: SocketAddr) {
         let Some((&node_id, _member)) = self.members.iter().find(|(_, m)| m.addr == addr) else {
-            ctx.error(ErrorKind::NotClusterMember.object());
+            ctx.error(ErrorKind::NotClusterMember);
             return;
         };
 
@@ -114,6 +114,13 @@ impl SystemMachine {
         });
 
         // TODO: reset self.node for removed server
+    }
+
+    pub(crate) fn get_node_id_by_addr(&self, addr: SocketAddr) -> Option<NodeId> {
+        self.members
+            .iter()
+            .find(|(_, m)| m.addr == addr)
+            .map(|(&id, _)| id)
     }
 
     pub(crate) fn gen_election_timeout(&self, role: Role) -> Duration {

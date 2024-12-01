@@ -180,10 +180,7 @@ impl Request {
                 last_position,
             } => Self::AppendEntriesReply {
                 jsonrpc: JsonRpcVersion::V2,
-                params: AppendEntriesReplyParams {
-                    header: MessageHeader::from_raftbare(header),
-                    last_log_position: last_position.into(),
-                },
+                params: AppendEntriesReplyParams::from_raftbare(header, last_position),
             },
         }
     }
@@ -288,14 +285,24 @@ impl AppendEntriesCallParams {
 #[allow(missing_docs)]
 pub struct AppendEntriesReplyParams {
     pub header: MessageHeader,
-    pub last_log_position: LogPosition,
+    pub last_position: LogPosition,
 }
 
 impl AppendEntriesReplyParams {
     pub(crate) fn into_raftbare(self) -> raftbare::Message {
         raftbare::Message::AppendEntriesReply {
             header: self.header.to_raftbare(),
-            last_position: self.last_log_position.into(),
+            last_position: self.last_position.into(),
+        }
+    }
+
+    pub(crate) fn from_raftbare(
+        header: raftbare::MessageHeader,
+        last_position: raftbare::LogPosition,
+    ) -> Self {
+        AppendEntriesReplyParams {
+            header: MessageHeader::from_raftbare(header),
+            last_position: last_position.into(),
         }
     }
 }
@@ -490,53 +497,68 @@ impl Caller {
     pub(crate) const DUMMY_REQUEST_ID: RequestId = RequestId::Number(-1);
 }
 
+// TODO: rename
 /// RPC error kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug)]
 #[allow(missing_docs)]
 pub enum ErrorKind {
-    ClusterAlreadyCreated = 1,
-    InvalidMachineInput,
-    InvalidMachineOutput,
-    NoMachineOutput,
+    ClusterAlreadyCreated,
     ServerAlreadyAdded,
     NotClusterMember,
+    InvalidMachineInput { reason: serde_json::Error },
+    InvalidMachineOutput { reason: serde_json::Error },
+    NoMachineOutput,
+    UnknownMember { reply: AppendEntriesReplyParams },
 }
 
 impl ErrorKind {
+    pub const ERROR_CODE_UNKNOWN_MEMBER: ErrorCode = ErrorCode::new(3000);
+
     /// Returns JSON-RPC error code.
-    pub const fn code(self) -> ErrorCode {
-        ErrorCode::new(self as i32)
+    pub fn code(&self) -> ErrorCode {
+        ErrorCode::new(match self {
+            ErrorKind::ClusterAlreadyCreated => 1000,
+            ErrorKind::ServerAlreadyAdded => 1002,
+            ErrorKind::NotClusterMember => 1003,
+            ErrorKind::InvalidMachineInput { .. } => 2000,
+            ErrorKind::InvalidMachineOutput { .. } => 2001,
+            ErrorKind::NoMachineOutput => 2002,
+            ErrorKind::UnknownMember { .. } => return Self::ERROR_CODE_UNKNOWN_MEMBER,
+        })
     }
 
     /// Returns JSON-RPC error message.
-    pub const fn message(&self) -> &'static str {
+    pub fn message(&self) -> &'static str {
         match self {
             ErrorKind::ClusterAlreadyCreated => "Cluster already created",
-            ErrorKind::NoMachineOutput => "No machine output",
-            ErrorKind::InvalidMachineInput => "Invalid machine input",
-            ErrorKind::InvalidMachineOutput => "Invalid machine output",
             ErrorKind::ServerAlreadyAdded => "Server already added",
             ErrorKind::NotClusterMember => "Not a cluster member",
+            ErrorKind::NoMachineOutput => "No machine output",
+            ErrorKind::InvalidMachineInput { .. } => "Invalid machine input",
+            ErrorKind::InvalidMachineOutput { .. } => "Invalid machine output",
+            ErrorKind::UnknownMember { .. } => "Unknown cluster member",
         }
     }
 
-    pub(crate) fn object(self) -> ErrorObject {
+    pub(crate) fn object(&self) -> ErrorObject {
         ErrorObject {
             code: self.code(),
             message: self.message().to_owned(),
-            data: None,
+            data: self.data(),
         }
     }
 
-    pub(crate) fn object_with_reason<E: std::fmt::Display>(self, reason: E) -> ErrorObject {
-        self.object_with_data(serde_json::json!({"reason": reason.to_string()}))
-    }
-
-    pub(crate) fn object_with_data(self, data: serde_json::Value) -> ErrorObject {
-        ErrorObject {
-            code: self.code(),
-            message: self.message().to_owned(),
-            data: Some(data),
+    fn data(&self) -> Option<serde_json::Value> {
+        match self {
+            ErrorKind::ClusterAlreadyCreated => None,
+            ErrorKind::ServerAlreadyAdded => None,
+            ErrorKind::NotClusterMember => None,
+            ErrorKind::InvalidMachineInput { reason }
+            | ErrorKind::InvalidMachineOutput { reason } => {
+                Some(serde_json::json!({"reason": reason.to_string()}))
+            }
+            ErrorKind::NoMachineOutput => None,
+            ErrorKind::UnknownMember { reply } => Some(serde_json::json!(reply)),
         }
     }
 }
