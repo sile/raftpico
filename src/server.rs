@@ -15,10 +15,9 @@ use crate::{
     machine::{ApplyContext, Machine},
     machines::Machines,
     messages::{
-        AddServerParams, AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorKind, InstallSnapshotParams, NotifyCommitParams,
-        ProposeQueryParams, RemoveServerParams, Request, RequestVoteCallParams,
-        RequestVoteReplyParams, TakeSnapshotResult,
+        AddServerParams, ApplyParams, Caller, CreateClusterParams, ErrorKind,
+        InstallSnapshotParams, NotifyCommitParams, ProposeQueryParams, RemoveServerParams, Request,
+        TakeSnapshotResult,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, QueueItem},
@@ -46,9 +45,11 @@ impl<M: Machine> Server<M> {
         listen_addr: SocketAddr,
         mut storage: Option<FileStorage>,
     ) -> std::io::Result<Self> {
+        let broker = MessageBroker::start(listen_addr)?;
         let mut commands = Commands::new();
         let mut machines = Machines::default();
         let mut node = Node::start(NodeId::UNINIT.into());
+
         if let Some(storage) = &mut storage {
             if let Some(loaded) = storage.load(&mut commands)? {
                 node = loaded.0;
@@ -56,19 +57,19 @@ impl<M: Machine> Server<M> {
             }
         }
 
-        let last_applied_index = node.log().snapshot_position().index.into();
+        let last_applied = node.log().snapshot_position().index.into();
         let mut this = Self {
             process_id: std::process::id(),
-            broker: MessageBroker::start(listen_addr)?,
+            broker,
             node,
             storage,
             commands,
-            election_timeout_deadline: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60), // sentinel value
-            last_applied: last_applied_index,
+            election_timeout_deadline: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60),
+            last_applied,
             pendings: BinaryHeap::new(),
             machines,
         };
-        this.update_rpc_clients(); // TODO
+        this.sync_broker();
 
         Ok(this)
     }
@@ -222,8 +223,7 @@ impl<M: Machine> Server<M> {
             command = Command::Apply { input };
         }
 
-        // TODO: rename
-        let needs_snapshot = matches!(
+        let member_changed = matches!(
             command,
             Command::CreateCluster { .. }
                 | Command::AddServer { .. }
@@ -258,25 +258,25 @@ impl<M: Machine> Server<M> {
             self.broker.reply_output(caller, ctx.output)?;
         }
 
-        if needs_snapshot {
+        if member_changed {
             // TODO: note comment
             self.take_snapshot(index)?;
             self.maybe_update_cluster_config();
-            self.update_rpc_clients();
+            self.sync_broker();
         }
 
         Ok(())
     }
 
-    fn update_rpc_clients(&mut self) {
-        self.broker.update_peers(
-            self.machines
-                .system
-                .members
-                .iter()
-                .filter(|(&id, _)| id != self.node.id().into())
-                .map(|(&id, m)| (id, m.token, m.addr)),
-        );
+    fn sync_broker(&mut self) {
+        let peers = self
+            .machines
+            .system
+            .members
+            .iter()
+            .filter(|(&id, _)| id != self.node.id().into())
+            .map(|(&id, m)| (id, m.token, m.addr));
+        self.broker.update_peers(peers);
     }
 
     fn maybe_update_cluster_config(&mut self) {
@@ -361,36 +361,52 @@ impl<M: Machine> Server<M> {
     fn handle_request(&mut self, from: ClientId, request: Request) -> std::io::Result<()> {
         match request {
             Request::CreateCluster { id, params, .. } => {
-                self.handle_create_cluster_request(self.caller(from, id), params)
+                self.handle_create_cluster_request(self.caller(from, id), params)?
             }
             Request::AddServer { id, params, .. } => {
-                self.handle_add_server_request(self.caller(from, id), params)
+                self.handle_add_server_request(self.caller(from, id), params)?
             }
             Request::RemoveServer { id, params, .. } => {
-                self.handle_remove_server_request(self.caller(from, id), params)
+                self.handle_remove_server_request(self.caller(from, id), params)?
             }
             Request::TakeSnapshot { id, .. } => {
-                self.handle_take_snapshot_request(self.caller(from, id))
+                self.propose_command(self.caller(from, id), Command::TakeSnapshot)?
             }
             Request::Apply { id, params, .. } => {
-                self.handle_apply_request(self.caller(from, id), params)
+                self.handle_apply_request(self.caller(from, id), params)?
             }
             Request::ProposeCommand { params, .. } => {
-                self.propose_command(params.caller, params.command)
+                self.propose_command(params.caller, params.command)?
             }
-            Request::ProposeQuery { params, .. } => self.handle_propose_query_request(params),
-            Request::NotifyCommit { params, .. } => self.handle_notify_commit_request(params),
-            Request::InstallSnapshot { params, .. } => self.handle_install_snapshot_request(params),
-            Request::AppendEntriesCall { params, .. } => self
-                .handle_append_entries_request(self.caller(from, Caller::DUMMY_REQUEST_ID), params),
+            Request::ProposeQuery { params, .. } => self.handle_propose_query_request(params)?,
+            Request::NotifyCommit { params, .. } => self.handle_notify_commit_request(params)?,
+            Request::InstallSnapshot { params, .. } => {
+                self.handle_install_snapshot_request(params)?
+            }
+            Request::AppendEntriesCall { params, .. } => {
+                let caller = self.caller(from, Caller::DUMMY_REQUEST_ID);
+                if self.is_known_node(params.header.from) {
+                    self.node
+                        .handle_message(params.into_raftbare(&mut self.commands));
+                } else {
+                    self.broker.reply_error(
+                        caller,
+                        ErrorKind::NotClusterMember
+                            .object_with_data(serde_json::json!({"addr": self.addr()})),
+                    )?;
+                }
+            }
             Request::AppendEntriesReply { params, .. } => {
-                self.handle_append_entries_result_request(params)
+                self.node.handle_message(params.into_raftbare());
             }
-            Request::RequestVoteCall { params, .. } => self.handle_request_vote_request(params),
+            Request::RequestVoteCall { params, .. } => {
+                self.node.handle_message(params.into_raftbare());
+            }
             Request::RequestVoteReply { params, .. } => {
-                self.handle_request_vote_result_request(params)
+                self.node.handle_message(params.into_raftbare());
             }
         }
+        Ok(())
     }
 
     fn handle_install_snapshot_request(
@@ -427,8 +443,7 @@ impl<M: Machine> Server<M> {
         }
 
         self.machines = serde_json::from_value(params.machine)?;
-
-        self.update_rpc_clients(); // TODO
+        self.sync_broker();
 
         Ok(())
     }
@@ -476,50 +491,6 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn handle_take_snapshot_request(&mut self, caller: Caller) -> std::io::Result<()> {
-        self.propose_command(caller, Command::TakeSnapshot)?;
-        Ok(())
-    }
-
-    fn handle_append_entries_result_request(
-        &mut self,
-        params: AppendEntriesReplyParams,
-    ) -> std::io::Result<()> {
-        if !self.is_initialized() {
-            return Ok(());
-        }
-
-        let message = params.into_raftbare();
-        self.node.handle_message(message);
-        Ok(())
-    }
-
-    fn handle_request_vote_request(
-        &mut self,
-        params: RequestVoteCallParams,
-    ) -> std::io::Result<()> {
-        if !self.is_initialized() {
-            return Ok(());
-        }
-
-        let message = params.into_raftbare();
-        self.node.handle_message(message);
-        Ok(())
-    }
-
-    fn handle_request_vote_result_request(
-        &mut self,
-        params: RequestVoteReplyParams,
-    ) -> std::io::Result<()> {
-        if !self.is_initialized() {
-            return Ok(());
-        }
-
-        let message = params.into_raftbare();
-        self.node.handle_message(message);
-        Ok(())
-    }
-
     fn is_initialized(&self) -> bool {
         self.node().is_some()
     }
@@ -529,6 +500,7 @@ impl<M: Machine> Server<M> {
             todo!("redirect if possible");
         }
 
+        // TODO: factor out
         let position = self.propose_command_leader(Command::Query);
         self.broker.send_to(
             params.caller.node_id,
@@ -554,30 +526,8 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn handle_append_entries_request(
-        &mut self,
-        caller: Caller,
-        params: AppendEntriesCallParams,
-    ) -> std::io::Result<()> {
-        if self.node().is_none()
-            || !self
-                .machines
-                .system
-                .members
-                .contains_key(&params.header.from)
-        {
-            self.broker.reply_error(
-                caller,
-                ErrorKind::NotClusterMember
-                    .object_with_data(serde_json::json!({"addr": self.addr()})),
-            )?;
-            return Ok(());
-        }
-
-        let message = params.into_raftbare(&mut self.commands);
-        self.node.handle_message(message);
-
-        Ok(())
+    fn is_known_node(&self, node_id: NodeId) -> bool {
+        self.machines.system.members.contains_key(&node_id)
     }
 
     fn handle_add_server_request(
@@ -716,7 +666,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn propose_command(&mut self, caller: Caller, command: Command) -> std::io::Result<()> {
-        assert!(self.is_initialized());
+        assert!(self.is_initialized()); // TODO: error reply
 
         if !self.is_leader() {
             let Some(maybe_leader) = self.node.voted_for().map(NodeId::from) else {
