@@ -125,6 +125,9 @@ impl MessageBroker {
         let raw = serde_json::value::to_raw_value(message)?;
         for client in self.rpc_clients.values_mut() {
             if client.queued_bytes_len() > SEND_QUEUE_LIMIT {
+                // Broadcast messages, particularly AppendEntriesCall, may become too numerous.
+                // Since Raft permits the dropping of messages,
+                // these should be discarded when the TCP connection is full.
                 continue;
             }
             let _ = client.send(&mut self.poller, &raw);
