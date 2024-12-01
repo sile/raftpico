@@ -43,7 +43,8 @@ impl<M: Machine> Machine for Machines<M> {
                     ctx.error(ErrorReason::InvalidMachineInput { reason: e });
                 }
             },
-            Command::Query | Command::StartTerm { .. } | Command::UpdateClusterConfig { .. } => {
+            Command::Query => {} // Do nothing.
+            Command::StartTerm { .. } | Command::UpdateClusterConfig { .. } => {
                 unreachable!();
             }
         }

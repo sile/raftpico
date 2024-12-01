@@ -1,12 +1,11 @@
 use std::{
-    collections::BinaryHeap,
     net::SocketAddr,
     time::{Duration, Instant},
 };
 
 use jsonlrpc::{ErrorObject, RequestId, ResponseObject};
 use jsonlrpc_mio::ClientId;
-use raftbare::{Action, ClusterConfig, CommitStatus, Node};
+use raftbare::{Action, ClusterConfig, Node};
 
 use crate::{
     broker::MessageBroker,
@@ -19,7 +18,7 @@ use crate::{
         ProposeQueryParams, Request,
     },
     storage::FileStorage,
-    types::{LogIndex, LogPosition, NodeId, QueueItem},
+    types::{LogIndex, LogPosition, NodeId, PendingQueue},
     ApplyKind,
 };
 
@@ -35,7 +34,8 @@ pub struct Server<M> {
     last_applied: LogIndex,
     commands: Commands,
     storage: Option<FileStorage>,
-    pendings: BinaryHeap<QueueItem<LogPosition, (Option<serde_json::Value>, Caller)>>,
+    pending_commands: PendingQueue<Caller>,
+    pending_queries: PendingQueue<(serde_json::Value, Caller)>,
     machines: Machines<M>,
 }
 
@@ -66,7 +66,8 @@ impl<M: Machine> Server<M> {
             commands,
             election_timeout_deadline: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60),
             last_applied,
-            pendings: BinaryHeap::new(),
+            pending_commands: PendingQueue::new(true),
+            pending_queries: PendingQueue::new(false),
             machines,
         })
     }
@@ -160,6 +161,24 @@ impl<M: Machine> Server<M> {
             }
 
             self.last_applied = self.node.commit_index().into();
+
+            self.handle_committed_queries()?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_committed_queries(&mut self) -> std::io::Result<()> {
+        while let Some(((input, caller), error)) = self
+            .pending_queries
+            .pop_committed(&self.node, self.last_applied)
+        {
+            if let Some(error) = error {
+                self.broker.reply_error(caller, error)?;
+            } else {
+                let command = Command::apply(input);
+                self.apply(ApplyKind::Query, self.last_applied, Some(caller), command)?;
+            }
         }
 
         Ok(())
@@ -175,79 +194,28 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn pop_pending(
-        &mut self,
-        commit_index: LogIndex,
-    ) -> std::io::Result<Option<(Option<serde_json::Value>, Caller)>> {
-        while let Some(pending) = self.pendings.peek() {
-            match self.node.get_commit_status(pending.key.into()) {
-                CommitStatus::InProgress => {
-                    break;
-                }
-                CommitStatus::Rejected => {
-                    let caller = self.pendings.pop().expect("unreachable").item.1;
-                    self.broker
-                        .reply_error(caller, ErrorReason::RequestRejected)?;
-                }
-                CommitStatus::Unknown => {
-                    let caller = self.pendings.pop().expect("unreachable").item.1;
-                    self.broker
-                        .reply_error(caller, ErrorReason::RequestResultUnknown)?;
-                }
-                CommitStatus::Committed
-                    if commit_index < pending.key.index && pending.item.0.is_none() =>
-                {
-                    // This commit (for a command) has already been applied.
-                    // Re-use `RequestResultUnknown` here, although it may be slightly inappropriate.
-                    let caller = self.pendings.pop().expect("unreachable").item.1;
-                    self.broker
-                        .reply_error(caller, ErrorReason::RequestResultUnknown)?;
-                }
-                CommitStatus::Committed if pending.key.index < commit_index => {
-                    break;
-                }
-                CommitStatus::Committed => {
-                    return Ok(Some(self.pendings.pop().expect("unreachable").item));
-                }
-            }
-        }
-        Ok(None)
-    }
-
     fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
-        let mut command = self.commands.get(&index).expect("bug").clone();
+        let command = self.commands.get(&index).expect("bug").clone();
         let will_change_member = command.will_change_member();
 
-        // TODO: while loop for merged commands / queries
-        let pending = self.pop_pending(index)?;
-        let caller = pending.as_ref().map(|p| p.1.clone()); // TODO: remove clone
-
-        let mut kind = ApplyKind::Command;
-        if matches!(command, Command::Query) {
-            let Some(input) = pending.map(|p| p.0) else {
-                return Ok(());
-            };
-            let input = input.expect("TODO");
-            kind = ApplyKind::Query;
-            command = Command::Apply { input };
+        let mut caller = None;
+        while let Some((popped_caller, error)) =
+            self.pending_commands.pop_committed(&self.node, index)
+        {
+            if let Some(error) = error {
+                self.broker.reply_error(popped_caller, error)?;
+            } else if caller.is_some() {
+                unreachable!("bug");
+            } else {
+                caller = Some(popped_caller);
+            }
         }
 
         if matches!(command, Command::TakeSnapshot) {
             self.take_snapshot(index)?;
         }
 
-        let mut ctx = ApplyContext {
-            kind,
-            node: &self.node,
-            commit_index: index,
-            output: None,
-            caller,
-        };
-        self.machines.apply(&mut ctx, command);
-
-        if let Some(caller) = ctx.caller {
-            self.broker.reply_output(caller, ctx.output)?;
-        }
+        self.apply(ApplyKind::Command, index, caller, command)?;
 
         if will_change_member {
             // Ensure that the snapshot consistently includes the latest member information for simplicity.
@@ -255,6 +223,29 @@ impl<M: Machine> Server<M> {
             self.maybe_sync_cluster_config();
             self.broker
                 .update_peers(self.machines.system.peers(self.node.id().into()));
+        }
+
+        Ok(())
+    }
+
+    fn apply(
+        &mut self,
+        kind: ApplyKind,
+        commit_index: LogIndex,
+        caller: Option<Caller>,
+        command: Command,
+    ) -> std::io::Result<()> {
+        let mut ctx = ApplyContext {
+            kind,
+            node: &self.node,
+            commit_index,
+            output: None,
+            caller,
+        };
+        self.machines.apply(&mut ctx, command);
+
+        if let Some(caller) = ctx.caller {
+            self.broker.reply_output(caller, ctx.output)?;
         }
 
         Ok(())
@@ -521,10 +512,13 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        self.pendings.push(QueueItem {
-            key: params.commit,
-            item: (params.input, params.caller),
-        });
+        if let Some(input) = params.input {
+            self.pending_queries
+                .push(params.commit, (input, params.caller));
+        } else {
+            self.pending_commands.push(params.commit, params.caller);
+        }
+
         Ok(())
     }
 
@@ -558,10 +552,7 @@ impl<M: Machine> Server<M> {
         // TODO: use propose_command()?
         if self.is_leader() {
             let commit_position = self.propose_command_leader(Command::Query);
-            self.pendings.push(QueueItem {
-                key: commit_position,
-                item: (Some(input), caller),
-            });
+            self.pending_queries.push(commit_position, (input, caller));
             return Ok(());
         }
 
@@ -645,11 +636,7 @@ impl<M: Machine> Server<M> {
 
         let commit_position = self.propose_command_leader(command);
         if caller.node_id == self.node.id().into() {
-            let pending = QueueItem {
-                key: commit_position,
-                item: (None, caller),
-            };
-            self.pendings.push(pending);
+            self.pending_commands.push(commit_position, caller);
         } else {
             // TODO: add note doc about message reordering
             let node_id = caller.node_id;

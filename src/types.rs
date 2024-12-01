@@ -1,5 +1,10 @@
 //! Basic types.
+use std::collections::BinaryHeap;
+
+use raftbare::{CommitStatus, Node};
 use serde::{Deserialize, Serialize};
+
+use crate::messages::ErrorReason;
 
 /// Raft node identifier.
 ///
@@ -182,27 +187,84 @@ impl From<LogPosition> for raftbare::LogPosition {
 }
 
 #[derive(Debug)]
-pub(crate) struct QueueItem<K, T> {
-    pub key: K,
-    pub item: T,
+struct PendingQueueItem<T> {
+    commit: LogPosition,
+    item: T,
 }
 
-impl<K: PartialEq, T> PartialEq for QueueItem<K, T> {
+impl<T> PartialEq for PendingQueueItem<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.key == other.key
+        self.commit == other.commit
     }
 }
 
-impl<K: Eq, T> Eq for QueueItem<K, T> {}
+impl<T> Eq for PendingQueueItem<T> {}
 
-impl<K: PartialOrd, T> PartialOrd for QueueItem<K, T> {
+impl<T> PartialOrd for PendingQueueItem<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.key.partial_cmp(&other.key).map(|o| o.reverse())
+        self.commit.partial_cmp(&other.commit).map(|o| o.reverse())
     }
 }
 
-impl<K: Ord, T> Ord for QueueItem<K, T> {
+impl<T> Ord for PendingQueueItem<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.key.cmp(&other.key).reverse()
+        self.commit.cmp(&other.commit).reverse()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PendingQueue<T> {
+    queue: BinaryHeap<PendingQueueItem<T>>,
+    is_command: bool,
+}
+
+impl<T> PendingQueue<T> {
+    pub fn new(is_command: bool) -> Self {
+        Self {
+            queue: BinaryHeap::new(),
+            is_command,
+        }
+    }
+
+    pub fn push(&mut self, commit: LogPosition, item: T) {
+        self.queue.push(PendingQueueItem { commit, item });
+    }
+
+    pub fn pop_committed(
+        &mut self,
+        node: &Node,
+        commit_index: LogIndex,
+    ) -> Option<(T, Option<ErrorReason>)> {
+        while let Some(pending) = self.queue.peek() {
+            match node.get_commit_status(pending.commit.into()) {
+                CommitStatus::InProgress => {
+                    break;
+                }
+                CommitStatus::Rejected => {
+                    let item = self.queue.pop().expect("unreachable").item;
+                    return Some((item, Some(ErrorReason::RequestRejected)));
+                }
+                CommitStatus::Unknown => {
+                    let item = self.queue.pop().expect("unreachable").item;
+                    return Some((item, Some(ErrorReason::RequestResultUnknown)));
+                }
+                CommitStatus::Committed
+                    if self.is_command && pending.commit.index < commit_index =>
+                {
+                    // This commit (for a command) has already been applied.
+                    // Re-use `RequestResultUnknown` here, although it may be slightly inappropriate.
+                    let item = self.queue.pop().expect("unreachable").item;
+                    return Some((item, Some(ErrorReason::RequestResultUnknown)));
+                }
+                CommitStatus::Committed if commit_index < pending.commit.index => {
+                    break;
+                }
+                CommitStatus::Committed => {
+                    let item = self.queue.pop().expect("unreachable").item;
+                    return Some((item, None));
+                }
+            }
+        }
+        None
     }
 }
