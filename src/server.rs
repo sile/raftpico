@@ -456,7 +456,7 @@ impl<M: Machine> Server<M> {
 
         if let Some(snapshot) = snapshot {
             if let Some(storage) = &mut self.storage {
-                storage.save_snapshot(&snapshot)?;
+                storage.save_snapshot(snapshot)?;
                 storage.save_current_term(self.node.current_term().into())?;
                 storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
                 storage.append_entries(self.node.log().entries(), &self.commands)?;

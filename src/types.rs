@@ -202,7 +202,7 @@ impl<T> Eq for PendingQueueItem<T> {}
 
 impl<T> PartialOrd for PendingQueueItem<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.commit.partial_cmp(&other.commit).map(|o| o.reverse())
+        Some(self.cmp(other))
     }
 }
 
@@ -235,36 +235,28 @@ impl<T> PendingQueue<T> {
         node: &Node,
         commit_index: LogIndex,
     ) -> Option<(T, Option<ErrorReason>)> {
-        while let Some(pending) = self.queue.peek() {
-            match node.get_commit_status(pending.commit.into()) {
-                CommitStatus::InProgress => {
-                    break;
-                }
-                CommitStatus::Rejected => {
-                    let item = self.queue.pop().expect("unreachable").item;
-                    return Some((item, Some(ErrorReason::RequestRejected)));
-                }
-                CommitStatus::Unknown => {
-                    let item = self.queue.pop().expect("unreachable").item;
-                    return Some((item, Some(ErrorReason::RequestResultUnknown)));
-                }
-                CommitStatus::Committed
-                    if self.is_command && pending.commit.index < commit_index =>
-                {
-                    // This commit (for a command) has already been applied.
-                    // Re-use `RequestResultUnknown` here, although it may be slightly inappropriate.
-                    let item = self.queue.pop().expect("unreachable").item;
-                    return Some((item, Some(ErrorReason::RequestResultUnknown)));
-                }
-                CommitStatus::Committed if commit_index < pending.commit.index => {
-                    break;
-                }
-                CommitStatus::Committed => {
-                    let item = self.queue.pop().expect("unreachable").item;
-                    return Some((item, None));
-                }
+        let pending = self.queue.peek()?;
+        match node.get_commit_status(pending.commit.into()) {
+            CommitStatus::InProgress => None,
+            CommitStatus::Rejected => {
+                let item = self.queue.pop().expect("unreachable").item;
+                Some((item, Some(ErrorReason::RequestRejected)))
+            }
+            CommitStatus::Unknown => {
+                let item = self.queue.pop().expect("unreachable").item;
+                Some((item, Some(ErrorReason::RequestResultUnknown)))
+            }
+            CommitStatus::Committed if self.is_command && pending.commit.index < commit_index => {
+                // This commit (for a command) has already been applied.
+                // Re-use `RequestResultUnknown` here, although it may be slightly inappropriate.
+                let item = self.queue.pop().expect("unreachable").item;
+                Some((item, Some(ErrorReason::RequestResultUnknown)))
+            }
+            CommitStatus::Committed if commit_index < pending.commit.index => None,
+            CommitStatus::Committed => {
+                let item = self.queue.pop().expect("unreachable").item;
+                Some((item, None))
             }
         }
-        None
     }
 }
