@@ -1,5 +1,5 @@
 //! Raft command.
-use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
+use std::{collections::BTreeMap, net::SocketAddr};
 
 use serde::{Deserialize, Serialize};
 
@@ -20,8 +20,8 @@ pub enum Command {
     /// A command proposed via [`Request::CreateCluster`] API.
     CreateCluster {
         seed_addr: SocketAddr,
-        min_election_timeout: Duration,
-        max_election_timeout: Duration,
+        min_election_timeout_ms: u32,
+        max_election_timeout_ms: u32,
     },
 
     /// A command proposed via [`Request::AddServer`] API.
@@ -53,8 +53,8 @@ impl Command {
     pub(crate) fn create_cluster(seed_addr: SocketAddr, params: &CreateClusterParams) -> Self {
         Self::CreateCluster {
             seed_addr,
-            min_election_timeout: Duration::from_millis(params.min_election_timeout_ms as u64),
-            max_election_timeout: Duration::from_millis(params.max_election_timeout_ms as u64),
+            min_election_timeout_ms: params.min_election_timeout_ms,
+            max_election_timeout_ms: params.max_election_timeout_ms,
         }
     }
 

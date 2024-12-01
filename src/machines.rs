@@ -61,8 +61,8 @@ pub(crate) struct Member {
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemMachine {
-    pub(crate) min_election_timeout: Duration,
-    pub(crate) max_election_timeout: Duration,
+    pub(crate) min_election_timeout_ms: u32,
+    pub(crate) max_election_timeout_ms: u32,
     pub(crate) members: BTreeMap<NodeId, Member>,
     next_token: Token,
 }
@@ -72,11 +72,11 @@ impl SystemMachine {
         &mut self,
         ctx: &mut ApplyContext,
         seed_addr: SocketAddr,
-        min_election_timeout: Duration,
-        max_election_timeout: Duration,
+        min_election_timeout_ms: u32,
+        max_election_timeout_ms: u32,
     ) {
-        self.min_election_timeout = min_election_timeout;
-        self.max_election_timeout = max_election_timeout;
+        self.min_election_timeout_ms = min_election_timeout_ms;
+        self.max_election_timeout_ms = max_election_timeout_ms;
         self.members.insert(
             NodeId::SEED,
             Member {
@@ -139,13 +139,14 @@ impl SystemMachine {
     }
 
     pub(crate) fn gen_election_timeout(&self, role: Role) -> Duration {
-        let min = self.min_election_timeout;
-        let max = self.max_election_timeout.max(min);
-        match role {
+        let min = self.min_election_timeout_ms;
+        let max = self.max_election_timeout_ms.max(min);
+        let timeout = match role {
             Role::Follower => max,
             Role::Candidate => rand::thread_rng().gen_range(min..=max),
             Role::Leader => min,
-        }
+        };
+        Duration::from_millis(timeout as u64)
     }
 }
 
@@ -156,14 +157,14 @@ impl Machine for SystemMachine {
         match input {
             Command::CreateCluster {
                 seed_addr,
-                min_election_timeout,
-                max_election_timeout,
+                min_election_timeout_ms,
+                max_election_timeout_ms,
                 ..
             } => self.apply_create_cluster_command(
                 ctx,
                 seed_addr,
-                min_election_timeout,
-                max_election_timeout,
+                min_election_timeout_ms,
+                max_election_timeout_ms,
             ),
             Command::AddServer { addr, .. } => self.apply_add_server_command(ctx, addr),
             Command::RemoveServer { addr, .. } => self.apply_remove_server_command(ctx, addr),

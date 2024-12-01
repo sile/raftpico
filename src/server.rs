@@ -502,27 +502,16 @@ impl<M: Machine> Server<M> {
             // [NOTE]
             // Theoretically, the restarted server could have the same process ID as before.
             // However, in practice, I believe the likelihood of this occurring is extremely low.
-            return Ok(());
-        }
-
-        if let Some(input) = params.input {
+        } else if let Some(input) = params.input {
             self.pending_queries
                 .push(params.commit, (input, params.caller));
         } else {
             self.pending_commands.push(params.commit, params.caller);
         }
-
         Ok(())
     }
 
     fn handle_apply_request(&mut self, caller: Caller, params: ApplyParams) -> std::io::Result<()> {
-        // TODO: remove this check?
-        if !self.is_initialized() {
-            self.broker
-                .reply_error(caller, ErrorReason::NotClusterMember)?;
-            return Ok(());
-        }
-
         match params.kind {
             ApplyKind::Command => {
                 self.propose_command(caller, Command::apply(params.input))?;
@@ -531,52 +520,11 @@ impl<M: Machine> Server<M> {
                 self.handle_apply_query_request(caller, params.input)?;
             }
             ApplyKind::LocalQuery => {
-                self.apply_local_query(caller, params.input)?;
+                let kind = ApplyKind::LocalQuery;
+                let command = Command::apply(params.input);
+                self.apply(kind, self.last_applied, Some(caller), command)?;
             }
         }
-        Ok(())
-    }
-
-    fn handle_apply_query_request(
-        &mut self,
-        caller: Caller,
-        input: serde_json::Value,
-    ) -> std::io::Result<()> {
-        // TODO: use propose_command()?
-        if self.is_leader() {
-            let commit_position = self.propose_command_leader(Command::Query);
-            self.pending_queries.push(commit_position, (input, caller));
-            return Ok(());
-        }
-
-        let Some(maybe_leader) = self.node.voted_for().map(NodeId::from) else {
-            todo!("error response");
-        };
-        let request = Request::propose_query(input, caller);
-        self.broker.send_to(maybe_leader, &request)?;
-
-        Ok(())
-    }
-
-    fn apply_local_query(
-        &mut self,
-        caller: Caller,
-        input: serde_json::Value,
-    ) -> std::io::Result<()> {
-        let input = serde_json::from_value(input).expect("TODO: reply error response");
-
-        let mut ctx = ApplyContext {
-            kind: ApplyKind::LocalQuery,
-            node: &self.node,
-            commit_index: self.last_applied,
-            output: None,
-            caller: Some(caller),
-        };
-
-        self.machines.user.apply(&mut ctx, input);
-        let caller = ctx.caller.expect("unreachale");
-        self.broker.reply_output(caller, ctx.output)?;
-
         Ok(())
     }
 
@@ -660,5 +608,27 @@ impl<M: Machine> Server<M> {
         self.commands.insert(position.index, command);
 
         position
+    }
+
+    // TODO: remove
+    fn handle_apply_query_request(
+        &mut self,
+        caller: Caller,
+        input: serde_json::Value,
+    ) -> std::io::Result<()> {
+        // TODO: use propose_command()?
+        if self.is_leader() {
+            let commit_position = self.propose_command_leader(Command::Query);
+            self.pending_queries.push(commit_position, (input, caller));
+            return Ok(());
+        }
+
+        let Some(maybe_leader) = self.node.voted_for().map(NodeId::from) else {
+            todo!("error response");
+        };
+        let request = Request::propose_query(input, caller);
+        self.broker.send_to(maybe_leader, &request)?;
+
+        Ok(())
     }
 }
