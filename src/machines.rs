@@ -116,6 +116,10 @@ impl SystemMachine {
         // TODO: reset self.node for removed server
     }
 
+    pub(crate) fn is_known_node(&self, node_id: NodeId) -> bool {
+        self.members.contains_key(&node_id)
+    }
+
     pub(crate) fn get_node_id_by_addr(&self, addr: SocketAddr) -> Option<NodeId> {
         self.members
             .iter()

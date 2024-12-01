@@ -406,7 +406,7 @@ impl<M: Machine> Server<M> {
         let sender = params.header.from;
         self.node
             .handle_message(params.into_raftbare(&mut self.commands));
-        if !self.is_known_node(sender) {
+        if !self.machines.system.is_known_node(sender) {
             // The reply message cannot be sent through the usual path.
             // Therefore, send the reply as the RPC response.
             // The leader will send a snapshot to synchronize the follower's state,
@@ -542,10 +542,6 @@ impl<M: Machine> Server<M> {
             item: (params.input, params.caller),
         });
         Ok(())
-    }
-
-    fn is_known_node(&self, node_id: NodeId) -> bool {
-        self.machines.system.members.contains_key(&node_id)
     }
 
     fn handle_apply_request(&mut self, caller: Caller, params: ApplyParams) -> std::io::Result<()> {
