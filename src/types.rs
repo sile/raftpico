@@ -179,3 +179,29 @@ impl From<LogPosition> for raftbare::LogPosition {
         }
     }
 }
+
+#[derive(Debug)]
+pub(crate) struct QueueItem<K, T> {
+    pub key: K,
+    pub item: T,
+}
+
+impl<K: PartialEq, T> PartialEq for QueueItem<K, T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl<K: Eq, T> Eq for QueueItem<K, T> {}
+
+impl<K: PartialOrd, T> PartialOrd for QueueItem<K, T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.key.partial_cmp(&other.key).map(|o| o.reverse())
+    }
+}
+
+impl<K: Ord, T> Ord for QueueItem<K, T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key.cmp(&other.key).reverse()
+    }
+}

@@ -22,37 +22,9 @@ use crate::{
         RequestVoteCallParams, RequestVoteReplyParams, TakeSnapshotResult,
     },
     storage::FileStorage,
-    types::{LogIndex, LogPosition, NodeId},
+    types::{LogIndex, LogPosition, NodeId, QueueItem},
     ApplyKind,
 };
-
-// TODO: rename
-#[derive(Debug)]
-struct Pending {
-    commit_position: LogPosition,
-    input: serde_json::Value,
-    caller: Caller,
-}
-
-impl PartialEq for Pending {
-    fn eq(&self, other: &Self) -> bool {
-        self.commit_position == other.commit_position
-    }
-}
-
-impl Eq for Pending {}
-
-impl PartialOrd for Pending {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Pending {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.commit_position.cmp(&other.commit_position).reverse()
-    }
-}
 
 // TODO: struct ServerState
 
@@ -66,7 +38,7 @@ pub struct Server<M> {
     last_applied_index: LogIndex,
     local_commands: Commands,
     storage: Option<FileStorage>, // TODO: local_storage
-    pendings: BinaryHeap<Pending>,
+    pendings: BinaryHeap<QueueItem<LogPosition, (serde_json::Value, Caller)>>,
     machines: Machines<M>,
 }
 
@@ -199,9 +171,9 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn pop_pending(&mut self, commit_index: LogIndex) -> Option<Pending> {
+    fn pop_pending(&mut self, commit_index: LogIndex) -> Option<(serde_json::Value, Caller)> {
         while let Some(pending) = self.pendings.peek() {
-            match self.node.get_commit_status(pending.commit_position.into()) {
+            match self.node.get_commit_status(pending.key.into()) {
                 CommitStatus::InProgress => {
                     break;
                 }
@@ -209,12 +181,12 @@ impl<M: Machine> Server<M> {
                     todo!("error response");
                 }
                 CommitStatus::Committed => {
-                    if pending.commit_position.index < commit_index {
+                    if pending.key.index < commit_index {
                         return None;
                     }
 
                     let pending = self.pendings.pop().expect("unreachable");
-                    return Some(pending);
+                    return Some(pending.item);
                 }
             }
         }
@@ -239,12 +211,12 @@ impl<M: Machine> Server<M> {
     fn handle_committed_command(&mut self, index: LogIndex) -> std::io::Result<()> {
         // TODO: while loop for merged commands / queries
         let pending = self.pop_pending(index);
-        let caller = pending.as_ref().map(|p| p.caller.clone()); // TODO: remove clone
+        let caller = pending.as_ref().map(|p| p.1.clone()); // TODO: remove clone
 
         let mut command = self.local_commands.get(&index).expect("bug").clone(); // TODO: remove clone
         let mut kind = ApplyKind::Command;
         if matches!(command, Command::Query) {
-            let Some(input) = pending.map(|p| p.input) else {
+            let Some(input) = pending.map(|p| p.0) else {
                 return Ok(());
             };
             kind = ApplyKind::Query;
@@ -623,10 +595,9 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        self.pendings.push(Pending {
-            commit_position: params.commit,
-            input: params.input,
-            caller: params.caller,
+        self.pendings.push(QueueItem {
+            key: params.commit,
+            item: (params.input, params.caller),
         });
         Ok(())
     }
@@ -702,11 +673,10 @@ impl<M: Machine> Server<M> {
         input: serde_json::Value,
     ) -> std::io::Result<()> {
         if self.is_leader() {
-            let promise = self.propose_command_leader(Command::Query);
-            self.pendings.push(Pending {
-                commit_position: promise,
-                input,
-                caller,
+            let commit_position = self.propose_command_leader(Command::Query);
+            self.pendings.push(QueueItem {
+                key: commit_position,
+                item: (input, caller),
             });
             return Ok(());
         }
@@ -818,10 +788,9 @@ impl<M: Machine> Server<M> {
 
         let commit_position = self.propose_command_leader(command);
         if caller.node_id == self.node.id().into() {
-            let pending = Pending {
-                commit_position,
-                input: serde_json::Value::Null, // Always null for non-query commands
-                caller,
+            let pending = QueueItem {
+                key: commit_position,
+                item: (serde_json::Value::Null, caller),
             };
             self.pendings.push(pending);
         } else {
