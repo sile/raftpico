@@ -452,6 +452,10 @@ pub struct Caller {
     pub request_id: RequestId,
 }
 
+impl Caller {
+    pub(crate) const DUMMY_REQUEST_ID: RequestId = RequestId::Number(-1);
+}
+
 /// RPC error kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(missing_docs)]

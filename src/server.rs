@@ -411,10 +411,8 @@ impl<M: Machine> Server<M> {
             Request::ProposeQuery { params, .. } => self.handle_propose_query_request(params),
             Request::NotifyCommit { params, .. } => self.handle_notify_commit_request(params),
             Request::InstallSnapshot { params, .. } => self.handle_install_snapshot_request(params),
-            Request::AppendEntriesCall { params, .. } => {
-                let caller = self.caller(from, jsonlrpc::RequestId::Number(0)); // TODO: remove dummy id
-                self.handle_append_entries_request(caller, params)
-            }
+            Request::AppendEntriesCall { params, .. } => self
+                .handle_append_entries_request(self.caller(from, Caller::DUMMY_REQUEST_ID), params),
             Request::AppendEntriesReply { params, .. } => {
                 self.handle_append_entries_result_request(params)
             }
