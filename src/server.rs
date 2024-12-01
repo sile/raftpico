@@ -15,7 +15,7 @@ use crate::{
     machines::Machines,
     messages::{
         AddServerParams, AppendEntriesReplyParams, ApplyParams, Caller, CreateClusterParams,
-        ErrorKind, InstallSnapshotParams, NotifyCommitParams, ProposeQueryParams,
+        ErrorReason, InstallSnapshotParams, NotifyCommitParams, ProposeQueryParams,
         RemoveServerParams, Request, TakeSnapshotResult,
     },
     storage::FileStorage,
@@ -123,7 +123,7 @@ impl<M: Machine> Server<M> {
         match response {
             ResponseObject::Ok { result, id, .. } => todo!("unexpected {result:?}, {id:?}"),
             ResponseObject::Err { error, .. }
-                if error.code == ErrorKind::ERROR_CODE_UNKNOWN_MEMBER =>
+                if error.code == ErrorReason::ERROR_CODE_UNKNOWN_MEMBER =>
             {
                 if let Some(mut params) = error
                     .data
@@ -135,6 +135,8 @@ impl<M: Machine> Server<M> {
                         };
                         params.header.from = node_id;
                     }
+
+                    // TODO: add note (this call should generate install snapshot ...)
                     self.node.handle_message(params.into_raftbare());
                 }
             }
@@ -399,7 +401,7 @@ impl<M: Machine> Server<M> {
                     self.node.actions_mut().send_messages.remove(&sender.into());
                     let reply = AppendEntriesReplyParams::from_raftbare(header, last_position);
                     self.broker
-                        .reply_error(caller, ErrorKind::UnknownMember { reply })?;
+                        .reply_error(caller, ErrorReason::UnknownMember { reply })?;
                 }
             }
             Request::AppendEntriesReply { params, .. } => {
@@ -545,7 +547,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
             self.broker
-                .reply_error(caller, ErrorKind::NotClusterMember)?;
+                .reply_error(caller, ErrorReason::NotClusterMember)?;
             return Ok(());
         }
         let command = Command::AddServer { addr: params.addr };
@@ -557,7 +559,7 @@ impl<M: Machine> Server<M> {
     fn handle_apply_request(&mut self, caller: Caller, params: ApplyParams) -> std::io::Result<()> {
         if !self.is_initialized() {
             self.broker
-                .reply_error(caller, ErrorKind::NotClusterMember)?;
+                .reply_error(caller, ErrorReason::NotClusterMember)?;
             return Ok(());
         }
         match params.kind {
@@ -629,7 +631,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
             self.broker
-                .reply_error(caller, ErrorKind::NotClusterMember)?;
+                .reply_error(caller, ErrorReason::NotClusterMember)?;
             return Ok(());
         }
 
@@ -646,7 +648,7 @@ impl<M: Machine> Server<M> {
     ) -> std::io::Result<()> {
         if self.is_initialized() {
             self.broker
-                .reply_error(caller, ErrorKind::ClusterAlreadyCreated)?;
+                .reply_error(caller, ErrorReason::ClusterAlreadyCreated)?;
             return Ok(());
         }
 

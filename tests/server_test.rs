@@ -7,7 +7,7 @@ use jsonlrpc::{ErrorCode, RequestId, ResponseObject, RpcClient};
 use raftpico::{
     messages::{
         AddServerParams, AddServerResult, ApplyParams, CreateClusterParams, CreateClusterResult,
-        ErrorKind, RemoveServerParams, RemoveServerResult, Request, TakeSnapshotResult,
+        ErrorReason, RemoveServerParams, RemoveServerResult, Request, TakeSnapshotResult,
     },
     ApplyContext, ApplyKind, FileStorage, Machine, Server,
 };
@@ -44,7 +44,7 @@ fn create_cluster() {
 
         // Second call: NG
         let error = rpc_err(addr, create_cluster_req());
-        assert_eq!(error, ErrorKind::ClusterAlreadyCreated.code());
+        assert_eq!(error, ErrorReason::ERROR_CODE_CLUSTER_ALREADY_CREATED);
     });
 
     while !handle.is_finished() {
@@ -122,7 +122,7 @@ fn re_election() {
             contact_addr = addr;
             std::thread::sleep(Duration::from_millis(400));
         }
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(500));
     });
     servers.push(server1);
     servers.push(server2);

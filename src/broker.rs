@@ -10,7 +10,7 @@ use mio::{Events, Poll};
 use serde::Serialize;
 
 use crate::{
-    messages::{Caller, ErrorKind},
+    messages::{Caller, ErrorReason},
     types::{NodeId, Token},
     Request,
 };
@@ -84,9 +84,9 @@ impl MessageBroker {
     pub fn reply_output(
         &mut self,
         caller: Caller,
-        output: Option<Result<serde_json::Value, ErrorKind>>,
+        output: Option<Result<serde_json::Value, ErrorReason>>,
     ) -> std::io::Result<()> {
-        match output.unwrap_or(Err(ErrorKind::NoMachineOutput)) {
+        match output.unwrap_or(Err(ErrorReason::NoMachineOutput)) {
             Err(e) => self.reply_error(caller, e),
             Ok(value) => self.reply_ok(caller, value),
         }
@@ -109,7 +109,7 @@ impl MessageBroker {
         Ok(())
     }
 
-    pub fn reply_error(&mut self, caller: Caller, error: ErrorKind) -> std::io::Result<()> {
+    pub fn reply_error(&mut self, caller: Caller, error: ErrorReason) -> std::io::Result<()> {
         let response = ResponseObject::Err {
             jsonrpc: JsonRpcVersion::V2,
             error: error.object(),

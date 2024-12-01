@@ -497,11 +497,10 @@ impl Caller {
     pub(crate) const DUMMY_REQUEST_ID: RequestId = RequestId::Number(-1);
 }
 
-// TODO: rename
-/// RPC error kind.
+/// RPC error reason.
 #[derive(Debug)]
 #[allow(missing_docs)]
-pub enum ErrorKind {
+pub enum ErrorReason {
     ClusterAlreadyCreated,
     ServerAlreadyAdded,
     NotClusterMember,
@@ -511,32 +510,38 @@ pub enum ErrorKind {
     UnknownMember { reply: AppendEntriesReplyParams },
 }
 
-impl ErrorKind {
+impl ErrorReason {
+    pub const ERROR_CODE_CLUSTER_ALREADY_CREATED: ErrorCode = ErrorCode::new(1000);
+    pub const ERROR_CODE_SERVER_ALREADY_ADDED: ErrorCode = ErrorCode::new(1001);
+    pub const ERROR_CODE_NOT_CLUSTER_MEMBER: ErrorCode = ErrorCode::new(1002);
+
+    pub const ERROR_CODE_INVALID_MACHINE_INPUT: ErrorCode = ErrorCode::new(2000);
+    pub const ERROR_CODE_INVALID_MACHINE_OUTPUT: ErrorCode = ErrorCode::new(2001);
+    pub const ERROR_CODE_NO_MACHINE_OUTPUT: ErrorCode = ErrorCode::new(2002);
+
     pub const ERROR_CODE_UNKNOWN_MEMBER: ErrorCode = ErrorCode::new(3000);
 
-    /// Returns JSON-RPC error code.
-    pub fn code(&self) -> ErrorCode {
-        ErrorCode::new(match self {
-            ErrorKind::ClusterAlreadyCreated => 1000,
-            ErrorKind::ServerAlreadyAdded => 1002,
-            ErrorKind::NotClusterMember => 1003,
-            ErrorKind::InvalidMachineInput { .. } => 2000,
-            ErrorKind::InvalidMachineOutput { .. } => 2001,
-            ErrorKind::NoMachineOutput => 2002,
-            ErrorKind::UnknownMember { .. } => return Self::ERROR_CODE_UNKNOWN_MEMBER,
-        })
+    fn code(&self) -> ErrorCode {
+        match self {
+            ErrorReason::ClusterAlreadyCreated => Self::ERROR_CODE_CLUSTER_ALREADY_CREATED,
+            ErrorReason::ServerAlreadyAdded => Self::ERROR_CODE_SERVER_ALREADY_ADDED,
+            ErrorReason::NotClusterMember => Self::ERROR_CODE_NOT_CLUSTER_MEMBER,
+            ErrorReason::InvalidMachineInput { .. } => Self::ERROR_CODE_INVALID_MACHINE_INPUT,
+            ErrorReason::InvalidMachineOutput { .. } => Self::ERROR_CODE_INVALID_MACHINE_OUTPUT,
+            ErrorReason::NoMachineOutput => Self::ERROR_CODE_NO_MACHINE_OUTPUT,
+            ErrorReason::UnknownMember { .. } => Self::ERROR_CODE_UNKNOWN_MEMBER,
+        }
     }
 
-    /// Returns JSON-RPC error message.
-    pub fn message(&self) -> &'static str {
+    fn message(&self) -> &'static str {
         match self {
-            ErrorKind::ClusterAlreadyCreated => "Cluster already created",
-            ErrorKind::ServerAlreadyAdded => "Server already added",
-            ErrorKind::NotClusterMember => "Not a cluster member",
-            ErrorKind::NoMachineOutput => "No machine output",
-            ErrorKind::InvalidMachineInput { .. } => "Invalid machine input",
-            ErrorKind::InvalidMachineOutput { .. } => "Invalid machine output",
-            ErrorKind::UnknownMember { .. } => "Unknown cluster member",
+            ErrorReason::ClusterAlreadyCreated => "Cluster already created",
+            ErrorReason::ServerAlreadyAdded => "Server already added",
+            ErrorReason::NotClusterMember => "Not a cluster member",
+            ErrorReason::NoMachineOutput => "No machine output",
+            ErrorReason::InvalidMachineInput { .. } => "Invalid machine input",
+            ErrorReason::InvalidMachineOutput { .. } => "Invalid machine output",
+            ErrorReason::UnknownMember { .. } => "Unknown cluster member",
         }
     }
 
@@ -550,15 +555,15 @@ impl ErrorKind {
 
     fn data(&self) -> Option<serde_json::Value> {
         match self {
-            ErrorKind::ClusterAlreadyCreated => None,
-            ErrorKind::ServerAlreadyAdded => None,
-            ErrorKind::NotClusterMember => None,
-            ErrorKind::InvalidMachineInput { reason }
-            | ErrorKind::InvalidMachineOutput { reason } => {
+            ErrorReason::ClusterAlreadyCreated => None,
+            ErrorReason::ServerAlreadyAdded => None,
+            ErrorReason::NotClusterMember => None,
+            ErrorReason::InvalidMachineInput { reason }
+            | ErrorReason::InvalidMachineOutput { reason } => {
                 Some(serde_json::json!({"reason": reason.to_string()}))
             }
-            ErrorKind::NoMachineOutput => None,
-            ErrorKind::UnknownMember { reply } => Some(serde_json::json!(reply)),
+            ErrorReason::NoMachineOutput => None,
+            ErrorReason::UnknownMember { reply } => Some(serde_json::json!(reply)),
         }
     }
 }

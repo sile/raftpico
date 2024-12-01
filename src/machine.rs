@@ -2,7 +2,7 @@ use raftbare::{Node, Role};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    messages::{Caller, ErrorKind},
+    messages::{Caller, ErrorReason},
     types::LogIndex,
 };
 
@@ -25,7 +25,7 @@ pub struct ApplyContext<'a> {
     pub(crate) kind: ApplyKind,
     pub(crate) node: &'a Node,
     pub(crate) commit_index: LogIndex,
-    pub(crate) output: Option<Result<serde_json::Value, ErrorKind>>,
+    pub(crate) output: Option<Result<serde_json::Value, ErrorReason>>,
     pub(crate) caller: Option<Caller>,
 }
 
@@ -50,12 +50,12 @@ impl ApplyContext<'_> {
         if self.caller.is_some() {
             self.output = Some(
                 serde_json::to_value(output)
-                    .map_err(|reason| ErrorKind::InvalidMachineOutput { reason }),
+                    .map_err(|reason| ErrorReason::InvalidMachineOutput { reason }),
             )
         }
     }
 
-    pub(crate) fn error(&mut self, error: ErrorKind) {
+    pub(crate) fn error(&mut self, error: ErrorReason) {
         if self.caller.is_some() {
             self.output = Some(Err(error));
         }

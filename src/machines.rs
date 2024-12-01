@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::Command,
-    messages::{AddServerResult, CreateClusterResult, ErrorKind, RemoveServerResult},
+    messages::{AddServerResult, CreateClusterResult, ErrorReason, RemoveServerResult},
     types::{NodeId, Token},
     ApplyContext, Machine,
 };
@@ -37,7 +37,7 @@ impl<M: Machine> Machine for Machines<M> {
                     self.user.apply(ctx, input);
                 }
                 Err(e) => {
-                    ctx.error(ErrorKind::InvalidMachineInput { reason: e });
+                    ctx.error(ErrorReason::InvalidMachineInput { reason: e });
                 }
             },
             Command::Query
@@ -90,7 +90,7 @@ impl SystemMachine {
 
     fn apply_add_server_command(&mut self, ctx: &mut ApplyContext, addr: SocketAddr) {
         if self.members.values().any(|m| m.addr == addr) {
-            ctx.error(ErrorKind::ServerAlreadyAdded);
+            ctx.error(ErrorReason::ServerAlreadyAdded);
             return;
         }
 
@@ -104,7 +104,7 @@ impl SystemMachine {
 
     fn apply_remove_server_command(&mut self, ctx: &mut ApplyContext, addr: SocketAddr) {
         let Some((&node_id, _member)) = self.members.iter().find(|(_, m)| m.addr == addr) else {
-            ctx.error(ErrorKind::NotClusterMember);
+            ctx.error(ErrorReason::NotClusterMember);
             return;
         };
 
