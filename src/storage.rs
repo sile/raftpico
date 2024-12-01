@@ -122,7 +122,7 @@ impl FileStorage {
                 }
                 Record::Snapshot(snapshot) => {
                     node_id = snapshot.node_id.into();
-                    entries = raftbare::LogEntries::new(snapshot.last_included_position.into());
+                    entries = raftbare::LogEntries::new(snapshot.last_included.into());
                     config.voters = snapshot.voters.into_iter().map(From::from).collect();
                     config.new_voters = snapshot.new_voters.into_iter().map(From::from).collect();
                     machine = Some(serde_json::from_value(snapshot.machine)?);

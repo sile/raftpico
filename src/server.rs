@@ -168,22 +168,6 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn handle_committed_queries(&mut self) -> std::io::Result<()> {
-        while let Some(((input, caller), error)) = self
-            .pending_queries
-            .pop_committed(&self.node, self.last_applied)
-        {
-            if let Some(error) = error {
-                self.broker.reply_error(caller, error)?;
-            } else {
-                let command = Command::apply(input);
-                self.apply(ApplyKind::Query, self.last_applied, Some(caller), command)?;
-            }
-        }
-
-        Ok(())
-    }
-
     fn handle_committed_log_entry(&mut self, index: LogIndex) -> std::io::Result<()> {
         let entry = self.node.log().entries().get_entry(index.0).expect("bug");
         match entry {
@@ -223,6 +207,22 @@ impl<M: Machine> Server<M> {
             self.maybe_sync_cluster_config();
             self.broker
                 .update_peers(self.machines.system.peers(self.node.id().into()));
+        }
+
+        Ok(())
+    }
+
+    fn handle_committed_queries(&mut self) -> std::io::Result<()> {
+        while let Some(((input, caller), error)) = self
+            .pending_queries
+            .pop_committed(&self.node, self.last_applied)
+        {
+            if let Some(error) = error {
+                self.broker.reply_error(caller, error)?;
+            } else {
+                let command = Command::apply(input);
+                self.apply(ApplyKind::Query, self.last_applied, Some(caller), command)?;
+            }
         }
 
         Ok(())
@@ -314,7 +314,11 @@ impl<M: Machine> Server<M> {
         let snapshot = self.get_snapshot(self.node.commit_index().into())?;
         let request = Request::install_snapshot(dst, snapshot);
         self.broker.send_to(dst, &request)?;
-        self.node.heartbeat(); // TODO: doc and note (p2p message is sufficient for this purpose)
+
+        // Send a heartbeat to update the follower's `voted_for`.
+        // (For simplicity, I use broadcast instead of a P2P message here)
+        self.node.heartbeat();
+
         Ok(())
     }
 
@@ -403,33 +407,17 @@ impl<M: Machine> Server<M> {
         if !self.is_initialized() {
             self.node = Node::start(params.node_id.into());
         }
-        if self.node.id() != params.node_id.into() {
+
+        if params.last_included.index <= self.node.commit_index().into() {
             return Ok(());
         }
 
-        // TODO: term check
-
-        if params.last_included_position.index <= self.node.commit_index().into() {
-            return Ok(());
-        }
-
-        let last_included = params.last_included_position.into();
         let config = ClusterConfig {
             voters: params.voters.iter().copied().map(From::from).collect(),
             new_voters: params.new_voters.iter().copied().map(From::from).collect(),
             ..Default::default()
         };
-
-        let ok = self.node.handle_snapshot_installed(last_included, config);
-        assert!(ok); // TODO: error handling
-        self.last_applied = last_included.index.into();
-
-        if let Some(storage) = &mut self.storage {
-            storage.save_snapshot(&params)?;
-            storage.save_current_term(self.node.current_term().into())?;
-            storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
-            storage.append_entries(self.node.log().entries(), &self.commands)?;
-        }
+        self.install_snapshot(params.last_included.into(), config, Some(&params))?;
 
         self.machines = serde_json::from_value(params.machine)?;
         self.broker
@@ -441,16 +429,11 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    // TODO
-    fn get_snapshot(&self, index: LogIndex) -> std::io::Result<InstallSnapshotParams> {
-        let (last_included, config) = self
-            .node
-            .log()
-            .get_position_and_config(index.into())
-            .expect("unreachable");
+    fn get_snapshot(&self, LogIndex(index): LogIndex) -> std::io::Result<InstallSnapshotParams> {
+        let (position, config) = self.node.log().get_position_and_config(index).expect("bug");
         let snapshot = InstallSnapshotParams {
             node_id: self.node.id().into(),
-            last_included_position: last_included.into(),
+            last_included: position.into(),
             voters: config.voters.iter().map(|n| NodeId::from(*n)).collect(),
             new_voters: config.new_voters.iter().map(|n| NodeId::from(*n)).collect(),
             machine: serde_json::to_value(&self.machines)?,
@@ -458,21 +441,20 @@ impl<M: Machine> Server<M> {
         Ok(snapshot)
     }
 
-    fn take_snapshot(&mut self, index: LogIndex) -> std::io::Result<()> {
-        let (position, config) = self
-            .node
-            .log()
-            .get_position_and_config(index.into())
-            .expect("unreachable");
+    fn install_snapshot(
+        &mut self,
+        position: raftbare::LogPosition,
+        config: raftbare::ClusterConfig,
+        snapshot: Option<&InstallSnapshotParams>,
+    ) -> std::io::Result<()> {
         let success = self
             .node
             .handle_snapshot_installed(position, config.clone());
-        assert!(success); // TODO:
-        self.commands = self.commands.split_off(&(u64::from(index) + 1).into());
+        assert!(success);
+        self.commands = self.commands.split_off(&(position.index.get() + 1).into());
+        self.last_applied = self.last_applied.max(position.index.into());
 
-        // TODO: factor out
-        if self.storage.is_some() {
-            let snapshot = self.get_snapshot(index)?;
+        if let Some(snapshot) = snapshot {
             if let Some(storage) = &mut self.storage {
                 storage.save_snapshot(&snapshot)?;
                 storage.save_current_term(self.node.current_term().into())?;
@@ -481,6 +463,17 @@ impl<M: Machine> Server<M> {
             }
         }
 
+        Ok(())
+    }
+
+    fn take_snapshot(&mut self, LogIndex(index): LogIndex) -> std::io::Result<()> {
+        let snapshot = if self.storage.is_some() {
+            Some(self.get_snapshot(LogIndex(index))?)
+        } else {
+            None
+        };
+        let (position, config) = self.node.log().get_position_and_config(index).expect("bug");
+        self.install_snapshot(position, config.clone(), snapshot.as_ref())?;
         Ok(())
     }
 

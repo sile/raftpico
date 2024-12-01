@@ -357,7 +357,7 @@ pub struct InstallSnapshotParams {
     // [NOTE] Unlike the other fields, this information is specific to a node.
     pub node_id: NodeId,
 
-    pub last_included_position: LogPosition,
+    pub last_included: LogPosition,
     pub voters: Vec<NodeId>,
     pub new_voters: Vec<NodeId>,
     pub machine: serde_json::Value,
