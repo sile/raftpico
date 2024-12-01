@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
 use crate::messages::Request;
-use crate::types::{LogIndex, NodeId, Term};
+use crate::{
+    messages::CreateClusterParams,
+    types::{LogIndex, NodeId, Term},
+};
 
 pub(crate) type Commands = BTreeMap<LogIndex, Command>;
 
@@ -47,6 +50,26 @@ pub enum Command {
 }
 
 impl Command {
+    pub(crate) fn create_cluster(seed_addr: SocketAddr, params: &CreateClusterParams) -> Self {
+        Self::CreateCluster {
+            seed_addr,
+            min_election_timeout: Duration::from_millis(params.min_election_timeout_ms as u64),
+            max_election_timeout: Duration::from_millis(params.max_election_timeout_ms as u64),
+        }
+    }
+
+    pub(crate) fn add_server(addr: SocketAddr) -> Self {
+        Self::AddServer { addr }
+    }
+
+    pub(crate) fn remove_server(addr: SocketAddr) -> Self {
+        Self::RemoveServer { addr }
+    }
+
+    pub(crate) fn apply(input: serde_json::Value) -> Self {
+        Self::Apply { input }
+    }
+
     pub(crate) fn from_log_entry(
         index: LogIndex,
         entry: &raftbare::LogEntry,

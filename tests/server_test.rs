@@ -241,7 +241,7 @@ fn query() {
         for addr in [addr1, addr2] {
             let _: AddServerResult = rpc(contact_addr, add_server_req(addr));
             contact_addr = addr;
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(400));
         }
     });
     servers.push(server1);
@@ -264,6 +264,7 @@ fn query() {
             let v1: serde_json::Value = rpc(addr, apply_query_req(i));
             assert_eq!(v0, v1);
         }
+        std::thread::sleep(Duration::from_millis(500));
     });
 
     while !handle.is_finished() {

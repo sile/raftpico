@@ -14,9 +14,9 @@ use crate::{
     machine::{ApplyContext, Machine},
     machines::Machines,
     messages::{
-        AddServerParams, AppendEntriesReplyParams, ApplyParams, Caller, CreateClusterParams,
-        ErrorReason, InstallSnapshotParams, NotifyCommitParams, ProposeQueryParams,
-        RemoveServerParams, Request, TakeSnapshotResult,
+        AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
+        CreateClusterParams, ErrorReason, InstallSnapshotParams, NotifyCommitParams,
+        ProposeQueryParams, Request, TakeSnapshotResult,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, QueueItem},
@@ -362,10 +362,10 @@ impl<M: Machine> Server<M> {
                 self.handle_create_cluster_request(self.caller(from, id), params)?
             }
             Request::AddServer { id, params, .. } => {
-                self.handle_add_server_request(self.caller(from, id), params)?
+                self.propose_command(self.caller(from, id), Command::add_server(params.addr))?;
             }
             Request::RemoveServer { id, params, .. } => {
-                self.handle_remove_server_request(self.caller(from, id), params)?
+                self.propose_command(self.caller(from, id), Command::remove_server(params.addr))?;
             }
             Request::TakeSnapshot { id, .. } => {
                 self.propose_command(self.caller(from, id), Command::TakeSnapshot)?
@@ -382,28 +382,8 @@ impl<M: Machine> Server<M> {
                 self.handle_install_snapshot_request(params)?
             }
             Request::AppendEntriesCall { params, .. } => {
-                let sender = params.header.from;
                 let caller = self.caller(from, Caller::DUMMY_REQUEST_ID);
-                self.node
-                    .handle_message(params.into_raftbare(&mut self.commands));
-                if !self.is_known_node(sender) {
-                    let Some(raftbare::Message::AppendEntriesReply {
-                        header,
-                        last_position,
-                    }) = self
-                        .node
-                        .actions()
-                        .send_messages
-                        .get(&sender.into())
-                        .cloned()
-                    else {
-                        return Ok(());
-                    };
-                    self.node.actions_mut().send_messages.remove(&sender.into());
-                    let reply = AppendEntriesReplyParams::from_raftbare(header, last_position);
-                    self.broker
-                        .reply_error(caller, ErrorReason::UnknownMember { reply })?;
-                }
+                self.handle_append_entries_call_request(caller, params)?;
             }
             Request::AppendEntriesReply { params, .. } => {
                 self.node.handle_message(params.into_raftbare());
@@ -414,6 +394,33 @@ impl<M: Machine> Server<M> {
             Request::RequestVoteReply { params, .. } => {
                 self.node.handle_message(params.into_raftbare());
             }
+        }
+        Ok(())
+    }
+
+    fn handle_append_entries_call_request(
+        &mut self,
+        caller: Caller,
+        params: AppendEntriesCallParams,
+    ) -> std::io::Result<()> {
+        let sender = params.header.from;
+        self.node
+            .handle_message(params.into_raftbare(&mut self.commands));
+        if !self.is_known_node(sender) {
+            // The reply message cannot be sent through the usual path.
+            // Therefore, send the reply as the RPC response.
+            // The leader will send a snapshot to synchronize the follower's state,
+            // including the latest cluster members.
+            let Some(raftbare::Message::AppendEntriesReply {
+                header,
+                last_position,
+            }) = self.node.actions_mut().send_messages.remove(&sender.into())
+            else {
+                return Ok(());
+            };
+            let reply = AppendEntriesReplyParams::from_raftbare(header, last_position);
+            self.broker
+                .reply_error(caller, ErrorReason::UnknownMember { reply })?;
         }
         Ok(())
     }
@@ -541,34 +548,17 @@ impl<M: Machine> Server<M> {
         self.machines.system.members.contains_key(&node_id)
     }
 
-    fn handle_add_server_request(
-        &mut self,
-        caller: Caller,
-        params: AddServerParams,
-    ) -> std::io::Result<()> {
-        if !self.is_initialized() {
-            self.broker
-                .reply_error(caller, ErrorReason::NotClusterMember)?;
-            return Ok(());
-        }
-        let command = Command::AddServer { addr: params.addr };
-        self.propose_command(caller, command)?;
-
-        Ok(())
-    }
-
     fn handle_apply_request(&mut self, caller: Caller, params: ApplyParams) -> std::io::Result<()> {
+        // TODO: remove this check?
         if !self.is_initialized() {
             self.broker
                 .reply_error(caller, ErrorReason::NotClusterMember)?;
             return Ok(());
         }
+
         match params.kind {
             ApplyKind::Command => {
-                let command = Command::Apply {
-                    input: params.input,
-                };
-                self.propose_command(caller, command)?;
+                self.propose_command(caller, Command::apply(params.input))?;
             }
             ApplyKind::Query => {
                 self.handle_apply_query_request(caller, params.input)?;
@@ -585,6 +575,7 @@ impl<M: Machine> Server<M> {
         caller: Caller,
         input: serde_json::Value,
     ) -> std::io::Result<()> {
+        // TODO: use propose_command()?
         if self.is_leader() {
             let commit_position = self.propose_command_leader(Command::Query);
             self.pendings.push(QueueItem {
@@ -625,23 +616,6 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn handle_remove_server_request(
-        &mut self,
-        caller: Caller,
-        params: RemoveServerParams,
-    ) -> std::io::Result<()> {
-        if !self.is_initialized() {
-            self.broker
-                .reply_error(caller, ErrorReason::NotClusterMember)?;
-            return Ok(());
-        }
-
-        let command = Command::RemoveServer { addr: params.addr };
-        self.propose_command(caller, command)?;
-
-        Ok(())
-    }
-
     fn handle_create_cluster_request(
         &mut self,
         mut caller: Caller,
@@ -653,21 +627,10 @@ impl<M: Machine> Server<M> {
             return Ok(());
         }
 
-        self.node = Node::start(NodeId::SEED.into());
         caller.node_id = NodeId::SEED;
-        let snapshot = self.get_snapshot(LogIndex::from(0))?;
-        if let Some(storage) = &mut self.storage {
-            storage.save_snapshot(&snapshot)?;
-        }
-
+        self.node = Node::start(NodeId::SEED.into());
         self.node.create_cluster(&[self.node.id()]); // Always succeeds
-
-        let command = Command::CreateCluster {
-            seed_addr: self.addr(),
-            min_election_timeout: Duration::from_millis(params.min_election_timeout_ms as u64),
-            max_election_timeout: Duration::from_millis(params.max_election_timeout_ms as u64),
-        };
-        self.propose_command(caller, command)?;
+        self.propose_command(caller, Command::create_cluster(self.addr(), &params))?;
 
         Ok(())
     }
@@ -677,7 +640,15 @@ impl<M: Machine> Server<M> {
     }
 
     fn propose_command(&mut self, caller: Caller, command: Command) -> std::io::Result<()> {
-        assert!(self.is_initialized()); // TODO: error reply
+        if !self.is_initialized() {
+            if caller.node_id == self.node.id().into() {
+                self.broker
+                    .reply_error(caller, ErrorReason::NotClusterMember)?;
+            } else {
+                todo!("notify 'leader not found' error to the origin node");
+            }
+            return Ok(());
+        }
 
         if !self.is_leader() {
             let Some(maybe_leader) = self.node.voted_for().map(NodeId::from) else {
@@ -710,7 +681,7 @@ impl<M: Machine> Server<M> {
     }
 
     fn propose_command_leader(&mut self, command: Command) -> LogPosition {
-        if let Some(promise) = matches!(command, Command::Query { .. })
+        if let Some(promise) = matches!(command, Command::Query)
             .then_some(())
             .and_then(|()| self.node.actions().append_log_entries.as_ref())
             .and_then(|entries| {

@@ -154,7 +154,7 @@ impl Machine for SystemMachine {
             Command::RemoveServer { addr, .. } => self.apply_remove_server_command(ctx, addr),
             Command::Apply { .. }
             | Command::TakeSnapshot { .. }
-            | Command::Query { .. }
+            | Command::Query
             | Command::StartTerm { .. }
             | Command::UpdateClusterConfig { .. } => {
                 unreachable!();
