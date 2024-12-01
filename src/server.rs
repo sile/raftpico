@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jsonlrpc::{RequestId, ResponseObject};
+use jsonlrpc::{ErrorObject, RequestId, ResponseObject};
 use jsonlrpc_mio::ClientId;
 use raftbare::{Action, ClusterConfig, CommitStatus, Node};
 
@@ -44,7 +44,7 @@ impl<M: Machine> Server<M> {
         listen_addr: SocketAddr,
         mut storage: Option<FileStorage>,
     ) -> std::io::Result<Self> {
-        let broker = MessageBroker::start(listen_addr)?;
+        let mut broker = MessageBroker::start(listen_addr)?;
         let mut commands = Commands::new();
         let mut machines = Machines::default();
         let mut node = Node::start(NodeId::UNINIT.into());
@@ -53,11 +53,12 @@ impl<M: Machine> Server<M> {
             if let Some(loaded) = storage.load(&mut commands)? {
                 node = loaded.0;
                 machines = loaded.1;
+                broker.update_peers(machines.system.peers(node.id().into()));
             }
         }
 
         let last_applied = node.log().snapshot_position().index.into();
-        let mut this = Self {
+        Ok(Self {
             process_id: std::process::id(),
             broker,
             node,
@@ -67,10 +68,7 @@ impl<M: Machine> Server<M> {
             last_applied,
             pendings: BinaryHeap::new(),
             machines,
-        };
-        this.sync_broker();
-
-        Ok(this)
+        })
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -120,45 +118,44 @@ impl<M: Machine> Server<M> {
         addr: SocketAddr,
         response: ResponseObject,
     ) -> std::io::Result<()> {
-        match response {
-            ResponseObject::Ok { result, id, .. } => todo!("unexpected {result:?}, {id:?}"),
-            ResponseObject::Err { error, .. }
-                if error.code == ErrorReason::ERROR_CODE_UNKNOWN_MEMBER =>
-            {
-                if let Some(mut params) = error
-                    .data
-                    .and_then(|d| serde_json::from_value::<AppendEntriesReplyParams>(d).ok())
-                {
-                    if params.header.from == NodeId::UNINIT {
-                        let Some(node_id) = self.machines.system.get_node_id_by_addr(addr) else {
-                            return Ok(());
-                        };
-                        params.header.from = node_id;
-                    }
+        let data = match response {
+            ResponseObject::Err {
+                error:
+                    ErrorObject {
+                        code: ErrorReason::ERROR_CODE_UNKNOWN_MEMBER,
+                        data: Some(data),
+                        ..
+                    },
+                ..
+            } => data,
+            response => {
+                panic!("Unexpected RPC response: {response:?}");
+            }
+        };
 
-                    // TODO: add note (this call should generate install snapshot ...)
-                    self.node.handle_message(params.into_raftbare());
-                }
-            }
-            e @ ResponseObject::Err { .. } => {
-                // TODO
-                dbg!(e);
-                todo!("unexpected error response");
-            }
+        let mut params: AppendEntriesReplyParams = serde_json::from_value(data)?;
+        if params.header.from == NodeId::UNINIT {
+            let Some(node_id) = self.machines.system.get_node_id_by_addr(addr) else {
+                return Ok(());
+            };
+            params.header.from = node_id;
         }
+
+        // This call will generate an `Action::InstallSnapshot`
+        // to inform the latest cluster members to the follower.
+        self.node.handle_message(params.into_raftbare());
+
         Ok(())
     }
 
     fn handle_committed_entries(&mut self) -> std::io::Result<()> {
-        for index in
-            (u64::from(self.last_applied) + 1..=self.node.commit_index().get()).map(LogIndex::from)
-        {
-            self.handle_committed_entry(index)?;
+        for index in u64::from(self.last_applied) + 1..=self.node.commit_index().get() {
+            self.handle_committed_entry(index.into())?;
         }
 
         if self.last_applied < self.node.commit_index().into() {
             if self.is_leader() {
-                // TODO: doc  (Quickly notify followers about the latest commit index)
+                // Notify followers of the latest commit index as quickly as possible.
                 self.node.heartbeat();
             }
 
@@ -259,21 +256,11 @@ impl<M: Machine> Server<M> {
             // TODO: note comment
             self.take_snapshot(index)?;
             self.maybe_update_cluster_config();
-            self.sync_broker();
+            self.broker
+                .update_peers(self.machines.system.peers(self.node.id().into()));
         }
 
         Ok(())
-    }
-
-    fn sync_broker(&mut self) {
-        let peers = self
-            .machines
-            .system
-            .members
-            .iter()
-            .filter(|(&id, _)| id != self.node.id().into())
-            .map(|(&id, m)| (id, m.token, m.addr));
-        self.broker.update_peers(peers);
     }
 
     fn maybe_update_cluster_config(&mut self) {
@@ -461,7 +448,11 @@ impl<M: Machine> Server<M> {
         }
 
         self.machines = serde_json::from_value(params.machine)?;
-        self.sync_broker();
+        self.broker
+            .update_peers(self.machines.system.peers(self.node.id().into()));
+
+        let timeout = self.machines.system.gen_election_timeout(self.node.role());
+        self.election_timeout_deadline = Instant::now() + timeout;
 
         Ok(())
     }

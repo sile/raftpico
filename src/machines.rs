@@ -120,6 +120,16 @@ impl SystemMachine {
         self.members.contains_key(&node_id)
     }
 
+    pub(crate) fn peers(
+        &self,
+        myself: NodeId,
+    ) -> impl '_ + Iterator<Item = (NodeId, Token, SocketAddr)> {
+        self.members
+            .iter()
+            .filter(move |(&id, _)| id != myself)
+            .map(|(&id, m)| (id, m.token, m.addr))
+    }
+
     pub(crate) fn get_node_id_by_addr(&self, addr: SocketAddr) -> Option<NodeId> {
         self.members
             .iter()
