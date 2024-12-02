@@ -24,6 +24,8 @@ use crate::{
 
 // TODO: struct ServerState
 
+const YEAR: Duration = Duration::from_secs(365 * 24 * 60 * 60);
+
 /// Raft server.
 #[derive(Debug)]
 pub struct Server<M> {
@@ -64,7 +66,7 @@ impl<M: Machine> Server<M> {
             node,
             storage,
             commands,
-            election_timeout_deadline: Instant::now() + Duration::from_secs(365 * 24 * 60 * 60),
+            election_timeout_deadline: Instant::now() + YEAR,
             last_applied,
             pending_commands: PendingQueue::new(true),
             pending_queries: PendingQueue::new(false),
@@ -268,7 +270,12 @@ impl<M: Machine> Server<M> {
     fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
         match action {
             Action::SetElectionTimeout => {
-                let timeout = self.machines.system.gen_election_timeout(self.node.role());
+                let timeout = if self.machines.system.is_known_node(self.node.id().into()) {
+                    self.machines.system.gen_election_timeout(self.node.role())
+                } else {
+                    // Non-member nodes aren't required to initiate a new election timeout.
+                    YEAR
+                };
                 self.election_timeout_deadline = Instant::now() + timeout;
             }
             Action::SaveCurrentTerm => {

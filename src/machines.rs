@@ -115,8 +115,6 @@ impl SystemMachine {
         ctx.output(&RemoveServerResult {
             members: self.members.values().map(|m| m.addr).collect(),
         });
-
-        // TODO: reset self.node for removed server
     }
 
     pub(crate) fn is_known_node(&self, node_id: NodeId) -> bool {
@@ -141,7 +139,6 @@ impl SystemMachine {
     }
 
     pub(crate) fn gen_election_timeout(&self, role: Role) -> Duration {
-        // TODO: check membership
         let min = self.min_election_timeout_ms;
         let max = self.max_election_timeout_ms.max(min);
         let timeout = match role {

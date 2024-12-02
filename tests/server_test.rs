@@ -92,7 +92,7 @@ fn add_and_remove_server() {
         server0.poll(POLL_TIMEOUT).expect("poll() failed");
         server1.poll(POLL_TIMEOUT).expect("poll() failed");
     }
-    assert!(server0.node().is_some()); // TODO: clear server0.node() if possible (but it seems difficult)
+    assert!(server0.node().is_some());
     assert!(server1.node().is_some());
 }
 
