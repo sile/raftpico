@@ -58,12 +58,6 @@ pub enum Request {
         params: ProposeCommandParams,
     },
 
-    /// **\[INTERNAL:raftpico\]** Propose a (consistent) query.
-    ProposeQuery {
-        jsonrpc: JsonRpcVersion,
-        params: ProposeQueryParams,
-    },
-
     // TODO: rename
     /// **\[INTERNAL:raftpico\]** Notify the commit position associated with a proposal.
     NotifyCommit {
@@ -126,17 +120,18 @@ impl Request {
         }
     }
 
-    pub(crate) fn propose_command(command: Command, caller: Caller) -> Self {
+    pub(crate) fn propose_command(
+        command: Command,
+        query_input: Option<serde_json::Value>,
+        caller: Caller,
+    ) -> Self {
         Self::ProposeCommand {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            params: ProposeCommandParams { command, caller },
-        }
-    }
-
-    pub(crate) fn propose_query(input: serde_json::Value, caller: Caller) -> Self {
-        Self::ProposeQuery {
-            jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            params: ProposeQueryParams { input, caller },
+            params: ProposeCommandParams {
+                command,
+                query_input,
+                caller,
+            },
         }
     }
 
@@ -449,20 +444,14 @@ pub struct ProposeCommandParams {
     /// Proposed command.
     pub command: Command,
 
-    /// RPC caller that receives the output of the command result.
-    pub caller: Caller,
-}
-
-/// Parameters of [`Request::ProposeQuery`].
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProposeQueryParams {
     // [NOTE]
     // This field can be omitted if the `Server` handles additional state for this,
     // albeit with a slight increase in complexity.
-    /// Input of the query.
-    pub input: serde_json::Value,
+    /// Input for the associated query (if a command is associated, this value becomes `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_input: Option<serde_json::Value>,
 
-    /// RPC caller that receives the output of the query result.
+    /// RPC caller that receives the output of the command result.
     pub caller: Caller,
 }
 
@@ -476,6 +465,7 @@ pub struct NotifyCommitParams {
     // This field can be omitted if the `Server` handles additional state for this,
     // albeit with a slight increase in complexity.
     /// Input for the associated query (if a command is associated, this value becomes `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<serde_json::Value>,
 
     /// RPC caller that receives the output of the associated command / query result.

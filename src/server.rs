@@ -14,8 +14,7 @@ use crate::{
     machines::Machines,
     messages::{
         AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorReason, InstallSnapshotParams, NotifyCommitParams,
-        ProposeQueryParams, Request,
+        CreateClusterParams, ErrorReason, InstallSnapshotParams, NotifyCommitParams, Request,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, PendingQueue},
@@ -326,21 +325,22 @@ impl<M: Machine> Server<M> {
                 self.handle_create_cluster_request(self.caller(from, id), params)?
             }
             Request::AddServer { id, params, .. } => {
-                self.propose_command(self.caller(from, id), Command::add_server(params.addr))?;
+                let command = Command::add_server(params.addr);
+                self.propose_command(self.caller(from, id), command, None)?;
             }
             Request::RemoveServer { id, params, .. } => {
-                self.propose_command(self.caller(from, id), Command::remove_server(params.addr))?;
+                let command = Command::remove_server(params.addr);
+                self.propose_command(self.caller(from, id), command, None)?;
             }
             Request::TakeSnapshot { id, .. } => {
-                self.propose_command(self.caller(from, id), Command::TakeSnapshot)?
+                self.propose_command(self.caller(from, id), Command::TakeSnapshot, None)?
             }
             Request::Apply { id, params, .. } => {
                 self.handle_apply_request(self.caller(from, id), params)?
             }
             Request::ProposeCommand { params, .. } => {
-                self.propose_command(params.caller, params.command)?
+                self.propose_command(params.caller, params.command, params.query_input)?
             }
-            Request::ProposeQuery { params, .. } => self.handle_propose_query_request(params)?,
             Request::NotifyCommit { params, .. } => self.handle_notify_commit_request(params)?,
             Request::InstallSnapshot { params, .. } => {
                 self.handle_install_snapshot_request(params)?
@@ -469,20 +469,6 @@ impl<M: Machine> Server<M> {
         self.node().is_some()
     }
 
-    fn handle_propose_query_request(&mut self, params: ProposeQueryParams) -> std::io::Result<()> {
-        if !self.is_leader() {
-            todo!("redirect if possible");
-        }
-
-        // TODO: factor out
-        let position = self.propose_command_leader(Command::Query);
-        self.broker.send_to(
-            params.caller.node_id,
-            &Request::notify_commit(position, Some(params.input), params.caller),
-        )?;
-        Ok(())
-    }
-
     fn handle_notify_commit_request(&mut self, params: NotifyCommitParams) -> std::io::Result<()> {
         if self.process_id != params.caller.process_id {
             // This notification is irrelevant as the server has been restarted.
@@ -502,10 +488,10 @@ impl<M: Machine> Server<M> {
     fn handle_apply_request(&mut self, caller: Caller, params: ApplyParams) -> std::io::Result<()> {
         match params.kind {
             ApplyKind::Command => {
-                self.propose_command(caller, Command::apply(params.input))?;
+                self.propose_command(caller, Command::apply(params.input), None)?;
             }
             ApplyKind::Query => {
-                self.handle_apply_query_request(caller, params.input)?;
+                self.propose_command(caller, Command::Query, Some(params.input))?;
             }
             ApplyKind::LocalQuery => {
                 let kind = ApplyKind::LocalQuery;
@@ -530,7 +516,7 @@ impl<M: Machine> Server<M> {
         caller.node_id = NodeId::SEED;
         self.node = Node::start(NodeId::SEED.into());
         self.node.create_cluster(&[self.node.id()]); // Always succeeds
-        self.propose_command(caller, Command::create_cluster(self.addr(), &params))?;
+        self.propose_command(caller, Command::create_cluster(self.addr(), &params), None)?;
 
         Ok(())
     }
@@ -539,7 +525,12 @@ impl<M: Machine> Server<M> {
         self.node.role().is_leader()
     }
 
-    fn propose_command(&mut self, caller: Caller, command: Command) -> std::io::Result<()> {
+    fn propose_command(
+        &mut self,
+        caller: Caller,
+        command: Command,
+        query_input: Option<serde_json::Value>,
+    ) -> std::io::Result<()> {
         if !self.is_initialized() {
             if caller.node_id == self.node.id().into() {
                 self.broker
@@ -548,6 +539,11 @@ impl<M: Machine> Server<M> {
                 todo!("notify 'leader not found' error to the origin node");
             }
             return Ok(());
+        }
+        if caller.node_id != self.node.id().into()
+            && !self.machines.system.is_known_node(caller.node_id)
+        {
+            todo!();
         }
 
         if !self.is_leader() {
@@ -558,18 +554,22 @@ impl<M: Machine> Server<M> {
                 todo!("notify this error to the origin node");
             }
 
-            let request = Request::propose_command(command, caller);
+            let request = Request::propose_command(command, query_input, caller);
             self.broker.send_to(maybe_leader, &request)?;
             return Ok(());
         }
 
         let commit_position = self.propose_command_leader(command);
         if caller.node_id == self.node.id().into() {
-            self.pending_commands.push(commit_position, caller);
+            if let Some(input) = query_input {
+                self.pending_queries.push(commit_position, (input, caller));
+            } else {
+                self.pending_commands.push(commit_position, caller);
+            }
         } else {
             // TODO: add note doc about message reordering
             let node_id = caller.node_id;
-            let request = Request::notify_commit(commit_position, None, caller);
+            let request = Request::notify_commit(commit_position, query_input, caller);
             self.broker.send_to(node_id, &request)?;
         }
 
@@ -596,27 +596,5 @@ impl<M: Machine> Server<M> {
         self.commands.insert(position.index, command);
 
         position
-    }
-
-    // TODO: remove
-    fn handle_apply_query_request(
-        &mut self,
-        caller: Caller,
-        input: serde_json::Value,
-    ) -> std::io::Result<()> {
-        // TODO: use propose_command()?
-        if self.is_leader() {
-            let commit_position = self.propose_command_leader(Command::Query);
-            self.pending_queries.push(commit_position, (input, caller));
-            return Ok(());
-        }
-
-        let Some(maybe_leader) = self.node.voted_for().map(NodeId::from) else {
-            todo!("error response");
-        };
-        let request = Request::propose_query(input, caller);
-        self.broker.send_to(maybe_leader, &request)?;
-
-        Ok(())
     }
 }
