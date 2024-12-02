@@ -14,7 +14,8 @@ use crate::{
     machines::Machines,
     messages::{
         AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorReason, InstallSnapshotParams, NotifyCommitParams, Request,
+        CreateClusterParams, ErrorReason, InstallSnapshotParams, NotifyCommitParams,
+        ReplyErrorParams, Request,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, PendingQueue},
@@ -342,6 +343,7 @@ impl<M: Machine> Server<M> {
                 self.propose_command(params.caller, params.command, params.query_input)?
             }
             Request::NotifyCommit { params, .. } => self.handle_notify_commit_request(params)?,
+            Request::ReplyError { params, .. } => self.handle_reply_error_request(params)?,
             Request::InstallSnapshot { params, .. } => {
                 self.handle_install_snapshot_request(params)?
             }
@@ -485,6 +487,13 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
+    fn handle_reply_error_request(&mut self, params: ReplyErrorParams) -> std::io::Result<()> {
+        if self.process_id == params.caller.process_id {
+            self.broker.reply_error(params.caller, params.error)?;
+        }
+        Ok(())
+    }
+
     fn handle_apply_request(&mut self, caller: Caller, params: ApplyParams) -> std::io::Result<()> {
         match params.kind {
             ApplyKind::Command => {
@@ -535,10 +544,7 @@ impl<M: Machine> Server<M> {
             || (!matches!(command, Command::CreateCluster { .. })
                 && !self.machines.system.is_known_node(caller.node_id))
         {
-            // TODO: maybe direct reply is not possible
-            return self
-                .broker
-                .reply_error(caller, ErrorReason::NotClusterMember);
+            return self.reply_error(caller, ErrorReason::NotClusterMember);
         }
 
         if self.is_leader() {
@@ -590,12 +596,21 @@ impl<M: Machine> Server<M> {
         query_input: Option<serde_json::Value>,
     ) -> std::io::Result<()> {
         let Some(maybe_leader) = self.node.voted_for().take_if(|id| *id != self.node.id()) else {
-            // TODO: maybe direct reply is not possible
-            return self.broker.reply_error(caller, ErrorReason::NoLeader);
+            return self.reply_error(caller, ErrorReason::NoLeader);
         };
 
         let request = Request::propose_command(command, query_input, caller);
         self.broker.send_to(NodeId::from(maybe_leader), &request)?;
         Ok(())
+    }
+
+    fn reply_error(&mut self, caller: Caller, error: ErrorReason) -> std::io::Result<()> {
+        if self.node.id() == caller.node_id.into() {
+            self.broker.reply_error(caller, error)
+        } else {
+            let node_id = caller.node_id;
+            self.broker
+                .send_to(node_id, &Request::reply_error(error, caller))
+        }
     }
 }

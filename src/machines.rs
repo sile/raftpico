@@ -40,7 +40,9 @@ impl<M: Machine> Machine for Machines<M> {
                     self.user.apply(ctx, input);
                 }
                 Err(e) => {
-                    ctx.error(ErrorReason::InvalidMachineInput { reason: e });
+                    ctx.error(ErrorReason::InvalidMachineInput {
+                        reason: e.to_string(),
+                    });
                 }
             },
             Command::Query => {} // Do nothing.

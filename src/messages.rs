@@ -65,6 +65,12 @@ pub enum Request {
         params: NotifyCommitParams,
     },
 
+    /// **\[INTERNAL:raftpico\]** Reply an error response to a client connecting to a remote server.
+    ReplyError {
+        jsonrpc: JsonRpcVersion,
+        params: ReplyErrorParams,
+    },
+
     /// **\[INTERNAL:raftbare\]** See: [`raftbare::Message::AppendEntriesCall`].
     AppendEntriesCall {
         jsonrpc: JsonRpcVersion,
@@ -117,6 +123,13 @@ impl Request {
                 input,
                 caller,
             },
+        }
+    }
+
+    pub(crate) fn reply_error(error: ErrorReason, caller: Caller) -> Self {
+        Self::ReplyError {
+            jsonrpc: JsonRpcVersion::V2,
+            params: ReplyErrorParams { error, caller },
         }
     }
 
@@ -472,6 +485,16 @@ pub struct NotifyCommitParams {
     pub caller: Caller,
 }
 
+/// Parameters of [`Request::ReplyError`].
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReplyErrorParams {
+    /// Error.
+    pub error: ErrorReason,
+
+    /// RPC caller that receives the output of the associated command / query result.
+    pub caller: Caller,
+}
+
 /// Caller of an RPC request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -488,14 +511,14 @@ impl Caller {
 }
 
 /// RPC error reason.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub enum ErrorReason {
     ClusterAlreadyCreated,
     ServerAlreadyAdded,
     NotClusterMember,
-    InvalidMachineInput { reason: serde_json::Error },
-    InvalidMachineOutput { reason: serde_json::Error },
+    InvalidMachineInput { reason: String },
+    InvalidMachineOutput { reason: String },
     NoMachineOutput,
     RequestRejected,
     RequestResultUnknown,
@@ -555,7 +578,7 @@ impl ErrorReason {
         match self {
             ErrorReason::InvalidMachineInput { reason }
             | ErrorReason::InvalidMachineOutput { reason } => {
-                Some(serde_json::json!({"reason": reason.to_string()}))
+                Some(serde_json::json!({"reason": reason}))
             }
             _ => None,
         }

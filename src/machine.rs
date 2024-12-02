@@ -48,10 +48,12 @@ impl ApplyContext<'_> {
     /// Notifies the output of the apply call to the raft server.
     pub fn output<T: Serialize>(&mut self, output: &T) {
         if self.caller.is_some() {
-            self.output = Some(
-                serde_json::to_value(output)
-                    .map_err(|reason| ErrorReason::InvalidMachineOutput { reason }),
-            )
+            self.output =
+                Some(
+                    serde_json::to_value(output).map_err(|e| ErrorReason::InvalidMachineOutput {
+                        reason: e.to_string(),
+                    }),
+                )
         }
     }
 
