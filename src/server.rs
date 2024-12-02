@@ -14,7 +14,7 @@ use crate::{
     machines::Machines,
     messages::{
         AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorReason, InstallSnapshotParams, NotifyCommitParams,
+        CreateClusterParams, ErrorReason, InstallSnapshotParams, NotifyPendingCommitParams,
         ReplyErrorParams, Request,
     },
     storage::FileStorage,
@@ -349,7 +349,9 @@ impl<M: Machine> Server<M> {
             Request::ProposeCommand { params, .. } => {
                 self.propose_command(params.caller, params.command, params.query_input)?
             }
-            Request::NotifyCommit { params, .. } => self.handle_notify_commit_request(params)?,
+            Request::NotifyPendingCommit { params, .. } => {
+                self.handle_notify_pending_commit_request(params)?
+            }
             Request::ReplyError { params, .. } => self.handle_reply_error_request(params)?,
             Request::InstallSnapshot { params, .. } => {
                 self.handle_install_snapshot_request(params)?
@@ -478,7 +480,10 @@ impl<M: Machine> Server<M> {
         self.node().is_some()
     }
 
-    fn handle_notify_commit_request(&mut self, params: NotifyCommitParams) -> std::io::Result<()> {
+    fn handle_notify_pending_commit_request(
+        &mut self,
+        params: NotifyPendingCommitParams,
+    ) -> std::io::Result<()> {
         if self.process_id != params.caller.process_id {
             // This notification is irrelevant as the server has been restarted.
             //

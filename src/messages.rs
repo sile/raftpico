@@ -58,11 +58,10 @@ pub enum Request {
         params: ProposeCommandParams,
     },
 
-    // TODO: rename
-    /// **\[INTERNAL:raftpico\]** Notify the commit position associated with a proposal.
-    NotifyCommit {
+    /// **\[INTERNAL:raftpico\]** Notify the commit position associated with an ongoing proposal.
+    NotifyPendingCommit {
         jsonrpc: JsonRpcVersion,
-        params: NotifyCommitParams,
+        params: NotifyPendingCommitParams,
     },
 
     /// **\[INTERNAL:raftpico\]** Reply an error response to a client connecting to a remote server.
@@ -116,9 +115,9 @@ impl Request {
         input: Option<serde_json::Value>,
         caller: Caller,
     ) -> Self {
-        Self::NotifyCommit {
+        Self::NotifyPendingCommit {
             jsonrpc: jsonlrpc::JsonRpcVersion::V2,
-            params: NotifyCommitParams {
+            params: NotifyPendingCommitParams {
                 commit,
                 input,
                 caller,
@@ -468,9 +467,9 @@ pub struct ProposeCommandParams {
     pub caller: Caller,
 }
 
-/// Parameters of [`Request::NotifyCommit`].
+/// Parameters of [`Request::NotifyPendingCommit`].
 #[derive(Debug, Serialize, Deserialize)]
-pub struct NotifyCommitParams {
+pub struct NotifyPendingCommitParams {
     /// Commit position.
     pub commit: LogPosition,
 
