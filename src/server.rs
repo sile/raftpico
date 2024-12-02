@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jsonlrpc::{ErrorObject, RequestId, ResponseObject};
+use jsonlrpc::{RequestId, ResponseObject};
 use jsonlrpc_mio::ClientId;
 use raftbare::{Action, ClusterConfig, Node};
 
@@ -119,19 +119,8 @@ impl<M: Machine> Server<M> {
         addr: SocketAddr,
         response: ResponseObject,
     ) -> std::io::Result<()> {
-        let data = match response {
-            ResponseObject::Err {
-                error:
-                    ErrorObject {
-                        code: ErrorReason::ERROR_CODE_UNKNOWN_MEMBER,
-                        data: Some(data),
-                        ..
-                    },
-                ..
-            } => data,
-            response => {
-                panic!("Unexpected RPC response: {response:?}");
-            }
+        let ResponseObject::Ok { result, .. } = response else {
+            panic!("Unexpected RPC response: {response:?}");
         };
 
         // The sender's `node_id` is not trusted because their knowledge might be outdated.
@@ -139,7 +128,7 @@ impl<M: Machine> Server<M> {
             return Ok(());
         };
 
-        let mut params: AppendEntriesReplyParams = serde_json::from_value(data)?;
+        let mut params: AppendEntriesReplyParams = serde_json::from_value(result)?;
         params.header.from = node_id;
 
         // This call will generate an `Action::InstallSnapshot`
@@ -393,10 +382,8 @@ impl<M: Machine> Server<M> {
             else {
                 return Ok(());
             };
-            let reply = AppendEntriesReplyParams::from_raftbare(header, last_position);
-            // TODO: use reply_ok(request)
-            self.broker
-                .reply_error(caller, ErrorReason::UnknownMember { reply })?;
+            let params = AppendEntriesReplyParams::from_raftbare(header, last_position);
+            self.broker.reply_ok(caller, params)?;
         }
         Ok(())
     }

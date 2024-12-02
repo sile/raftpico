@@ -509,7 +509,6 @@ pub enum ErrorReason {
     NoMachineOutput,
     RequestRejected,
     RequestResultUnknown,
-    UnknownMember { reply: AppendEntriesReplyParams },
 }
 
 impl ErrorReason {
@@ -523,8 +522,6 @@ impl ErrorReason {
     pub const ERROR_CODE_REQUEST_REJECTED: ErrorCode = ErrorCode::new(2003);
     pub const ERROR_CODE_REQUEST_RESULT_UNKNOWN: ErrorCode = ErrorCode::new(2004);
 
-    pub const ERROR_CODE_UNKNOWN_MEMBER: ErrorCode = ErrorCode::new(3000);
-
     fn code(&self) -> ErrorCode {
         match self {
             ErrorReason::ClusterAlreadyCreated => Self::ERROR_CODE_CLUSTER_ALREADY_CREATED,
@@ -535,7 +532,6 @@ impl ErrorReason {
             ErrorReason::NoMachineOutput => Self::ERROR_CODE_NO_MACHINE_OUTPUT,
             ErrorReason::RequestRejected => Self::ERROR_CODE_REQUEST_REJECTED,
             ErrorReason::RequestResultUnknown => Self::ERROR_CODE_REQUEST_RESULT_UNKNOWN,
-            ErrorReason::UnknownMember { .. } => Self::ERROR_CODE_UNKNOWN_MEMBER,
         }
     }
 
@@ -551,7 +547,6 @@ impl ErrorReason {
             ErrorReason::RequestResultUnknown => {
                 "Request result unknown (it could either be accepted or rejected)"
             }
-            ErrorReason::UnknownMember { .. } => "Unknown cluster member",
         }
     }
 
@@ -569,7 +564,6 @@ impl ErrorReason {
             | ErrorReason::InvalidMachineOutput { reason } => {
                 Some(serde_json::json!({"reason": reason.to_string()}))
             }
-            ErrorReason::UnknownMember { reply } => Some(serde_json::json!(reply)),
             _ => None,
         }
     }
