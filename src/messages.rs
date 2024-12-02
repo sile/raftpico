@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{Command, Commands},
+    machines::Machines,
     types::{LogIndex, LogPosition, NodeId, Term},
     ApplyKind,
 };
@@ -51,7 +52,12 @@ pub enum Request {
         id: RequestId,
     },
 
-    // TODO: GetServerState
+    /// **\[API\]** Get the server state.
+    GetServerState {
+        jsonrpc: JsonRpcVersion,
+        id: RequestId,
+    },
+
     /// **\[INTERNAL:raftpico\]** Propose a command.
     ProposeCommand {
         jsonrpc: JsonRpcVersion,
@@ -448,6 +454,20 @@ pub struct ApplyParams {
 pub struct TakeSnapshotResult {
     /// Log index where the snapshot was taken.
     pub snapshot_index: LogIndex,
+}
+
+/// Successful result of [`Request::GetServerState`].
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetServerStateResult<'a, M> {
+    pub addr: SocketAddr,
+    pub node_id: NodeId,
+    pub current_term: Term,
+    pub voted_for: Option<NodeId>,
+    pub role: &'static str,
+    pub commit_index: LogIndex,
+    pub snapshot: LogPosition,
+    pub machines: &'a Machines<M>,
 }
 
 /// Parameters of [`Request::ProposeCommand`].

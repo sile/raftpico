@@ -14,15 +14,13 @@ use crate::{
     machines::Machines,
     messages::{
         AppendEntriesCallParams, AppendEntriesReplyParams, ApplyParams, Caller,
-        CreateClusterParams, ErrorReason, InstallSnapshotParams, NotifyPendingCommitParams,
-        ReplyErrorParams, Request,
+        CreateClusterParams, ErrorReason, GetServerStateResult, InstallSnapshotParams,
+        NotifyPendingCommitParams, ReplyErrorParams, Request,
     },
     storage::FileStorage,
     types::{LogIndex, LogPosition, NodeId, PendingQueue, Term},
     ApplyKind,
 };
-
-// TODO: struct ServerState
 
 const YEAR: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 
@@ -343,6 +341,9 @@ impl<M: Machine> Server<M> {
             Request::TakeSnapshot { id, .. } => {
                 self.propose_command(self.caller(from, id), Command::TakeSnapshot, None)?
             }
+            Request::GetServerState { id, .. } => {
+                self.handle_get_server_state_request(self.caller(from, id))?
+            }
             Request::Apply { id, params, .. } => {
                 self.handle_apply_request(self.caller(from, id), params)?
             }
@@ -503,6 +504,26 @@ impl<M: Machine> Server<M> {
         if self.process_id == params.caller.process_id {
             self.broker.reply_error(params.caller, params.error)?;
         }
+        Ok(())
+    }
+
+    fn handle_get_server_state_request(&mut self, caller: Caller) -> std::io::Result<()> {
+        let role = match self.node.role() {
+            raftbare::Role::Follower => "FOLLOWER",
+            raftbare::Role::Candidate => "CANDIDATE",
+            raftbare::Role::Leader => "LEADER",
+        };
+        let state = GetServerStateResult {
+            addr: self.addr(),
+            node_id: NodeId(self.node.id()),
+            current_term: Term(self.node.current_term()),
+            voted_for: self.node.voted_for().map(NodeId),
+            role,
+            commit_index: LogIndex(self.node.commit_index()),
+            snapshot: self.node.log().snapshot_position().into(),
+            machines: &self.machines,
+        };
+        self.broker.reply_ok(caller, &state)?;
         Ok(())
     }
 
