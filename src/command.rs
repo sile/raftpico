@@ -83,22 +83,10 @@ impl Command {
         commands: &Commands,
     ) -> Self {
         match entry {
-            raftbare::LogEntry::Term(term) => Self::StartTerm {
-                term: Term::from(*term),
-            },
-            raftbare::LogEntry::ClusterConfig(cluster_config) => Self::UpdateClusterConfig {
-                voters: cluster_config
-                    .voters
-                    .iter()
-                    .copied()
-                    .map(NodeId::from)
-                    .collect(),
-                new_voters: cluster_config
-                    .new_voters
-                    .iter()
-                    .copied()
-                    .map(NodeId::from)
-                    .collect(),
+            raftbare::LogEntry::Term(term) => Self::StartTerm { term: Term(*term) },
+            raftbare::LogEntry::ClusterConfig(config) => Self::UpdateClusterConfig {
+                voters: config.voters.iter().copied().map(NodeId).collect(),
+                new_voters: config.new_voters.iter().copied().map(NodeId).collect(),
             },
             raftbare::LogEntry::Command => commands.get(&index).expect("bug").clone(),
         }
@@ -110,11 +98,11 @@ impl Command {
         commands: &mut Commands,
     ) -> raftbare::LogEntry {
         match self {
-            Command::StartTerm { term } => raftbare::LogEntry::Term(term.into()),
+            Command::StartTerm { term } => raftbare::LogEntry::Term(term.0),
             Command::UpdateClusterConfig { voters, new_voters } => {
                 raftbare::LogEntry::ClusterConfig(raftbare::ClusterConfig {
-                    voters: voters.into_iter().map(From::from).collect(),
-                    new_voters: new_voters.into_iter().map(From::from).collect(),
+                    voters: voters.into_iter().map(|n| n.0).collect(),
+                    new_voters: new_voters.into_iter().map(|n| n.0).collect(),
                     ..Default::default()
                 })
             }

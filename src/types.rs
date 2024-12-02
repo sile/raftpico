@@ -11,7 +11,7 @@ use crate::messages::ErrorReason;
 /// This struct is the same as [`raftbare::NodeId`], except that it is serializable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(into = "u64", from = "u64")]
-pub struct NodeId(raftbare::NodeId);
+pub struct NodeId(pub raftbare::NodeId);
 
 impl NodeId {
     pub(crate) const SEED: Self = Self(raftbare::NodeId::new(0));
@@ -30,24 +30,12 @@ impl From<NodeId> for u64 {
     }
 }
 
-impl From<raftbare::NodeId> for NodeId {
-    fn from(value: raftbare::NodeId) -> Self {
-        Self(value)
-    }
-}
-
-impl From<NodeId> for raftbare::NodeId {
-    fn from(value: NodeId) -> Self {
-        value.0
-    }
-}
-
 /// `mio` Token.
 ///
 /// This struct is the same as [`mio::Token`], except that it is serializable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(into = "usize", from = "usize")]
-pub struct Token(mio::Token);
+pub struct Token(pub mio::Token);
 
 impl Token {
     pub(crate) const CLIENT_MIN: Self = Self(mio::Token(0));
@@ -84,24 +72,12 @@ impl From<Token> for usize {
     }
 }
 
-impl From<mio::Token> for Token {
-    fn from(value: mio::Token) -> Self {
-        Self(value)
-    }
-}
-
-impl From<Token> for mio::Token {
-    fn from(value: Token) -> Self {
-        value.0
-    }
-}
-
 /// Raft term.
 ///
 /// This struct is the same as [`raftbare::Term`], except that it is serializable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(into = "u64", from = "u64")]
-pub struct Term(raftbare::Term);
+pub struct Term(pub raftbare::Term);
 
 impl From<u64> for Term {
     fn from(value: u64) -> Self {
@@ -115,24 +91,12 @@ impl From<Term> for u64 {
     }
 }
 
-impl From<raftbare::Term> for Term {
-    fn from(value: raftbare::Term) -> Self {
-        Self(value)
-    }
-}
-
-impl From<Term> for raftbare::Term {
-    fn from(value: Term) -> Self {
-        value.0
-    }
-}
-
 /// Raft log index.
 ///
 /// This struct is the same as [`raftbare::LogIndex`], except that it is serializable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(into = "u64", from = "u64")]
-pub struct LogIndex(pub(crate) raftbare::LogIndex);
+pub struct LogIndex(pub raftbare::LogIndex);
 
 impl From<u64> for LogIndex {
     fn from(value: u64) -> Self {
@@ -143,19 +107,6 @@ impl From<u64> for LogIndex {
 impl From<LogIndex> for u64 {
     fn from(value: LogIndex) -> Self {
         value.0.get()
-    }
-}
-
-// TODO: remove
-impl From<raftbare::LogIndex> for LogIndex {
-    fn from(value: raftbare::LogIndex) -> Self {
-        Self(value)
-    }
-}
-
-impl From<LogIndex> for raftbare::LogIndex {
-    fn from(value: LogIndex) -> Self {
-        value.0
     }
 }
 
@@ -171,8 +122,8 @@ pub struct LogPosition {
 impl From<raftbare::LogPosition> for LogPosition {
     fn from(value: raftbare::LogPosition) -> Self {
         Self {
-            term: value.term.into(),
-            index: value.index.into(),
+            term: Term(value.term),
+            index: LogIndex(value.index),
         }
     }
 }
@@ -180,8 +131,8 @@ impl From<raftbare::LogPosition> for LogPosition {
 impl From<LogPosition> for raftbare::LogPosition {
     fn from(value: LogPosition) -> Self {
         Self {
-            term: value.term.into(),
-            index: value.index.into(),
+            term: value.term.0,
+            index: value.index.0,
         }
     }
 }

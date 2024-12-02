@@ -101,15 +101,15 @@ impl FileStorage {
         commands: &mut Commands,
     ) -> std::io::Result<Option<(Node, Machines<M>)>> {
         let mut machine = None;
-        let mut node_id = raftbare::NodeId::from(NodeId::UNINIT);
+        let mut node_id = NodeId::UNINIT.0;
         let mut term = raftbare::Term::new(0);
         let mut voted_for = None;
         let mut config = raftbare::ClusterConfig::default();
         let mut entries = raftbare::LogEntries::new(raftbare::LogPosition::ZERO);
         while let Some(record) = self.load_record()? {
             match record {
-                Record::Term(v) => term = raftbare::Term::from(v),
-                Record::VotedFor(v) => voted_for = v.map(raftbare::NodeId::from),
+                Record::Term(v) => term = v.0,
+                Record::VotedFor(v) => voted_for = v.map(|v| v.0),
                 Record::LogEntries(v) => {
                     let v = v.into_raftbare(commands);
                     let n = v.prev_position().index - entries.prev_position().index;
@@ -121,10 +121,10 @@ impl FileStorage {
                     }
                 }
                 Record::Snapshot(snapshot) => {
-                    node_id = snapshot.node_id.into();
+                    node_id = snapshot.node_id.0;
                     entries = raftbare::LogEntries::new(snapshot.last_included.into());
-                    config.voters = snapshot.voters.into_iter().map(From::from).collect();
-                    config.new_voters = snapshot.new_voters.into_iter().map(From::from).collect();
+                    config.voters = snapshot.voters.into_iter().map(|n| n.0).collect();
+                    config.new_voters = snapshot.new_voters.into_iter().map(|n| n.0).collect();
                     machine = Some(serde_json::from_value(snapshot.machine)?);
                 }
             }

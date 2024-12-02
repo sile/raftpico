@@ -35,8 +35,8 @@ impl MessageBroker {
         let rpc_server = RpcServer::start(
             &mut poller,
             listen_addr,
-            Token::SERVER_MIN.into(),
-            Token::SERVER_MAX.into(),
+            Token::SERVER_MIN.0,
+            Token::SERVER_MAX.0,
         )?;
         Ok(Self {
             poller,
@@ -64,7 +64,7 @@ impl MessageBroker {
             tokens.insert(token);
             self.rpc_clients
                 .entry(token)
-                .or_insert_with(|| RpcClient::new(token.into(), addr));
+                .or_insert_with(|| RpcClient::new(token.0, addr));
         }
 
         self.rpc_clients.retain(|token, _| tokens.contains(token));
@@ -141,7 +141,7 @@ impl MessageBroker {
         }
 
         for event in self.events.iter() {
-            if let Some(client) = self.rpc_clients.get_mut(&event.token().into()) {
+            if let Some(client) = self.rpc_clients.get_mut(&Token(event.token())) {
                 let _ = client.handle_event(&mut self.poller, event);
                 while let Some(response) = client.try_recv() {
                     self.responses.push_back((client.server_addr(), response));

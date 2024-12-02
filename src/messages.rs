@@ -167,7 +167,7 @@ impl Request {
                 jsonrpc: JsonRpcVersion::V2,
                 params: AppendEntriesCallParams::from_raftbare(
                     header,
-                    commit_index.into(),
+                    LogIndex(commit_index),
                     entries,
                     commands,
                 ),
@@ -205,16 +205,16 @@ pub struct MessageHeader {
 impl MessageHeader {
     fn from_raftbare(header: raftbare::MessageHeader) -> Self {
         Self {
-            from: header.from.into(),
-            term: header.term.into(),
+            from: NodeId(header.from),
+            term: Term(header.term),
             seqno: header.seqno.get(),
         }
     }
 
     fn to_raftbare(&self) -> raftbare::MessageHeader {
         raftbare::MessageHeader {
-            from: self.from.into(),
-            term: self.term.into(),
+            from: self.from.0,
+            term: self.term.0,
             seqno: raftbare::MessageSeqNo::new(self.seqno),
         }
     }
@@ -234,7 +234,7 @@ impl LogEntries {
             prev: entries.prev_position().into(),
             commands: entries
                 .iter_with_positions()
-                .map(|(p, x)| Command::from_log_entry(p.index.into(), &x, commands))
+                .map(|(p, x)| Command::from_log_entry(LogIndex(p.index), &x, commands))
                 .collect(),
         }
     }
@@ -278,7 +278,7 @@ impl AppendEntriesCallParams {
     pub(crate) fn into_raftbare(self, commands: &mut Commands) -> raftbare::Message {
         raftbare::Message::AppendEntriesCall {
             header: self.header.to_raftbare(),
-            commit_index: self.commit_index.into(),
+            commit_index: self.commit_index.0,
             entries: self.entries.into_raftbare(commands),
         }
     }

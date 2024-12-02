@@ -18,7 +18,7 @@ use crate::{
         ReplyErrorParams, Request,
     },
     storage::FileStorage,
-    types::{LogIndex, LogPosition, NodeId, PendingQueue},
+    types::{LogIndex, LogPosition, NodeId, PendingQueue, Term},
     ApplyKind,
 };
 
@@ -49,17 +49,17 @@ impl<M: Machine> Server<M> {
         let mut broker = MessageBroker::start(listen_addr)?;
         let mut commands = Commands::new();
         let mut machines = Machines::default();
-        let mut node = Node::start(NodeId::UNINIT.into());
+        let mut node = Node::start(NodeId::UNINIT.0);
 
         if let Some(storage) = &mut storage {
             if let Some(loaded) = storage.load(&mut commands)? {
                 node = loaded.0;
                 machines = loaded.1;
-                broker.update_peers(machines.system.peers(node.id().into()));
+                broker.update_peers(machines.system.peers(NodeId(node.id())));
             }
         }
 
-        let last_applied = node.log().snapshot_position().index.into();
+        let last_applied = LogIndex(node.log().snapshot_position().index);
         Ok(Self {
             process_id: std::process::id(),
             broker,
@@ -79,7 +79,7 @@ impl<M: Machine> Server<M> {
     }
 
     pub fn node(&self) -> Option<&Node> {
-        (self.node.id() != NodeId::UNINIT.into()).then_some(&self.node)
+        (self.node.id() != NodeId::UNINIT.0).then_some(&self.node)
     }
 
     pub fn machine(&self) -> &M {
@@ -145,13 +145,13 @@ impl<M: Machine> Server<M> {
             self.handle_committed_log_entry(index.into())?;
         }
 
-        if self.last_applied < self.node.commit_index().into() {
+        if self.last_applied.0 < self.node.commit_index() {
             if self.is_leader() {
                 // Notify followers of the latest commit index as quickly as possible.
                 self.node.heartbeat();
             }
 
-            self.last_applied = self.node.commit_index().into();
+            self.last_applied = LogIndex(self.node.commit_index());
 
             self.handle_committed_queries()?;
         }
@@ -197,7 +197,7 @@ impl<M: Machine> Server<M> {
             self.take_snapshot(index)?;
             self.maybe_sync_cluster_config();
             self.broker
-                .update_peers(self.machines.system.peers(self.node.id().into()));
+                .update_peers(self.machines.system.peers(NodeId(self.node.id())));
         }
 
         Ok(())
@@ -250,12 +250,12 @@ impl<M: Machine> Server<M> {
         let mut adding = Vec::new();
         let mut removing = Vec::new();
         for &id in self.machines.system.members.keys() {
-            if !self.node.config().voters.contains(&id.into()) {
-                adding.push(id.into());
+            if !self.node.config().voters.contains(&id.0) {
+                adding.push(id.0);
             }
         }
         for &id in &self.node.config().voters {
-            if !self.machines.system.members.contains_key(&id.into()) {
+            if !self.machines.system.members.contains_key(&NodeId(id)) {
                 removing.push(id);
             }
         }
@@ -270,7 +270,7 @@ impl<M: Machine> Server<M> {
     fn handle_action(&mut self, action: Action) -> std::io::Result<()> {
         match action {
             Action::SetElectionTimeout => {
-                let timeout = if self.machines.system.is_known_node(self.node.id().into()) {
+                let timeout = if self.machines.system.is_known_node(NodeId(self.node.id())) {
                     self.machines.system.gen_election_timeout(self.node.role())
                 } else {
                     // Non-member nodes aren't required to initiate a new election timeout.
@@ -280,12 +280,12 @@ impl<M: Machine> Server<M> {
             }
             Action::SaveCurrentTerm => {
                 if let Some(storage) = &mut self.storage {
-                    storage.save_current_term(self.node.current_term().into())?;
+                    storage.save_current_term(Term(self.node.current_term()))?;
                 }
             }
             Action::SaveVotedFor => {
                 if let Some(storage) = &mut self.storage {
-                    storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
+                    storage.save_voted_for(self.node.voted_for().map(NodeId))?;
                 }
             }
             Action::AppendLogEntries(entries) => {
@@ -299,15 +299,15 @@ impl<M: Machine> Server<M> {
             }
             Action::SendMessage(dst, message) => {
                 let request = Request::from_raftbare(message, &self.commands);
-                self.broker.send_to(dst.into(), &request)?;
+                self.broker.send_to(NodeId(dst), &request)?;
             }
-            Action::InstallSnapshot(dst) => self.send_install_snapshot_request(dst.into())?,
+            Action::InstallSnapshot(dst) => self.send_install_snapshot_request(NodeId(dst))?,
         }
         Ok(())
     }
 
     fn send_install_snapshot_request(&mut self, dst: NodeId) -> std::io::Result<()> {
-        let snapshot = self.get_snapshot(self.node.commit_index().into())?;
+        let snapshot = self.get_snapshot(LogIndex(self.node.commit_index()))?;
         let request = Request::install_snapshot(dst, snapshot);
         self.broker.send_to(dst, &request)?;
 
@@ -320,7 +320,7 @@ impl<M: Machine> Server<M> {
 
     fn caller(&self, client_id: ClientId, request_id: RequestId) -> Caller {
         Caller {
-            node_id: self.node.id().into(),
+            node_id: NodeId(self.node.id()),
             process_id: self.process_id,
             client_id,
             request_id,
@@ -389,7 +389,7 @@ impl<M: Machine> Server<M> {
             let Some(raftbare::Message::AppendEntriesReply {
                 header,
                 last_position,
-            }) = self.node.actions_mut().send_messages.remove(&sender.into())
+            }) = self.node.actions_mut().send_messages.remove(&sender.0)
             else {
                 return Ok(());
             };
@@ -404,23 +404,23 @@ impl<M: Machine> Server<M> {
         params: InstallSnapshotParams,
     ) -> std::io::Result<()> {
         if !self.is_initialized() {
-            self.node = Node::start(params.node_id.into());
+            self.node = Node::start(params.node_id.0);
         }
 
-        if params.last_included.index <= self.node.commit_index().into() {
+        if params.last_included.index.0 <= self.node.commit_index() {
             return Ok(());
         }
 
         let config = ClusterConfig {
-            voters: params.voters.iter().copied().map(From::from).collect(),
-            new_voters: params.new_voters.iter().copied().map(From::from).collect(),
+            voters: params.voters.iter().copied().map(|n| n.0).collect(),
+            new_voters: params.new_voters.iter().copied().map(|n| n.0).collect(),
             ..Default::default()
         };
         self.install_snapshot(params.last_included.into(), config, Some(&params))?;
 
         self.machines = serde_json::from_value(params.machine)?;
         self.broker
-            .update_peers(self.machines.system.peers(self.node.id().into()));
+            .update_peers(self.machines.system.peers(NodeId(self.node.id())));
 
         let timeout = self.machines.system.gen_election_timeout(self.node.role());
         self.election_timeout_deadline = Instant::now() + timeout;
@@ -431,10 +431,10 @@ impl<M: Machine> Server<M> {
     fn get_snapshot(&self, LogIndex(index): LogIndex) -> std::io::Result<InstallSnapshotParams> {
         let (position, config) = self.node.log().get_position_and_config(index).expect("bug");
         let snapshot = InstallSnapshotParams {
-            node_id: self.node.id().into(),
+            node_id: NodeId(self.node.id()),
             last_included: position.into(),
-            voters: config.voters.iter().map(|n| NodeId::from(*n)).collect(),
-            new_voters: config.new_voters.iter().map(|n| NodeId::from(*n)).collect(),
+            voters: config.voters.iter().copied().map(NodeId).collect(),
+            new_voters: config.new_voters.iter().copied().map(NodeId).collect(),
             machine: serde_json::to_value(&self.machines)?,
         };
         Ok(snapshot)
@@ -451,13 +451,13 @@ impl<M: Machine> Server<M> {
             .handle_snapshot_installed(position, config.clone());
         assert!(success);
         self.commands = self.commands.split_off(&(position.index.get() + 1).into());
-        self.last_applied = self.last_applied.max(position.index.into());
+        self.last_applied = self.last_applied.max(LogIndex(position.index));
 
         if let Some(snapshot) = snapshot {
             if let Some(storage) = &mut self.storage {
                 storage.save_snapshot(snapshot)?;
-                storage.save_current_term(self.node.current_term().into())?;
-                storage.save_voted_for(self.node.voted_for().map(NodeId::from))?;
+                storage.save_current_term(Term(self.node.current_term()))?;
+                storage.save_voted_for(self.node.voted_for().map(NodeId))?;
                 storage.append_entries(self.node.log().entries(), &self.commands)?;
             }
         }
@@ -535,7 +535,7 @@ impl<M: Machine> Server<M> {
         }
 
         caller.node_id = NodeId::SEED;
-        self.node = Node::start(NodeId::SEED.into());
+        self.node = Node::start(NodeId::SEED.0);
         self.node.create_cluster(&[self.node.id()]); // Always succeeds
         self.propose_command(caller, Command::create_cluster(self.addr(), &params), None)?;
 
@@ -585,7 +585,7 @@ impl<M: Machine> Server<M> {
             commit_position
         };
 
-        if caller.node_id == self.node.id().into() {
+        if caller.node_id.0 == self.node.id() {
             if let Some(input) = query_input {
                 self.pending_queries.push(commit_position, (input, caller));
             } else {
@@ -612,12 +612,12 @@ impl<M: Machine> Server<M> {
         };
 
         let request = Request::propose_command(command, query_input, caller);
-        self.broker.send_to(NodeId::from(maybe_leader), &request)?;
+        self.broker.send_to(NodeId(maybe_leader), &request)?;
         Ok(())
     }
 
     fn reply_error(&mut self, caller: Caller, error: ErrorReason) -> std::io::Result<()> {
-        if self.node.id() == caller.node_id.into() {
+        if self.node.id() == caller.node_id.0 {
             self.broker.reply_error(caller, error)
         } else {
             let node_id = caller.node_id;
