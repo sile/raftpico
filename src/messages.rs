@@ -499,18 +499,19 @@ pub enum ErrorReason {
     NoMachineOutput,
     RequestRejected,
     RequestResultUnknown,
+    NoLeader,
 }
 
 impl ErrorReason {
-    pub const ERROR_CODE_CLUSTER_ALREADY_CREATED: ErrorCode = ErrorCode::new(1000);
-    pub const ERROR_CODE_SERVER_ALREADY_ADDED: ErrorCode = ErrorCode::new(1001);
-    pub const ERROR_CODE_NOT_CLUSTER_MEMBER: ErrorCode = ErrorCode::new(1002);
-
-    pub const ERROR_CODE_INVALID_MACHINE_INPUT: ErrorCode = ErrorCode::new(2000);
-    pub const ERROR_CODE_INVALID_MACHINE_OUTPUT: ErrorCode = ErrorCode::new(2001);
-    pub const ERROR_CODE_NO_MACHINE_OUTPUT: ErrorCode = ErrorCode::new(2002);
-    pub const ERROR_CODE_REQUEST_REJECTED: ErrorCode = ErrorCode::new(2003);
-    pub const ERROR_CODE_REQUEST_RESULT_UNKNOWN: ErrorCode = ErrorCode::new(2004);
+    pub const ERROR_CODE_CLUSTER_ALREADY_CREATED: ErrorCode = ErrorCode::new(100);
+    pub const ERROR_CODE_SERVER_ALREADY_ADDED: ErrorCode = ErrorCode::new(101);
+    pub const ERROR_CODE_NOT_CLUSTER_MEMBER: ErrorCode = ErrorCode::new(102);
+    pub const ERROR_CODE_INVALID_MACHINE_INPUT: ErrorCode = ErrorCode::new(103);
+    pub const ERROR_CODE_INVALID_MACHINE_OUTPUT: ErrorCode = ErrorCode::new(104);
+    pub const ERROR_CODE_NO_MACHINE_OUTPUT: ErrorCode = ErrorCode::new(105);
+    pub const ERROR_CODE_REQUEST_REJECTED: ErrorCode = ErrorCode::new(106);
+    pub const ERROR_CODE_REQUEST_RESULT_UNKNOWN: ErrorCode = ErrorCode::new(107);
+    pub const ERROR_CODE_NO_LEADER: ErrorCode = ErrorCode::new(108);
 
     fn code(&self) -> ErrorCode {
         match self {
@@ -522,6 +523,7 @@ impl ErrorReason {
             ErrorReason::NoMachineOutput => Self::ERROR_CODE_NO_MACHINE_OUTPUT,
             ErrorReason::RequestRejected => Self::ERROR_CODE_REQUEST_REJECTED,
             ErrorReason::RequestResultUnknown => Self::ERROR_CODE_REQUEST_RESULT_UNKNOWN,
+            ErrorReason::NoLeader => Self::ERROR_CODE_NO_LEADER,
         }
     }
 
@@ -537,6 +539,7 @@ impl ErrorReason {
             ErrorReason::RequestResultUnknown => {
                 "Request result unknown (it could either be accepted or rejected)"
             }
+            ErrorReason::NoLeader => "No leader in the cluster or not known by the server",
         }
     }
 

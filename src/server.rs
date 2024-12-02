@@ -531,35 +531,42 @@ impl<M: Machine> Server<M> {
         command: Command,
         query_input: Option<serde_json::Value>,
     ) -> std::io::Result<()> {
-        if !self.is_initialized() {
-            if caller.node_id == self.node.id().into() {
-                self.broker
-                    .reply_error(caller, ErrorReason::NotClusterMember)?;
-            } else {
-                todo!("notify 'leader not found' error to the origin node");
-            }
-            return Ok(());
-        }
-        if caller.node_id != self.node.id().into()
-            && !self.machines.system.is_known_node(caller.node_id)
+        if !self.is_initialized()
+            || (!matches!(command, Command::CreateCluster { .. })
+                && !self.machines.system.is_known_node(caller.node_id))
         {
-            todo!();
+            // TODO: maybe direct reply is not possible
+            return self
+                .broker
+                .reply_error(caller, ErrorReason::NotClusterMember);
         }
 
-        if !self.is_leader() {
-            let Some(maybe_leader) = self.node.voted_for().map(NodeId::from) else {
-                todo!("notify this error to the origin node");
-            };
-            if maybe_leader == self.node.id().into() {
-                todo!("notify this error to the origin node");
-            }
-
-            let request = Request::propose_command(command, query_input, caller);
-            self.broker.send_to(maybe_leader, &request)?;
-            return Ok(());
+        if self.is_leader() {
+            self.propose_command_leader(caller, command, query_input)
+        } else {
+            self.propose_command_non_leader(caller, command, query_input)
         }
+    }
 
-        let commit_position = self.propose_command_leader(command);
+    fn propose_command_leader(
+        &mut self,
+        caller: Caller,
+        command: Command,
+        query_input: Option<serde_json::Value>,
+    ) -> std::io::Result<()> {
+        let commit_position = if let Some(position) = matches!(command, Command::Query)
+            .then_some(())
+            .and_then(|()| self.node.actions().append_log_entries.as_ref())
+            .and_then(|entries| (!entries.is_empty()).then(|| entries.last_position()))
+        {
+            // TODO: note comment
+            position.into()
+        } else {
+            let commit_position = LogPosition::from(self.node.propose_command()); // Always succeeds
+            self.commands.insert(commit_position.index, command);
+            commit_position
+        };
+
         if caller.node_id == self.node.id().into() {
             if let Some(input) = query_input {
                 self.pending_queries.push(commit_position, (input, caller));
@@ -576,25 +583,19 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn propose_command_leader(&mut self, command: Command) -> LogPosition {
-        if let Some(promise) = matches!(command, Command::Query)
-            .then_some(())
-            .and_then(|()| self.node.actions().append_log_entries.as_ref())
-            .and_then(|entries| {
-                if entries.is_empty() {
-                    None
-                } else {
-                    Some(entries.last_position())
-                }
-            })
-        {
-            // TODO: note comment
-            return promise.into();
-        }
+    fn propose_command_non_leader(
+        &mut self,
+        caller: Caller,
+        command: Command,
+        query_input: Option<serde_json::Value>,
+    ) -> std::io::Result<()> {
+        let Some(maybe_leader) = self.node.voted_for().take_if(|id| *id != self.node.id()) else {
+            // TODO: maybe direct reply is not possible
+            return self.broker.reply_error(caller, ErrorReason::NoLeader);
+        };
 
-        let position = LogPosition::from(self.node.propose_command()); // Always succeeds
-        self.commands.insert(position.index, command);
-
-        position
+        let request = Request::propose_command(command, query_input, caller);
+        self.broker.send_to(NodeId::from(maybe_leader), &request)?;
+        Ok(())
     }
 }
