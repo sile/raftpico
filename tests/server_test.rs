@@ -34,7 +34,7 @@ impl Machine for Counter {
 #[test]
 fn create_cluster() {
     let mut server = Server::<Counter>::start(auto_addr(), None).expect("start() failed");
-    assert!(server.node().is_none());
+    assert!(!server.is_initialized());
 
     let addr = server.addr();
     let handle = std::thread::spawn(move || {
@@ -51,13 +51,13 @@ fn create_cluster() {
         server.poll(POLL_TIMEOUT).expect("poll() failed");
     }
     assert!(handle.join().is_ok());
-    assert!(server.node().is_some());
+    assert!(server.is_initialized());
 }
 
 #[test]
 fn add_and_remove_server() {
     let mut server0 = Server::<Counter>::start(auto_addr(), None).expect("start() failed");
-    assert!(server0.node().is_none());
+    assert!(!server0.is_initialized());
 
     // Create a cluster.
     let addr0 = server0.addr();
@@ -66,7 +66,7 @@ fn add_and_remove_server() {
     while !handle.is_finished() {
         server0.poll(POLL_TIMEOUT).expect("poll() failed");
     }
-    assert!(server0.node().is_some());
+    assert!(server0.is_initialized());
 
     // Add a server to the cluster.
     let mut server1 = Server::<Counter>::start(auto_addr(), None).expect("start() failed");
@@ -80,7 +80,7 @@ fn add_and_remove_server() {
         server0.poll(POLL_TIMEOUT).expect("poll() failed");
         server1.poll(POLL_TIMEOUT).expect("poll() failed");
     }
-    assert!(server1.node().is_some());
+    assert!(server1.is_initialized());
 
     // Remove server0 from the cluster.
     let handle = std::thread::spawn(move || {
@@ -92,8 +92,8 @@ fn add_and_remove_server() {
         server0.poll(POLL_TIMEOUT).expect("poll() failed");
         server1.poll(POLL_TIMEOUT).expect("poll() failed");
     }
-    assert!(server0.node().is_some());
-    assert!(server1.node().is_some());
+    assert!(server0.is_initialized());
+    assert!(server1.is_initialized());
 }
 
 #[test]
@@ -133,30 +133,30 @@ fn re_election() {
         }
     }
     for server in &servers {
-        assert!(server.node().is_some());
+        assert!(server.is_initialized());
     }
-    assert!(servers[0].node().expect("unreachable").role().is_leader());
+    assert!(servers[0].node().role().is_leader());
 
     // Run until the leader changes.
     for _ in 0..200 {
         for server in servers.iter_mut().skip(1) {
             server.poll(POLL_TIMEOUT).expect("poll() failed");
         }
-        if servers[1].is_leader() || servers[2].is_leader() {
+        if servers[1].node().role().is_leader() || servers[2].node().role().is_leader() {
             break;
         }
     }
-    assert!(servers[1].is_leader() || servers[2].is_leader());
+    assert!(servers[1].node().role().is_leader() || servers[2].node().role().is_leader());
 
     for _ in 0..100 {
         for server in &mut servers {
             server.poll(POLL_TIMEOUT).expect("poll() failed");
         }
-        if !servers[0].is_leader() {
+        if !servers[0].node().role().is_leader() {
             break;
         }
     }
-    assert!(!servers[0].is_leader());
+    assert!(!servers[0].node().role().is_leader());
 }
 
 #[test]
@@ -195,7 +195,7 @@ fn command() {
         }
     }
     for server in &servers {
-        assert!(server.node().is_some());
+        assert!(server.is_initialized());
     }
 
     // Propose commands.
@@ -253,7 +253,7 @@ fn query() {
         }
     }
     for server in &servers {
-        assert!(server.node().is_some());
+        assert!(server.is_initialized());
     }
 
     // Commands & queries
@@ -313,19 +313,15 @@ fn local_query() {
         }
     }
     for server in &servers {
-        assert!(server.node().is_some());
+        assert!(server.is_initialized());
     }
 
     // Local query
-    for (i, server) in servers.iter_mut().enumerate() {
-        server.machine_mut().0 = i;
-    }
-
     let addrs = servers.iter().map(|s| s.addr()).collect::<Vec<_>>();
     let handle = std::thread::spawn(move || {
-        for (i, addr) in addrs.into_iter().enumerate() {
+        for addr in addrs {
             let v: usize = rpc(addr, apply_local_query_req(0));
-            assert_eq!(v, i);
+            assert_eq!(v, 0);
         }
     });
 
@@ -396,7 +392,7 @@ fn snapshot() {
         }
     }
     for server in &servers {
-        assert!(server.node().is_some());
+        assert!(server.is_initialized());
     }
 
     // Propose commands.
@@ -473,7 +469,7 @@ fn storage() {
         }
     }
     for server in &servers {
-        assert!(server.node().is_some());
+        assert!(server.is_initialized());
     }
 
     // Propose commands.
@@ -515,7 +511,7 @@ fn storage() {
             server.poll(POLL_TIMEOUT).expect("poll() failed");
         }
     }
-    assert!(servers.iter().any(|s| s.is_leader()));
+    assert!(servers.iter().any(|s| s.node().role().is_leader()));
 
     for server in &servers {
         assert_eq!(server.machine().0, 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9);

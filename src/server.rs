@@ -25,6 +25,14 @@ use crate::{
 const YEAR: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 
 /// Raft server.
+///
+/// Please use the following JSON-RPC requests to interact with this server:
+/// - [`Request::CreateCluster`]
+/// - [`Request::AddServer`]
+/// - [`Request::RemoveServer`]
+/// - [`Request::Apply`]
+/// - [`Request::TakeSnapshot`]
+/// - [`Request::GetServerState`]
 #[derive(Debug)]
 pub struct Server<M> {
     process_id: u32,
@@ -40,6 +48,9 @@ pub struct Server<M> {
 }
 
 impl<M: Machine> Server<M> {
+    /// Starts a Raft server.
+    ///
+    /// If `storage` holds previous data, the server will load that state.
     pub fn start(
         listen_addr: SocketAddr,
         mut storage: Option<FileStorage>,
@@ -72,22 +83,35 @@ impl<M: Machine> Server<M> {
         })
     }
 
+    /// Returns the address of this server.
     pub fn addr(&self) -> SocketAddr {
         self.broker.listen_addr()
     }
 
-    pub fn node(&self) -> Option<&Node> {
-        (self.node.id() != NodeId::UNINIT.0).then_some(&self.node)
-    }
-
+    /// Returns a reference to the replicated state machine.
     pub fn machine(&self) -> &M {
         &self.machines.user
     }
 
-    pub fn machine_mut(&mut self) -> &mut M {
-        &mut self.machines.user
+    /// Returns an iterator that traverses through the cluster members.
+    pub fn members(&self) -> impl '_ + Iterator<Item = SocketAddr> {
+        self.machines.system.members.values().map(|m| m.addr)
     }
 
+    /// Returns `true` if this server is part of a cluster.
+    ///
+    /// Note that this method will continue to return `true` even if the server is removed from the cluster.
+    /// To completely clear the server's state, you must stop the process and delete the storage data.
+    pub fn is_initialized(&self) -> bool {
+        self.node.id() != NodeId::UNINIT.0
+    }
+
+    /// Returns a reference to the internal raftbare node.
+    pub fn node(&self) -> &Node {
+        &self.node
+    }
+
+    /// Polls and handles I/O events for this server.
     pub fn poll(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
         let timeout = self
             .election_timeout_deadline
@@ -477,10 +501,6 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    fn is_initialized(&self) -> bool {
-        self.node().is_some()
-    }
-
     fn handle_notify_pending_commit_request(
         &mut self,
         params: NotifyPendingCommitParams,
@@ -563,7 +583,7 @@ impl<M: Machine> Server<M> {
         Ok(())
     }
 
-    pub fn is_leader(&self) -> bool {
+    fn is_leader(&self) -> bool {
         self.node.role().is_leader()
     }
 
