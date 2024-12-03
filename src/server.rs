@@ -515,7 +515,7 @@ impl<M: Machine> Server<M> {
         };
         let state = GetServerStateResult {
             addr: self.addr(),
-            node_id: NodeId(self.node.id()),
+            node_id: self.is_initialized().then_some(NodeId(self.node.id())),
             current_term: Term(self.node.current_term()),
             voted_for: self.node.voted_for().map(NodeId),
             role,
@@ -598,7 +598,8 @@ impl<M: Machine> Server<M> {
             .and_then(|()| self.node.actions().append_log_entries.as_ref())
             .and_then(|entries| (!entries.is_empty()).then(|| entries.last_position()))
         {
-            // TODO: note comment
+            // If there are other commands present,
+            // proposing the additional `Command::Query` command is unnecessary.
             position.into()
         } else {
             let commit_position = LogPosition::from(self.node.propose_command()); // Always succeeds
@@ -613,7 +614,10 @@ impl<M: Machine> Server<M> {
                 self.pending_commands.push(commit_position, caller);
             }
         } else {
-            // TODO: add note doc about message reordering
+            // Inform the node that received the RPC request about the commit position.
+            //
+            // Note that in the absence of leader re-elections, this notification is guaranteed
+            // to reach the destination before the log entry is committed.
             let node_id = caller.node_id;
             let request = Request::notify_commit(commit_position, query_input, caller);
             self.broker.send_to(node_id, &request)?;

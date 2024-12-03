@@ -461,7 +461,7 @@ pub struct TakeSnapshotResult {
 #[serde(rename_all = "camelCase")]
 pub struct GetServerStateResult<'a, M> {
     pub addr: SocketAddr,
-    pub node_id: NodeId,
+    pub node_id: Option<NodeId>,
     pub current_term: Term,
     pub voted_for: Option<NodeId>,
     pub role: &'static str,
