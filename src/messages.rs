@@ -459,6 +459,7 @@ pub struct TakeSnapshotResult {
 /// Successful result of [`Request::GetServerState`].
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
 pub struct GetServerStateResult<'a, M> {
     pub addr: SocketAddr,
     pub node_id: Option<NodeId>,
@@ -544,6 +545,7 @@ pub enum ErrorReason {
     NoLeader,
 }
 
+#[allow(missing_docs)]
 impl ErrorReason {
     pub const ERROR_CODE_CLUSTER_ALREADY_CREATED: ErrorCode = ErrorCode::new(100);
     pub const ERROR_CODE_SERVER_ALREADY_ADDED: ErrorCode = ErrorCode::new(101);

@@ -1,3 +1,8 @@
+//! A simple Raft framework for Rust built on top of the [raftbare] crate.
+//!
+//! [raftbare]: https://github.com/sile/raftbare
+#![warn(missing_docs)]
+
 mod broker;
 pub mod command;
 mod machine;

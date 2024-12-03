@@ -114,6 +114,7 @@ impl From<LogIndex> for u64 {
 ///
 /// This struct is the same as [`raftbare::LogPosition`], except that it is serializable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub struct LogPosition {
     pub term: Term,
     pub index: LogIndex,
