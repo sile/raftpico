@@ -368,7 +368,7 @@ pub struct InstallSnapshotParams {
     pub last_included: LogPosition,
     pub voters: Vec<NodeId>,
     pub new_voters: Vec<NodeId>,
-    pub machine: serde_json::Value,
+    pub machines: serde_json::Value,
 }
 
 /// Parameters of [`Request::CreateCluster`].

@@ -443,7 +443,7 @@ impl<M: Machine> Server<M> {
         };
         self.install_snapshot(params.last_included.into(), config, Some(&params))?;
 
-        self.machines = serde_json::from_value(params.machine)?;
+        self.machines = serde_json::from_value(params.machines)?;
         self.broker
             .update_peers(self.machines.system.peers(NodeId(self.node.id())));
 
@@ -460,7 +460,7 @@ impl<M: Machine> Server<M> {
             last_included: position.into(),
             voters: config.voters.iter().copied().map(NodeId).collect(),
             new_voters: config.new_voters.iter().copied().map(NodeId).collect(),
-            machine: serde_json::to_value(&self.machines)?,
+            machines: serde_json::to_value(&self.machines)?,
         };
         Ok(snapshot)
     }

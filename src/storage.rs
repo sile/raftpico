@@ -125,7 +125,7 @@ impl FileStorage {
                     entries = raftbare::LogEntries::new(snapshot.last_included.into());
                     config.voters = snapshot.voters.into_iter().map(|n| n.0).collect();
                     config.new_voters = snapshot.new_voters.into_iter().map(|n| n.0).collect();
-                    machine = Some(serde_json::from_value(snapshot.machine)?);
+                    machine = Some(serde_json::from_value(snapshot.machines)?);
                 }
             }
         }
