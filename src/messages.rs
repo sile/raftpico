@@ -259,7 +259,6 @@ impl LogEntries {
 ///
 /// See also: [`raftbare::Message::AppendEntriesCall`]
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct AppendEntriesCallParams {
     pub header: MessageHeader,
@@ -294,7 +293,6 @@ impl AppendEntriesCallParams {
 ///
 /// See also: [`raftbare::Message::AppendEntriesReply`]
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct AppendEntriesReplyParams {
     pub header: MessageHeader,
@@ -324,7 +322,6 @@ impl AppendEntriesReplyParams {
 ///
 /// See also: [`raftbare::Message::RequestVoteCall`]
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct RequestVoteCallParams {
     pub header: MessageHeader,
@@ -344,7 +341,6 @@ impl RequestVoteCallParams {
 ///
 /// See also: [`raftbare::Message::RequestVoteReply`]
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct RequestVoteReplyParams {
     pub header: MessageHeader,
@@ -364,7 +360,6 @@ impl RequestVoteReplyParams {
 ///
 /// See also: [`raftbare::Action::InstallSnapshot`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct InstallSnapshotParams {
     // [NOTE] Unlike the other fields, this information is specific to a node.
@@ -378,7 +373,6 @@ pub struct InstallSnapshotParams {
 
 /// Parameters of [`Request::CreateCluster`].
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct CreateClusterParams {
     /// Minimum value for the Raft election timeout (default: `100` milliseconds).
     ///
@@ -450,7 +444,6 @@ pub struct ApplyParams {
 
 /// Successful result of [`Request::TakeSnapshot`].
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct TakeSnapshotResult {
     /// Log index where the snapshot was taken.
     pub snapshot_index: LogIndex,
@@ -458,7 +451,6 @@ pub struct TakeSnapshotResult {
 
 /// Successful result of [`Request::GetServerState`].
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct GetServerStateResult<'a, M> {
     pub addr: SocketAddr,
@@ -517,7 +509,6 @@ pub struct ReplyErrorParams {
 
 /// Caller of an RPC request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub struct Caller {
     pub node_id: NodeId,

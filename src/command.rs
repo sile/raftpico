@@ -14,7 +14,6 @@ pub(crate) type Commands = BTreeMap<LogIndex, Command>;
 
 /// Commmand that can be proposed to [`Server`][crate::Server].
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
 pub enum Command {
     /// A command proposed via [`Request::CreateCluster`] API.
