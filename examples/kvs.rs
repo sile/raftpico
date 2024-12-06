@@ -61,7 +61,6 @@ impl Machine for KvsMachine {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 enum KvsInput {
     Put {
         key: String,

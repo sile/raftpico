@@ -8,8 +8,15 @@ raftpico
 
 A simple Raft framework for Rust built on top of the [raftbare](https://github.com/sile/raftbare) crate.
 
+Features
+--------
+
+**WIP**
+
 Example
 -------
+
+**WIP**
 
 ```console
 $ cargo run --example kvs 127.0.0.1:4000
@@ -26,4 +33,28 @@ $ echo '{"jsonrpc":"2.0", "id":0, "method":"AddServer", "params":{"addr":"127.0.
 
 $ echo '{"jsonrpc":"2.0", "id":0, "method":"AddServer", "params":{"addr":"127.0.0.1:4002"}}' | nc -w 1 localhost 4000
 {"jsonrpc":"2.0","id":0,"result":{"members":["127.0.0.1:4000","127.0.0.1:4001","127.0.0.1:4002"]}}
+
+$ echo '{"jsonrpc":"2.0", "id":0, "method":"Apply", "params":{"input":{"Put":{"key":"foo","value":1}}, "kind":"COMMAND"}}' | nc -w 1 localhost 4000
+{"jsonrpc":"2.0","id":0,"result":null}
+
+$ echo '{"jsonrpc":"2.0", "id":0, "method":"Apply", "params":{"input":{"Get":{"key":"foo","value":1}}, "kind":"QUERY"}}' | nc -w 1 localhost 4000
+{"jsonrpc":"2.0","id":0,"result":1}
+```
+
+API
+---
+
+**WIP**
+
+Limitations
+-----------
+
+**WIP**
+
+Benchmark
+---------
+
+```console
+$ rjg --count 100000 --var key='{"$str": ["$alpha", "$alpha", "$alpha"]}' --var put='{"Put": {"key":"$key", "value":"$u32"}}' --var get='{"Get": {"key": "$key"}}' -v delete='{"Delete":{"key":"$key"}}' '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params": {"kind":"COMMAND", "input":{"$oneof": ["$get", "$put", "$delete"]}}}' > requests.jsonl
+$ cat requests.jsonl | jlot stream-call 127.0.0.1:4000 127.0.0.1:4001 127.0.0.1:4002 -a -c 1000 --preread | jlot stats | jq .
 ```
