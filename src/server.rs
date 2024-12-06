@@ -117,7 +117,8 @@ impl<M: Machine> Server<M> {
             .election_timeout_deadline
             .saturating_duration_since(Instant::now())
             .min(timeout.unwrap_or(Duration::MAX));
-        if !self.broker.poll(timeout)? && self.election_timeout_deadline <= Instant::now() {
+        self.broker.poll(timeout)?;
+        if self.election_timeout_deadline <= Instant::now() {
             self.node.handle_election_timeout();
         }
 

@@ -24,6 +24,7 @@ $ cargo run --example kvs 127.0.0.1:4001
 $ cargo run --example kvs 127.0.0.1:4002
 ```
 
+TODO: use jlot
 ```console
 $ echo '{"jsonrpc":"2.0", "id":0, "method":"CreateCluster"}' | nc -w 1 localhost 4000
 {"jsonrpc":"2.0","id":0,"result":{"members":["127.0.0.1:4000"]}}
@@ -53,6 +54,8 @@ Limitations
 
 Benchmark
 ---------
+
+TODO: release build
 
 ```console
 $ rjg --count 100000 --var key='{"$str": ["$alpha", "$alpha", "$alpha"]}' --var put='{"Put": {"key":"$key", "value":"$u32"}}' --var get='{"Get": {"key": "$key"}}' -v delete='{"Delete":{"key":"$key"}}' '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params": {"kind":"COMMAND", "input":{"$oneof": ["$get", "$put", "$delete"]}}}' > requests.jsonl
