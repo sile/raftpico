@@ -56,6 +56,9 @@ impl Machine for KvsMachine {
                 let value = self.entries.remove(&key);
                 ctx.output(&value);
             }
+            KvsInput::List => {
+                ctx.output(&self.entries.keys().collect::<Vec<_>>());
+            }
         }
     }
 }
@@ -72,4 +75,5 @@ enum KvsInput {
     Delete {
         key: String,
     },
+    List,
 }
