@@ -374,12 +374,12 @@ pub struct InstallSnapshotParams {
 /// Parameters of [`Request::CreateCluster`].
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateClusterParams {
-    /// Minimum value for the Raft election timeout (default: `100` milliseconds).
+    /// Minimum value for the Raft election timeout (default: `300` milliseconds).
     ///
     /// See also: [`raftbare::Action::SetElectionTimeout`]
     pub min_election_timeout_ms: u32,
 
-    /// Maximum value for the Raft election timeout (default: `1000` milliseconds).
+    /// Maximum value for the Raft election timeout (default: `2000` milliseconds).
     ///
     /// See also: [`raftbare::Action::SetElectionTimeout`]
     pub max_election_timeout_ms: u32,
