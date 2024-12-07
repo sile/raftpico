@@ -388,8 +388,8 @@ pub struct CreateClusterParams {
 impl Default for CreateClusterParams {
     fn default() -> Self {
         Self {
-            min_election_timeout_ms: 100,
-            max_election_timeout_ms: 1000,
+            min_election_timeout_ms: 300,
+            max_election_timeout_ms: 2000,
         }
     }
 }
