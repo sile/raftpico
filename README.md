@@ -25,19 +25,19 @@ $ cargo run --example kvs 127.0.0.1:4002
 ```
 
 ```console
-$ jlot call :4000 '{"jsonrpc":"2.0", "id":0, "method":"CreateCluster"}'
+$ jlot req CreateCluster | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":{"members":["127.0.0.1:4000"]}}
 
-$ jlot call :4000 '{"jsonrpc":"2.0", "id":0, "method":"AddServer", "params":{"addr":"127.0.0.1:4001"}}'
+$ jlot req AddServer '{"addr":"127.0.0.1:4001"}' | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":{"members":["127.0.0.1:4000","127.0.0.1:4001"]}}
 
-$ jlot call :4000 '{"jsonrpc":"2.0", "id":0, "method":"AddServer", "params":{"addr":"127.0.0.1:4002"}}'
+$ jlot req AddServer '{"addr":"127.0.0.1:4002"}' | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":{"members":["127.0.0.1:4000","127.0.0.1:4001","127.0.0.1:4002"]}}
 
-$ jlot call :4000 '{"jsonrpc":"2.0", "id":0, "method":"Apply", "params":{"input":{"Put":{"key":"foo","value":1}}, "kind":"COMMAND"}}'
+$ jlot req Apply '{"input":{"Put":{"key":"foo","value":1}}, "kind":"Command"}' | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":null}
 
-$ jlot call :4000 '{"jsonrpc":"2.0", "id":0, "method":"Apply", "params":{"input":{"Get":{"key":"foo","value":1}}, "kind":"QUERY"}}'
+$ jlot req Apply '{"input":{"Get":{"key":"foo","value":1}}, "kind":"Query"}' | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":1}
 ```
 
@@ -64,7 +64,7 @@ Benchmark
 TODO: release build
 
 ```console
-$ jlot call :4000 (jlot req CreateCluster) (jlot req AddServer '{"addr":"127.0.0.1:4001"}') (jlot req AddServer '{"addr":"127.0.0.1:4002"}')
+$ echo -e $(jlot req CreateCluster) '\n' $(jlot req AddServer '{"addr":"127.0.0.1:4001"}') '\n' $(jlot req AddServer '{"addr":"127.0.0.1:4002"}') | jlot call :4000
 
 $ rjg --count 100000 --var key='{"$str": ["$alpha", "$alpha", "$alpha"]}' --var put='{"Put": {"key":"$key", "value":"$u32"}}' --var get='{"Get": {"key": "$key"}}' -v delete='{"Delete":{"key":"$key"}}' '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params": {"kind":"Command", "input":{"$oneof": ["$get", "$put", "$delete"]}}}' > requests.jsonl
 $ cat requests.jsonl | jlot stream-call :4000 :4001 :4002 -ab -c 1000 | jlot stats | jq .
