@@ -27,7 +27,7 @@ fn main() -> std::io::Result<()> {
 
         let term = server.node().current_term().get();
         let role = server.node().role();
-        if prev_term_role != Some((term, role)) {
+        if server.is_initialized() && prev_term_role != Some((term, role)) {
             eprintln!("Raft term or role has changed: term={term}, role={role:?}");
             prev_term_role = Some((term, role));
         }
@@ -61,7 +61,6 @@ impl Machine for KvsMachine {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 enum KvsInput {
     Put {
         key: String,

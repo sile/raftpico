@@ -134,10 +134,10 @@ impl MessageBroker {
         Ok(())
     }
 
-    pub fn poll(&mut self, timeout: Duration) -> std::io::Result<bool> {
+    pub fn poll(&mut self, timeout: Duration) -> std::io::Result<()> {
         self.poller.poll(&mut self.events, Some(timeout))?;
         if self.events.is_empty() {
-            return Ok(false);
+            return Ok(());
         }
 
         for event in self.events.iter() {
@@ -151,7 +151,7 @@ impl MessageBroker {
             }
         }
 
-        Ok(true)
+        Ok(())
     }
 
     pub fn try_recv_request(&mut self) -> Option<(ClientId, Request)> {

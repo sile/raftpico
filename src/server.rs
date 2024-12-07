@@ -117,7 +117,8 @@ impl<M: Machine> Server<M> {
             .election_timeout_deadline
             .saturating_duration_since(Instant::now())
             .min(timeout.unwrap_or(Duration::MAX));
-        if !self.broker.poll(timeout)? && self.election_timeout_deadline <= Instant::now() {
+        self.broker.poll(timeout)?;
+        if self.election_timeout_deadline <= Instant::now() {
             self.node.handle_election_timeout();
         }
 
@@ -443,7 +444,7 @@ impl<M: Machine> Server<M> {
         };
         self.install_snapshot(params.last_included.into(), config, Some(&params))?;
 
-        self.machines = serde_json::from_value(params.machine)?;
+        self.machines = serde_json::from_value(params.machines)?;
         self.broker
             .update_peers(self.machines.system.peers(NodeId(self.node.id())));
 
@@ -460,7 +461,7 @@ impl<M: Machine> Server<M> {
             last_included: position.into(),
             voters: config.voters.iter().copied().map(NodeId).collect(),
             new_voters: config.new_voters.iter().copied().map(NodeId).collect(),
-            machine: serde_json::to_value(&self.machines)?,
+            machines: serde_json::to_value(&self.machines)?,
         };
         Ok(snapshot)
     }
@@ -483,7 +484,9 @@ impl<M: Machine> Server<M> {
                 storage.save_snapshot(snapshot)?;
                 storage.save_current_term(Term(self.node.current_term()))?;
                 storage.save_voted_for(self.node.voted_for().map(NodeId))?;
-                storage.append_entries(self.node.log().entries(), &self.commands)?;
+                if !self.node.log().entries().is_empty() {
+                    storage.append_entries(self.node.log().entries(), &self.commands)?;
+                }
             }
         }
 
