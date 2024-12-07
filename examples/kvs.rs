@@ -19,7 +19,8 @@ fn main() -> std::io::Result<()> {
         .map(|path| FileStorage::new(path))
         .transpose()?;
     let mut server = Server::<KvsMachine>::start(args.listen_addr, storage)?;
-    eprintln!("Raft server has started: {}", server.addr());
+    let addr = server.addr();
+    eprintln!("[{addr}] Raft server has started");
 
     let mut prev_term_role = None;
     loop {
@@ -28,7 +29,7 @@ fn main() -> std::io::Result<()> {
         let term = server.node().current_term().get();
         let role = server.node().role();
         if server.is_initialized() && prev_term_role != Some((term, role)) {
-            eprintln!("Raft term or role has changed: term={term}, role={role:?}");
+            eprintln!("[{addr}] Raft term or role has changed: term={term}, role={role:?}");
             prev_term_role = Some((term, role));
         }
     }
