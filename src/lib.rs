@@ -1,6 +1,9 @@
 //! A simple Raft framework for Rust built on top of the [raftbare] crate.
 //!
+//! For more information, please refer to the [README.md].
+//!
 //! [raftbare]: https://github.com/sile/raftbare
+//! [README.md]: https://github.com/sile/raftpico
 #![warn(missing_docs)]
 
 mod broker;
