@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Parser)]
 struct Args {
     listen_addr: SocketAddr,
-
-    #[clap(long)]
     storage_file: Option<PathBuf>,
 }
 
