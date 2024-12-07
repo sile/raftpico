@@ -19,9 +19,9 @@ Example
 **WIP**
 
 ```console
-$ cargo run --example kvs 127.0.0.1:4000
-$ cargo run --example kvs 127.0.0.1:4001
-$ cargo run --example kvs 127.0.0.1:4002
+$ cargo run --release --example kvs 127.0.0.1:4000
+$ cargo run --release --example kvs 127.0.0.1:4001
+$ cargo run --release --example kvs 127.0.0.1:4002
 ```
 
 ```console
@@ -60,8 +60,6 @@ Limitations
 
 Benchmark
 ---------
-
-TODO: release build
 
 ```console
 $ echo -e $(jlot req CreateCluster) '\n' $(jlot req AddServer '{"addr":"127.0.0.1:4001"}') '\n' $(jlot req AddServer '{"addr":"127.0.0.1:4002"}') | jlot call :4000
