@@ -51,6 +51,13 @@ Limitations
 
 **WIP**
 
+- Single thread
+  - Thus, ...
+- JSON-RPC
+  - Thus, ...
+- Copy of the log entries in the memory
+  - Thus, ...
+
 Benchmark
 ---------
 
