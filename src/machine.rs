@@ -69,7 +69,6 @@ impl ApplyContext<'_> {
 /// If the kind is not [`ApplyKind::Command`],
 /// the state machine must not be updated while executing [`Machine::apply()`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ApplyKind {
     /// Commands are executed on all servers in the cluster.
     Command,
