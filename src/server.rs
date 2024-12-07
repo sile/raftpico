@@ -484,7 +484,9 @@ impl<M: Machine> Server<M> {
                 storage.save_snapshot(snapshot)?;
                 storage.save_current_term(Term(self.node.current_term()))?;
                 storage.save_voted_for(self.node.voted_for().map(NodeId))?;
-                storage.append_entries(self.node.log().entries(), &self.commands)?;
+                if !self.node.log().entries().is_empty() {
+                    storage.append_entries(self.node.log().entries(), &self.commands)?;
+                }
             }
         }
 
