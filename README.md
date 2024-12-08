@@ -34,10 +34,11 @@ Features
 [`GetServerState`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.GetServerState
 [`Machine`]: https://docs.rs/raftpico/latest/raftpico/trait.Machine.html
 
-Key-Value Store Example
------------------------
+Example: Key-Value Store
+------------------------
 
-[examples/kvs.rs](examples/kvs.rs)
+The code snippets provided below are from [examples/kvs.rs](examples/kvs.rs) and
+demonstrate the implementation of a key-value store (KVS) using `raftpico`:
 
 ```rust
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -78,25 +79,38 @@ enum KvsInput {
 }
 ```
 
-**WIP**
+First, launch two KVS servers to form the cluster:
 
 ```console
+/// Start a KVS server in one terminal.
 $ cargo run --release --example kvs 127.0.0.1:4000
+
+/// Start another KVS server in a different terminal.
 $ cargo run --release --example kvs 127.0.0.1:4001
 ```
 
+To set up a Raft cluster, run the following commands:
 ```console
+$ cargo install jlot
+
+// Initialize a Raft cluster with a server.
 $ jlot req CreateCluster | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":{"members":["127.0.0.1:4000"]}}
 
+// Add an additional server to the cluster.
 $ jlot req AddServer '{"addr":"127.0.0.1:4001"}' | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":{"members":["127.0.0.1:4000","127.0.0.1:4001"]}}
+```
 
-$ jlot req Apply '{"input":{"Put":{"key":"foo","value":1}}, "kind":"Command"}' | jlot call :4000
+To perform operations on the replicated state machine, use an `Apply` request as demonstrated below:
+```console
+// Insert an entry into the KVS.
+$ jlot req Apply '{"input":{"Put":["foo", 123]}, "kind":"Command"}' | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":null}
 
-$ jlot req Apply '{"input":{"Get":{"key":"foo","value":1}}, "kind":"Query"}' | jlot call :4000
-{"jsonrpc":"2.0","id":0,"result":1}
+// Retrieve the value of the previously inserted entry.
+$ jlot req Apply '{"input":{"Get":"foo"}, "kind":"Query"}' | jlot call :4000
+{"jsonrpc":"2.0","id":0,"result":123}
 ```
 
 Limitations
