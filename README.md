@@ -11,7 +11,7 @@ A simple Raft framework for Rust built on top of the [raftbare](https://github.c
 Features
 --------
 
-- **JSON-RPC API**: The framework exposes a JSON-RPC API for various operations including:
+- **JSON-RPC API**: The framework exposes a [JSON-RPC] API for various operations including:
   - [`CreateCluster`]: Initialize a new Raft cluster.
   - [`AddServer`]: Add a new server to the cluster.
   - [`RemoveServer`]: Remove a server from the cluster.
@@ -20,8 +20,10 @@ Features
   - [`GetServerState`]: Retrieve the current state of an individual server.
 - **Custom State Machines**: Provides a [`Machine`] trait that users can implement to define their own state machines that will be replicated across the Raft cluster.
 - **Simple Codebase**: Designed to be easily understandable and modifiable, enabling users to add their own features with ease.
-- **Serialization**: Utilizes JSON Lines as the serialization format for persistent storage and communication between servers, offering simplicity and human-readability.
+- **Serialization**: Utilizes [JSON Lines] as the serialization format for persistent storage and communication between servers, offering simplicity and human-readability.
 
+[JSON-RCP]: https://www.jsonrpc.org/specification
+[JSON Lines]: https://jsonlines.org/
 [`CreateCluster`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.CreateCluster
 [`AddServer`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.AddServer
 [`RemoveServer`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.RemoveServer
