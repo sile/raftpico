@@ -60,11 +60,13 @@ impl<M: Machine> Server<M> {
         let mut machines = Machines::default();
         let mut node = Node::start(NodeId::UNINIT.0);
 
+        let mut timeout = YEAR;
         if let Some(storage) = &mut storage {
             if let Some(loaded) = storage.load(&mut commands)? {
                 node = loaded.0;
                 machines = loaded.1;
                 broker.update_peers(machines.system.peers(NodeId(node.id())));
+                timeout = machines.system.gen_election_timeout(node.role());
             }
         }
 
@@ -75,7 +77,7 @@ impl<M: Machine> Server<M> {
             node,
             storage,
             commands,
-            election_timeout_deadline: Instant::now() + YEAR,
+            election_timeout_deadline: Instant::now() + timeout,
             last_applied,
             pending_commands: PendingQueue::new(true),
             pending_queries: PendingQueue::new(false),
