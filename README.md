@@ -140,16 +140,9 @@ In summary, `raftpico` is not suitable for the following purposes:
 Benchmark
 ---------
 
-```console
-$ parallel -u ::: 'cargo run --release --example kvs 127.0.0.1:4000 kvs-4000.jsonl' \
-                  'cargo run --release --example kvs 127.0.0.1:4001 kvs-4001.jsonl' \
-                  'cargo run --release --example kvs 127.0.0.1:4002 kvs-4002.jsonl'
+This is a casual benchmark of the above example KVS server.
 
-$ echo $(jlot req CreateCluster) \
-       $(jlot req AddServer '{"addr":"127.0.0.1:4001"}') \
-       $(jlot req AddServer '{"addr":"127.0.0.1:4002"}') | jlot call :4000
-```
-
+Environment:
 ```console
 $ lsb_release -a
 No LSB modules are available.
@@ -163,13 +156,29 @@ model name      : AMD EPYC 7763 64-Core Processor
 
 $ cat /proc/cpuinfo | grep 'model name' | wc -l
 8
+```
 
+Create a KVS cluster with three nodes:
+```console
+$ parallel -u ::: 'cargo run --release --example kvs 127.0.0.1:4000 kvs-4000.jsonl' \
+                  'cargo run --release --example kvs 127.0.0.1:4001 kvs-4001.jsonl' \
+                  'cargo run --release --example kvs 127.0.0.1:4002 kvs-4002.jsonl'
+
+$ echo $(jlot req CreateCluster) \
+       $(jlot req AddServer '{"addr":"127.0.0.1:4001"}') \
+       $(jlot req AddServer '{"addr":"127.0.0.1:4002"}') | jlot call :4000
+```
+
+`Put` command benchmark:
+```console
+// Generate 100,000 random requests.
 $ cargo install rjg
-
 $ rjg --count 100000 \
       --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
       --var params='{"kind":"Command", "input":{"Put":["$key", "$u32"]}}' \
       '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > commands.jsonl
+
+// Execute the requests with a concurrency of 1000.
 $ cat commands.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
 {
   "rpc_calls": 100000,
@@ -187,11 +196,15 @@ $ cat commands.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq 
 }
 ```
 
+`Get` query (consistent query) benchmark:
 ```console
+// Generate 100,000 random requests.
 $ rjg --count 100000 \
       --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
       --var params='{"kind":"Query", "input":{"Get":"$key"}}' \
       '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > queries.jsonl
+
+// Execute the requests with a concurrency of 1000.
 $ cat queries.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
 {
   "rpc_calls": 100000,
@@ -209,11 +222,15 @@ $ cat queries.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
 }
 ```
 
+`Get` local query benchmark:
 ```console
+// Generate 100,000 random requests.
 $ rjg --count 100000 \
       --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
       --var params='{"kind":"LocalQuery", "input":{"Get":"$key"}}' \
       '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > local-queries.jsonl
+
+// Execute the requests with a concurrency of 1000.
 $ cat local-queries.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
 {
   "rpc_calls": 100000,
