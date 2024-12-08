@@ -127,6 +127,7 @@ Limitations
 - **Single-Threaded Server**:
   - Currently, [`Server`] does not utilize multi-threading.
   - Consequently, intensive tasks like handling large snapshots can block the server's running thread.
+    - To make matters worse, `raftpico` processes an entire snapshot all at once instead of breaking it into smaller chunks.
 - **In-Memory Log Entries**:
   - To maintain simplicity and minimize storage reads, `raftpico` also keeps log entries in memory.
   - This means memory usage increases with each proposed command until the next snapshot is taken.
