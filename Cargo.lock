@@ -252,7 +252,7 @@ checksum = "4c3656def8264d8d4461813070f0ed26159dbb9aba235cd2193768a90f1cde04"
 
 [[package]]
 name = "raftpico"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "jsonlrpc",
