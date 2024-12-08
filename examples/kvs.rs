@@ -43,15 +43,15 @@ impl Machine for KvsMachine {
 
     fn apply(&mut self, ctx: &mut ApplyContext, input: Self::Input) {
         match input {
-            KvsInput::Put { key, value } => {
+            KvsInput::Put(key, value) => {
                 let value = self.entries.insert(key, value);
                 ctx.output(&value);
             }
-            KvsInput::Get { key } => {
+            KvsInput::Get(key) => {
                 let value = self.entries.get(&key);
                 ctx.output(&value);
             }
-            KvsInput::Delete { key } => {
+            KvsInput::Delete(key) => {
                 let value = self.entries.remove(&key);
                 ctx.output(&value);
             }
@@ -64,15 +64,8 @@ impl Machine for KvsMachine {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum KvsInput {
-    Put {
-        key: String,
-        value: serde_json::Value,
-    },
-    Get {
-        key: String,
-    },
-    Delete {
-        key: String,
-    },
+    Put(String, serde_json::Value),
+    Get(String),
+    Delete(String),
     List,
 }
