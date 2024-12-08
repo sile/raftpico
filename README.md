@@ -6,7 +6,9 @@ raftpico
 [![Actions Status](https://github.com/sile/raftpico/workflows/CI/badge.svg)](https://github.com/sile/raftpico/actions)
 ![License](https://img.shields.io/crates/l/raftpico)
 
-A simple Raft framework for Rust built on top of the [raftbare](https://github.com/sile/raftbare) crate.
+A simple [Raft] framework for Rust built on top of the [raftbare](https://github.com/sile/raftbare) crate.
+
+[Raft]: https://raft.github.io/
 
 Features
 --------
@@ -20,7 +22,7 @@ Features
   - [`GetServerState`]: Retrieve the current state of an individual server.
 - **Custom State Machines**: Provides a [`Machine`] trait that users can implement to define their own state machines that will be replicated across the Raft cluster.
 - **Simple Codebase**: Designed to be easily understandable and modifiable, enabling users to add their own features with ease.
-- **Serialization**: Utilizes [JSON Lines] as the serialization format for persistent storage and communication between servers, offering simplicity and human-readability.
+- **JSON Serialization**: Utilizes [JSON Lines] as the serialization format for persistent storage and communication between servers, offering simplicity and human-readability.
 
 [JSON-RPC]: https://www.jsonrpc.org/specification
 [JSON Lines]: https://jsonlines.org/
@@ -74,7 +76,7 @@ Limitations
 - **Single Threaded Server**:
   - Currently, a `Server` does not facilitate multi-thread.
   - It's not sure but some heavy workload such as snapshot handling can be offloaded to a non main thread.
-- **On Memory Log Entries*:
+- **On Memory Log Entries**:
   - Thus, ...
   
 In other words, `raftpico` is not suited for the following purposes:
