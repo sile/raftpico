@@ -66,22 +66,25 @@ Limitations
 -----------
 
 - **JSON Serialization**:
-  - Obviously, JSON is not the best efficient format for storage and internal communications.
-    - Especially, if the replicated state machine (or input / output of that machine) contains BLOBs.
-  - Although such demerit exists, as the primary focus of `raftpico` is simplicity and readability, it inrendedly adopts JSON.
-    - However, the performance of `raftpico` seems sufficient for many usecases (see the [Benchmark](#Benchmark) section).
+  - JSON is evidently not the most efficient format for storage and internal communication.
+    - This is particularly true if the replicated state machine (or its input/output) includes BLOBs.
+  - Despite this drawback, `raftpico` intentionally uses JSON due to its emphasis on simplicity and readability.
+    - Besides, the performance of `raftpico` appears adequate for many use cases (see the [Benchmark](#Benchmark) section).
 - **JSON-RPC (over TCP) API**:
-  - This incurrs unnecessary overhead if the Raft server runs on the same process with the client.
-  - [NOTE] To add methods such as `Server::apply()` would be easy though.
-- **Single Threaded Server**:
-  - Currently, a `Server` does not facilitate multi-thread.
-  - It's not sure but some heavy workload such as snapshot handling can be offloaded to a non main thread.
-- **On Memory Log Entries**:
-  - Thus, ...
-  
-In other words, `raftpico` is not suited for the following purposes:
-- Large BLOBs that inefficient to seriarize using JSON 
-- Large state machine that is too costly to take the snapshot
+  - When the Raft server runs in the same process as the client, this can introduce unnecessary overhead.
+  - [NOTE] Adding methods such as `Server::apply()` would be straightforward.
+- **Single-Threaded Server**:
+  - Currently, [`Server`] does not utilize multi-threading.
+  - Consequently, intensive tasks like handling large snapshots can block the server's running thread.
+- **In-Memory Log Entries**:
+  - To maintain simplicity and minimize storage reads, `raftpico` also keeps log entries in memory.
+  - This means memory usage increases with each proposed command until the next snapshot is taken.
+
+In summary, `raftpico` is not suitable for the following purposes:
+- Processing large BLOBs that are inefficient to serialize using JSON
+- Managing large state machines where taking snapshots is prohibitively costly
+
+[`Server`]: https://docs.rs/raftpico/latest/raftpico/struct.Server.html
 
 Benchmark
 ---------
