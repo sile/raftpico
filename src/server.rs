@@ -532,9 +532,9 @@ impl<M: Machine> Server<M> {
 
     fn handle_get_server_state_request(&mut self, caller: Caller) -> std::io::Result<()> {
         let role = match self.node.role() {
-            raftbare::Role::Follower => "FOLLOWER",
-            raftbare::Role::Candidate => "CANDIDATE",
-            raftbare::Role::Leader => "LEADER",
+            raftbare::Role::Follower => "Follower",
+            raftbare::Role::Candidate => "Candidate",
+            raftbare::Role::Leader => "Leader",
         };
         let state = GetServerStateResult {
             addr: self.addr(),
