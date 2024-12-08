@@ -34,15 +34,58 @@ Features
 [`GetServerState`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.GetServerState
 [`Machine`]: https://docs.rs/raftpico/latest/raftpico/trait.Machine.html
 
-Example
--------
+Key-Value Store Example
+-----------------------
+
+[examples/kvs.rs](examples/kvs.rs)
+
+```rust
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct KvsMachine {
+    entries: HashMap<String, serde_json::Value>,
+}
+
+impl Machine for KvsMachine {
+    type Input = KvsInput;
+
+    fn apply(&mut self, ctx: &mut ApplyContext, input: Self::Input) {
+        match input {
+            KvsInput::Put { key, value } => {
+                let value = self.entries.insert(key, value);
+                ctx.output(&value);
+            }
+            KvsInput::Get { key } => {
+                let value = self.entries.get(&key);
+                ctx.output(&value);
+            }
+            KvsInput::Delete { key } => {
+                let value = self.entries.remove(&key);
+                ctx.output(&value);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum KvsInput {
+    Put {
+        key: String,
+        value: serde_json::Value,
+    },
+    Get {
+        key: String,
+    },
+    Delete {
+        key: String,
+    },
+}
+```
 
 **WIP**
 
 ```console
 $ cargo run --release --example kvs 127.0.0.1:4000
 $ cargo run --release --example kvs 127.0.0.1:4001
-$ cargo run --release --example kvs 127.0.0.1:4002
 ```
 
 ```console
@@ -51,9 +94,6 @@ $ jlot req CreateCluster | jlot call :4000
 
 $ jlot req AddServer '{"addr":"127.0.0.1:4001"}' | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":{"members":["127.0.0.1:4000","127.0.0.1:4001"]}}
-
-$ jlot req AddServer '{"addr":"127.0.0.1:4002"}' | jlot call :4000
-{"jsonrpc":"2.0","id":0,"result":{"members":["127.0.0.1:4000","127.0.0.1:4001","127.0.0.1:4002"]}}
 
 $ jlot req Apply '{"input":{"Put":{"key":"foo","value":1}}, "kind":"Command"}' | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":null}
