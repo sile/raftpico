@@ -156,22 +156,25 @@ $ cat /proc/cpuinfo
 
 $ cargo install rjg
 
-$ rjg --count 100000 --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
-                     --var params='{"kind":"Command", "input":{"Put":["$key", "$u32"]}}' \
-                     '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > commands.jsonl
-$ cat commands.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
+$ rjg --count 100000 \
+      --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
+      --var params='{"kind":"Command", "input":{"Put":["$key", "$u32"]}}' \
+      '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > commands.jsonl
+$ cat commands.jsonl | jlot call :4000 :4001 :4002 -a -c 5000 | jlot stats | jq .
 ```
 
 ```console
-$ rjg --count 100000 --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
-                     --var params='{"kind":"Query", "input":{"Get":"$key"}}' \
-                     '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > queries.jsonl
-$ cat queries.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
+$ rjg --count 100000 \
+      --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
+      --var params='{"kind":"Query", "input":{"Get":"$key"}}' \
+      '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > queries.jsonl
+$ cat queries.jsonl | jlot call :4000 :4001 :4002 -a -c 5000 | jlot stats | jq .
 ```
 
 ```console
-$ rjg --count 100000 --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
-                     --var params='{"kind":"LocalQuery", "input":{"Get":"$key"}}' \
-                     '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > local-queries.jsonl
-$ cat local-queries.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
+$ rjg --count 100000 \
+      --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
+      --var params='{"kind":"LocalQuery", "input":{"Get":"$key"}}' \
+      '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > local-queries.jsonl
+$ cat local-queries.jsonl | jlot call :4000 :4001 :4002 -a -c 5000 | jlot stats | jq .
 ```
