@@ -60,22 +60,26 @@ $ jlot req Apply '{"input":{"Get":{"key":"foo","value":1}}, "kind":"Query"}' | j
 {"jsonrpc":"2.0","id":0,"result":1}
 ```
 
-API
----
-
-**WIP**
-
 Limitations
 -----------
 
-**WIP**
-
-- Single thread
+- **JSON Serialization**:
+  - Obviously, JSON is not the best efficient format for storage and internal communications.
+    - Especially, if the replicated state machine (or input / output of that machine) contains BLOBs.
+  - Although such demerit exists, as the primary focus of `raftpico` is simplicity and readability, it inrendedly adopts JSON.
+    - However, the performance of `raftpico` seems sufficient for many usecases (see the [Benchmark](#Benchmark) section).
+- **JSON-RPC (over TCP) API**:
+  - This incurrs unnecessary overhead if the Raft server runs on the same process with the client.
+  - [NOTE] To add methods such as `Server::apply()` would be easy though.
+- **Single Threaded Server**:
+  - Currently, a `Server` does not facilitate multi-thread.
+  - It's not sure but some heavy workload such as snapshot handling can be offloaded to a non main thread.
+- **On Memory Log Entries*:
   - Thus, ...
-- JSON-RPC
-  - Thus, ...
-- Copy of the log entries in the memory
-  - Thus, ...
+  
+In other words, `raftpico` is not suited for the following purposes:
+- Large BLOBs that inefficient to seriarize using JSON 
+- Large state machine that is too costly to take the snapshot
 
 Benchmark
 ---------
