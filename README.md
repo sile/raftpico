@@ -22,7 +22,7 @@ Features
 - **Simple Codebase**: Designed to be easily understandable and modifiable, enabling users to add their own features with ease.
 - **Serialization**: Utilizes [JSON Lines] as the serialization format for persistent storage and communication between servers, offering simplicity and human-readability.
 
-[JSON-RCP]: https://www.jsonrpc.org/specification
+[JSON-RPC]: https://www.jsonrpc.org/specification
 [JSON Lines]: https://jsonlines.org/
 [`CreateCluster`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.CreateCluster
 [`AddServer`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.AddServer
