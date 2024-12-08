@@ -151,8 +151,18 @@ $ echo $(jlot req CreateCluster) \
 ```
 
 ```console
-$ uname -a
-$ cat /proc/cpuinfo
+$ lsb_release -a
+No LSB modules are available.
+Distributor ID: Ubuntu
+Description:    Ubuntu 20.04.6 LTS
+Release:        20.04
+Codename:       focal
+
+$ cat /proc/cpuinfo | grep 'model name' | head -1
+model name      : AMD EPYC 7763 64-Core Processor
+
+$ cat /proc/cpuinfo | grep 'model name' | wc -l
+8
 
 $ cargo install rjg
 
@@ -160,7 +170,21 @@ $ rjg --count 100000 \
       --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
       --var params='{"kind":"Command", "input":{"Put":["$key", "$u32"]}}' \
       '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > commands.jsonl
-$ cat commands.jsonl | jlot call :4000 :4001 :4002 -a -c 5000 | jlot stats | jq .
+$ cat commands.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
+{
+  "rpc_calls": 100000,
+  "duration": 1.874101709,
+  "max_concurrency": 1000,
+  "rps": 53358.896969022506,
+  "latency": {
+    "min": 0.003427635,
+    "p25": 0.015225686,
+    "p50": 0.018969559,
+    "p75": 0.02225708,
+    "max": 0.037078306,
+    "avg": 0.018675618
+  }
+}
 ```
 
 ```console
@@ -168,7 +192,21 @@ $ rjg --count 100000 \
       --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
       --var params='{"kind":"Query", "input":{"Get":"$key"}}' \
       '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > queries.jsonl
-$ cat queries.jsonl | jlot call :4000 :4001 :4002 -a -c 5000 | jlot stats | jq .
+$ cat queries.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
+{
+  "rpc_calls": 100000,
+  "duration": 1.362893895,
+  "max_concurrency": 1000,
+  "rps": 73373.28339855833,
+  "latency": {
+    "min": 0.002436916,
+    "p25": 0.01140849,
+    "p50": 0.014045573,
+    "p75": 0.01576976,
+    "max": 0.024304805,
+    "avg": 0.013583492
+  }
+}
 ```
 
 ```console
@@ -176,5 +214,19 @@ $ rjg --count 100000 \
       --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
       --var params='{"kind":"LocalQuery", "input":{"Get":"$key"}}' \
       '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > local-queries.jsonl
-$ cat local-queries.jsonl | jlot call :4000 :4001 :4002 -a -c 5000 | jlot stats | jq .
+$ cat local-queries.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
+{
+  "rpc_calls": 100000,
+  "duration": 0.410423888,
+  "max_concurrency": 993,
+  "rps": 243650.53527293712,
+  "latency": {
+    "min": 0.000639122,
+    "p25": 0.003991307,
+    "p50": 0.004037483,
+    "p75": 0.00421849,
+    "max": 0.004560348,
+    "avg": 0.004078114
+  }
+}
 ```
