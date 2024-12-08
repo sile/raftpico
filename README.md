@@ -108,8 +108,8 @@ To perform operations on the replicated state machine, use an `Apply` request as
 $ jlot req Apply '{"input":{"Put":["foo", 123]}, "kind":"Command"}' | jlot call :4000
 {"jsonrpc":"2.0","id":0,"result":null}
 
-// Retrieve the value of the previously inserted entry.
-$ jlot req Apply '{"input":{"Get":"foo"}, "kind":"Query"}' | jlot call :4000
+// Retrieve the value of the previously inserted entry from another server.
+$ jlot req Apply '{"input":{"Get":"foo"}, "kind":"Query"}' | jlot call :4001
 {"jsonrpc":"2.0","id":0,"result":123}
 ```
 
@@ -141,10 +141,37 @@ Benchmark
 ---------
 
 ```console
-$ parallel -u ::: 'cargo run --release --example kvs 127.0.0.1:4000' 'cargo run --release --example kvs 127.0.0.1:4001' 'cargo run --release --example kvs 127.0.0.1:4001'
+$ parallel -u ::: 'cargo run --release --example kvs 127.0.0.1:4000 kvs-4000.jsonl' \
+                  'cargo run --release --example kvs 127.0.0.1:4001 kvs-4001.jsonl' \
+                  'cargo run --release --example kvs 127.0.0.1:4002 kvs-4002.jsonl'
 
-$ echo $(jlot req CreateCluster) $(jlot req AddServer '{"addr":"127.0.0.1:4001"}') $(jlot req AddServer '{"addr":"127.0.0.1:4002"}') | jlot call :4000
+$ echo $(jlot req CreateCluster) \
+       $(jlot req AddServer '{"addr":"127.0.0.1:4001"}') \
+       $(jlot req AddServer '{"addr":"127.0.0.1:4002"}') | jlot call :4000
+```
 
-$ rjg --count 100000 --var key='{"$str": ["$alpha", "$alpha", "$alpha"]}' --var put='{"Put": {"key":"$key", "value":"$u32"}}' --var get='{"Get": {"key": "$key"}}' -v delete='{"Delete":{"key":"$key"}}' '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params": {"kind":"Command", "input":{"$oneof": ["$get", "$put", "$delete"]}}}' > requests.jsonl
-$ cat requests.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
+```console
+$ uname -a
+$ cat /proc/cpuinfo
+
+$ cargo install rjg
+
+$ rjg --count 100000 --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
+                     --var params='{"kind":"Command", "input":{"Put":["$key", "$u32"]}}' \
+                     '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > commands.jsonl
+$ cat commands.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
+```
+
+```console
+$ rjg --count 100000 --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
+                     --var params='{"kind":"Query", "input":{"Get":"$key"}}' \
+                     '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > queries.jsonl
+$ cat queries.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
+```
+
+```console
+$ rjg --count 100000 --var key='{"$str":["$alpha", "$alpha", "$alpha"]}' \
+                     --var params='{"kind":"LocalQuery", "input":{"Get":"$key"}}' \
+                     '{"jsonrpc":"2.0", "id":"$i", "method":"Apply", "params":"$params"}' > local-queries.jsonl
+$ cat local-queries.jsonl | jlot call :4000 :4001 :4002 -a -c 1000 | jlot stats | jq .
 ```
