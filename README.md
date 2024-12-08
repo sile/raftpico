@@ -11,7 +11,24 @@ A simple Raft framework for Rust built on top of the [raftbare](https://github.c
 Features
 --------
 
-**WIP**
+- **JSON-RPC API**: The framework exposes a JSON-RPC API for various operations including:
+  - [`CreateCluster`]: Initialize a new Raft cluster.
+  - [`AddServer`]: Add a new server to the cluster.
+  - [`RemoveServer`]: Remove a server from the cluster.
+  - [`Apply`]: Submit a command, perform a consistent query, or execute a local query on the state machine.
+  - [`TakeSnapshot`]: Trigger a snapshot of the current state.
+  - [`GetServerState`]: Retrieve the current state of an individual server.
+- **Custom State Machines**: Provides a [`Machine`] trait that users can implement to define their own state machines that will be replicated across the Raft cluster.
+- **Simple Codebase**: Designed to be easily understandable and modifiable, enabling users to add their own features with ease.
+- **Serialization**: Utilizes JSON Lines as the serialization format for persistent storage and communication between servers, offering simplicity and human-readability.
+
+[`CreateCluster`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.CreateCluster
+[`AddServer`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.AddServer
+[`RemoveServer`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.RemoveServer
+[`Apply`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.Apply
+[`TakeSnapshot`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.TakeSnapshot
+[`GetServerState`]: https://docs.rs/raftpico/latest/raftpico/messages/enum.Request.html#variant.GetServerState
+[`Machine`]: https://docs.rs/raftpico/latest/raftpico/trait.Machine.html
 
 Example
 -------
