@@ -161,9 +161,9 @@ $ cat /proc/cpuinfo | grep 'model name' | wc -l
 
 Create a KVS cluster with three nodes:
 ```console
-$ parallel -u ::: 'cargo run --release --example kvs 127.0.0.1:4000 kvs-4000.jsonl' \
-                  'cargo run --release --example kvs 127.0.0.1:4001 kvs-4001.jsonl' \
-                  'cargo run --release --example kvs 127.0.0.1:4002 kvs-4002.jsonl'
+$ parallel -- 'cargo run --release --example kvs 127.0.0.1:4000 kvs-4000.jsonl' \
+              'cargo run --release --example kvs 127.0.0.1:4001 kvs-4001.jsonl' \
+              'cargo run --release --example kvs 127.0.0.1:4002 kvs-4002.jsonl'
 
 $ echo $(jlot req CreateCluster) \
        $(jlot req AddServer '{"addr":"127.0.0.1:4001"}') \
