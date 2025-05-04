@@ -32,7 +32,7 @@ impl<M: Machine> Machine for Machines<M> {
             Command::CreateCluster { .. }
             | Command::AddServer { .. }
             | Command::RemoveServer { .. }
-            | Command::TakeSnapshot { .. } => {
+            | Command::TakeSnapshot => {
                 self.system.apply(ctx, input);
             }
             Command::Apply { input } => match serde_json::from_value(input) {
