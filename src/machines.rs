@@ -32,7 +32,7 @@ impl<M: Machine> Machine for Machines<M> {
             Command::CreateCluster { .. }
             | Command::AddServer { .. }
             | Command::RemoveServer { .. }
-            | Command::TakeSnapshot { .. } => {
+            | Command::TakeSnapshot => {
                 self.system.apply(ctx, input);
             }
             Command::Apply { input } => match serde_json::from_value(input) {
@@ -142,7 +142,7 @@ impl SystemMachine {
         let max = self.max_election_timeout_ms.max(min);
         let timeout = match role {
             Role::Follower => max,
-            Role::Candidate => rand::thread_rng().gen_range(min..=max),
+            Role::Candidate => rand::rng().random_range(min..=max),
             Role::Leader => min,
         };
         Duration::from_millis(timeout as u64)

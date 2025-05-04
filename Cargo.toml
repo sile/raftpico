@@ -14,7 +14,7 @@ jsonlrpc = "0.2.0"
 jsonlrpc_mio = "0.2.0"
 mio = { version = "1.0.2", default-features=false, features = ["net", "os-poll"] }
 raftbare = "0.2.0"
-rand = "0.8.5"
+rand = "0.9.1"
 serde = { version = "1.0.209", features = ["derive"] }
 serde_json = { version = "1.0.127", features = ["raw_value"] }
 
